@@ -1,0 +1,3 @@
+[console_scripts]
+main_gui = spear_gui.main_gui:main
+

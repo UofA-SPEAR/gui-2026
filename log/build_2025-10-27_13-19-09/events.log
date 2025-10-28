@@ -1,0 +1,55 @@
+[0.000000] (-) TimerEvent: {}
+[0.000337] (spear_gui) JobQueued: {'identifier': 'spear_gui', 'dependencies': OrderedDict()}
+[0.002007] (spear_gui) JobStarted: {'identifier': 'spear_gui'}
+[0.099478] (-) TimerEvent: {}
+[0.199896] (-) TimerEvent: {}
+[0.300434] (-) TimerEvent: {}
+[0.400962] (-) TimerEvent: {}
+[0.501464] (-) TimerEvent: {}
+[0.602008] (-) TimerEvent: {}
+[0.702598] (-) TimerEvent: {}
+[0.803181] (-) TimerEvent: {}
+[0.903680] (-) TimerEvent: {}
+[0.941124] (spear_gui) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'egg_info', '--egg-base', '../build/spear_gui', 'build', '--build-base', '/root/ros2_ws/src/gui-2026/build/spear_gui/build', 'install', '--record', '/root/ros2_ws/src/gui-2026/build/spear_gui/install.log', '--single-version-externally-managed', 'install_data'], 'cwd': '/root/ros2_ws/src/gui-2026/spear_gui', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'USER': 'root', 'SHLVL': '1', 'LD_LIBRARY_PATH': '/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib', 'MOTD_SHOWN': 'update-motd', 'HOME': '/root', 'OLDPWD': '/root/ros2_ws/src', 'ROS_PYTHON_VERSION': '3', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/0/bus', 'WSL_DISTRO_NAME': 'Ubuntu', 'WAYLAND_DISPLAY': 'wayland-0', 'COLCON_PREFIX_PATH': '/root/ros2_ws/install:/root/OnboardingProject/install', 'ROS_DISTRO': 'humble', 'LOGNAME': 'root', 'NAME': 'Brandon', 'WSL_INTEROP': '/run/WSL/448_interop', 'PULSE_SERVER': 'unix:/mnt/wslg/PulseServer', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.1.0_x64__8wekyb3d8bbwe:/mnt/c/Python313/Scripts/:/mnt/c/Python313/:/mnt/c/Program Files/Common Files/Oracle/Java/javapath:/mnt/c/Program Files (x86)/VMware/VMware Workstation/bin/:/mnt/c/Program Files/Python310/Scripts/:/mnt/c/Program Files/Python310/:/mnt/c/Windows/system32:/mnt/c/Windows:/mnt/c/Windows/System32/Wbem:/mnt/c/Windows/System32/WindowsPowerShell/v1.0/:/mnt/c/Windows/System32/OpenSSH/:/mnt/c/Program Files (x86)/NVIDIA Corporation/PhysX/Common:/mnt/c/Program Files/NVIDIA Corporation/NVIDIA NvDLISR:/mnt/c/Program Files/dotnet/:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Java/jdk-17/bin:/mnt/c/Program Files/Git/cmd:/mnt/c/MinGW/bin:/mnt/c/Anaconda3/Scripts:/mnt/c/Program Files/MongoDB/Server/8.0/bin:/mnt/c/Program Files/MongoDB/mongosh-2.3.4-win32-x64/bin:/mnt/c/Program Files/MATLAB/R2024b/bin:/mnt/c/Program Files/GitHub CLI/:/mnt/c/Program Files/Docker/Docker/resources/bin:/mnt/c/ProgramData/chocolatey/bin:/mnt/c/Program Files/nodejs/:/mnt/c/Users/Brandon Ramirez/AppData/Local/Programs/Python/Python312/Scripts/:/mnt/c/Users/Brandon Ramirez/AppData/Local/Programs/Python/Python312/:/mnt/c/Users/Brandon Ramirez/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/Brandon Ramirez/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Program Files/Multipass/bin:/mnt/c/Users/Brandon Ramirez/miniconda3/condabin:/mnt/c/Users/Brandon Ramirez/AppData/Roaming/Python/Python310/Scripts:/mnt/c/Users/Brandon Ramirez/AppData/Local/Programs/cursor/resources/app/bin:/mnt/c/Program Files/nodejs/:/mnt/c/Users/Brandon Ramirez/AppData/Roaming/npm:/snap/bin', 'XDG_RUNTIME_DIR': '/run/user/0/', 'DISPLAY': ':0', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'AMENT_PREFIX_PATH': '/root/ros2_ws/install/spear_gui:/root/ros2_ws/install/onboarding_project:/root/OnboardingProject/install/OnboardingProject:/opt/ros/humble', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'PWD': '/root/ros2_ws/src/gui-2026/build/spear_gui', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/root/ros2_ws/src/gui-2026/build/spear_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages:/root/ros2_ws/install/spear_gui/lib/python3.10/site-packages:/root/ros2_ws/install/onboarding_project/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages', 'COLCON': '1', 'WSL2_GUI_APPS_ENABLED': '1', 'HOSTTYPE': 'x86_64', 'CMAKE_PREFIX_PATH': '/root/OnboardingProject/install/OnboardingProject', 'WSLENV': ''}, 'shell': False}
+[1.004125] (-) TimerEvent: {}
+[1.104610] (-) TimerEvent: {}
+[1.205151] (-) TimerEvent: {}
+[1.228850] (spear_gui) StdoutLine: {'line': b'running egg_info\n'}
+[1.229624] (spear_gui) StdoutLine: {'line': b'creating ../build/spear_gui/spear_gui.egg-info\n'}
+[1.230013] (spear_gui) StdoutLine: {'line': b'writing ../build/spear_gui/spear_gui.egg-info/PKG-INFO\n'}
+[1.230363] (spear_gui) StdoutLine: {'line': b'writing dependency_links to ../build/spear_gui/spear_gui.egg-info/dependency_links.txt\n'}
+[1.230508] (spear_gui) StdoutLine: {'line': b'writing entry points to ../build/spear_gui/spear_gui.egg-info/entry_points.txt\n'}
+[1.231003] (spear_gui) StdoutLine: {'line': b'writing requirements to ../build/spear_gui/spear_gui.egg-info/requires.txt\n'}
+[1.231355] (spear_gui) StdoutLine: {'line': b'writing top-level names to ../build/spear_gui/spear_gui.egg-info/top_level.txt\n'}
+[1.231752] (spear_gui) StdoutLine: {'line': b"writing manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'\n"}
+[1.234720] (spear_gui) StdoutLine: {'line': b"reading manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'\n"}
+[1.235807] (spear_gui) StdoutLine: {'line': b"writing manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'\n"}
+[1.235978] (spear_gui) StdoutLine: {'line': b'running build\n'}
+[1.236131] (spear_gui) StdoutLine: {'line': b'running build_py\n'}
+[1.236494] (spear_gui) StdoutLine: {'line': b'creating /root/ros2_ws/src/gui-2026/build/spear_gui/build\n'}
+[1.236645] (spear_gui) StdoutLine: {'line': b'creating /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib\n'}
+[1.236944] (spear_gui) StdoutLine: {'line': b'creating /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui\n'}
+[1.237539] (spear_gui) StdoutLine: {'line': b'copying spear_gui/__init__.py -> /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui\n'}
+[1.237689] (spear_gui) StdoutLine: {'line': b'copying spear_gui/main_gui.py -> /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui\n'}
+[1.238621] (spear_gui) StdoutLine: {'line': b'running install\n'}
+[1.239196] (spear_gui) StdoutLine: {'line': b'running install_lib\n'}
+[1.239845] (spear_gui) StdoutLine: {'line': b'creating /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui\n'}
+[1.240308] (spear_gui) StdoutLine: {'line': b'copying /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui/__init__.py -> /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui\n'}
+[1.240463] (spear_gui) StdoutLine: {'line': b'copying /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui/main_gui.py -> /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui\n'}
+[1.241191] (spear_gui) StdoutLine: {'line': b'byte-compiling /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui/__init__.py to __init__.cpython-310.pyc\n'}
+[1.241613] (spear_gui) StdoutLine: {'line': b'byte-compiling /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui/main_gui.py to main_gui.cpython-310.pyc\n'}
+[1.243085] (spear_gui) StdoutLine: {'line': b'running install_data\n'}
+[1.243246] (spear_gui) StdoutLine: {'line': b'creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index\n'}
+[1.244956] (spear_gui) StdoutLine: {'line': b'creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index\n'}
+[1.245373] (spear_gui) StdoutLine: {'line': b'creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index/packages\n'}
+[1.245607] (spear_gui) StdoutLine: {'line': b'copying resource/spear_gui -> /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index/packages\n'}
+[1.246145] (spear_gui) StdoutLine: {'line': b'copying package.xml -> /root/ros2_ws/src/gui-2026/install/spear_gui/share/spear_gui\n'}
+[1.246292] (spear_gui) StdoutLine: {'line': b'running install_egg_info\n'}
+[1.248394] (spear_gui) StdoutLine: {'line': b'Copying ../build/spear_gui/spear_gui.egg-info to /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui-0.0.0-py3.10.egg-info\n'}
+[1.249318] (spear_gui) StdoutLine: {'line': b'running install_scripts\n'}
+[1.277928] (spear_gui) StdoutLine: {'line': b'Installing main_gui script to /root/ros2_ws/src/gui-2026/install/spear_gui/lib/spear_gui\n'}
+[1.278792] (spear_gui) StdoutLine: {'line': b"writing list of installed files to '/root/ros2_ws/src/gui-2026/build/spear_gui/install.log'\n"}
+[1.305331] (-) TimerEvent: {}
+[1.307024] (spear_gui) CommandEnded: {'returncode': 0}
+[1.339808] (spear_gui) JobEnded: {'identifier': 'spear_gui', 'rc': 0}
+[1.340290] (-) EventReactorShutdown: {}

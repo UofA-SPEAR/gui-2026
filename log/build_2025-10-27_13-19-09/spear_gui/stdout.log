@@ -1,0 +1,35 @@
+running egg_info
+creating ../build/spear_gui/spear_gui.egg-info
+writing ../build/spear_gui/spear_gui.egg-info/PKG-INFO
+writing dependency_links to ../build/spear_gui/spear_gui.egg-info/dependency_links.txt
+writing entry points to ../build/spear_gui/spear_gui.egg-info/entry_points.txt
+writing requirements to ../build/spear_gui/spear_gui.egg-info/requires.txt
+writing top-level names to ../build/spear_gui/spear_gui.egg-info/top_level.txt
+writing manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'
+reading manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'
+writing manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /root/ros2_ws/src/gui-2026/build/spear_gui/build
+creating /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib
+creating /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui
+copying spear_gui/__init__.py -> /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui
+copying spear_gui/main_gui.py -> /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui
+running install
+running install_lib
+creating /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui
+copying /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui/__init__.py -> /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui
+copying /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui/main_gui.py -> /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui
+byte-compiling /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui/__init__.py to __init__.cpython-310.pyc
+byte-compiling /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui/main_gui.py to main_gui.cpython-310.pyc
+running install_data
+creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index
+creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index
+creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index/packages
+copying resource/spear_gui -> /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index/packages
+copying package.xml -> /root/ros2_ws/src/gui-2026/install/spear_gui/share/spear_gui
+running install_egg_info
+Copying ../build/spear_gui/spear_gui.egg-info to /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui-0.0.0-py3.10.egg-info
+running install_scripts
+Installing main_gui script to /root/ros2_ws/src/gui-2026/install/spear_gui/lib/spear_gui
+writing list of installed files to '/root/ros2_ws/src/gui-2026/build/spear_gui/install.log'

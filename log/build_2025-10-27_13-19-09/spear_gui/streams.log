@@ -1,0 +1,37 @@
+[0.940s] Invoking command in '/root/ros2_ws/src/gui-2026/spear_gui': PYTHONPATH=/root/ros2_ws/src/gui-2026/build/spear_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/spear_gui build --build-base /root/ros2_ws/src/gui-2026/build/spear_gui/build install --record /root/ros2_ws/src/gui-2026/build/spear_gui/install.log --single-version-externally-managed install_data
+[1.227s] running egg_info
+[1.228s] creating ../build/spear_gui/spear_gui.egg-info
+[1.228s] writing ../build/spear_gui/spear_gui.egg-info/PKG-INFO
+[1.228s] writing dependency_links to ../build/spear_gui/spear_gui.egg-info/dependency_links.txt
+[1.228s] writing entry points to ../build/spear_gui/spear_gui.egg-info/entry_points.txt
+[1.229s] writing requirements to ../build/spear_gui/spear_gui.egg-info/requires.txt
+[1.229s] writing top-level names to ../build/spear_gui/spear_gui.egg-info/top_level.txt
+[1.230s] writing manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'
+[1.233s] reading manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'
+[1.234s] writing manifest file '../build/spear_gui/spear_gui.egg-info/SOURCES.txt'
+[1.234s] running build
+[1.234s] running build_py
+[1.235s] creating /root/ros2_ws/src/gui-2026/build/spear_gui/build
+[1.235s] creating /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib
+[1.235s] creating /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui
+[1.236s] copying spear_gui/__init__.py -> /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui
+[1.236s] copying spear_gui/main_gui.py -> /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui
+[1.237s] running install
+[1.237s] running install_lib
+[1.238s] creating /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui
+[1.238s] copying /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui/__init__.py -> /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui
+[1.238s] copying /root/ros2_ws/src/gui-2026/build/spear_gui/build/lib/spear_gui/main_gui.py -> /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui
+[1.239s] byte-compiling /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui/__init__.py to __init__.cpython-310.pyc
+[1.240s] byte-compiling /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui/main_gui.py to main_gui.cpython-310.pyc
+[1.241s] running install_data
+[1.241s] creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index
+[1.243s] creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index
+[1.243s] creating /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index/packages
+[1.244s] copying resource/spear_gui -> /root/ros2_ws/src/gui-2026/install/spear_gui/share/ament_index/resource_index/packages
+[1.244s] copying package.xml -> /root/ros2_ws/src/gui-2026/install/spear_gui/share/spear_gui
+[1.244s] running install_egg_info
+[1.246s] Copying ../build/spear_gui/spear_gui.egg-info to /root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages/spear_gui-0.0.0-py3.10.egg-info
+[1.247s] running install_scripts
+[1.276s] Installing main_gui script to /root/ros2_ws/src/gui-2026/install/spear_gui/lib/spear_gui
+[1.277s] writing list of installed files to '/root/ros2_ws/src/gui-2026/build/spear_gui/install.log'
+[1.305s] Invoked command in '/root/ros2_ws/src/gui-2026/spear_gui' returned '0': PYTHONPATH=/root/ros2_ws/src/gui-2026/build/spear_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/src/gui-2026/install/spear_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../build/spear_gui build --build-base /root/ros2_ws/src/gui-2026/build/spear_gui/build install --record /root/ros2_ws/src/gui-2026/build/spear_gui/install.log --single-version-externally-managed install_data
