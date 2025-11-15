@@ -283,7 +283,8 @@ class CameraNode(Node):
                 h, w = target_h, target_w
 
             bytes_per_line = ch * w
-            q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            # Make a copy to prevent garbage collection issues
+            q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
             pixmap = QPixmap.fromImage(q_image)
             item.setPixmap(pixmap)
 
