@@ -1,38 +1,42 @@
 #!/usr/bin/env python3
 import cv2
+import pyzed.sl as sl
 
-# GStreamer pipeline for Tegra camera
-gst_pipeline = (
-    "v4l2src device=/dev/video0 ! "
-    "video/x-raw, width=1280, height=720, framerate=30/1 ! "
-    "videoconvert ! "
-    "appsink"
-)
+# Create a ZED camera object
+zed = sl.Camera()
 
-print("Trying GStreamer pipeline...")
-cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+# Set configuration parameters
+init_params = sl.InitParameters()
+init_params.camera_resolution = sl.RESOLUTION.HD720  # Use HD720 video mode
+init_params.camera_fps = 30  # Set fps at 30
 
-if not cap.isOpened():
-    print("Error: Cannot open camera with GStreamer")
-    exit()
+# Open the camera
+err = zed.open(init_params)
+if err != sl.ERROR_CODE.SUCCESS:
+    print(f"Error opening ZED camera: {err}")
+    exit(-1)
 
-print("Camera opened successfully! Press 'q' to quit")
+print("ZED camera opened successfully! Press 'q' to quit")
+
+# Create sl.Mat objects to store images
+image_zed = sl.Mat()
 
 while True:
-    # Read frame
-    ret, frame = cap.read()
+    # Grab a new frame
+    if zed.grab() == sl.ERROR_CODE.SUCCESS:
+        # Retrieve the left image
+        zed.retrieve_image(image_zed, sl.VIEW.LEFT)
 
-    if not ret:
-        print("Error: Failed to read frame")
-        break
+        # Convert to numpy array for OpenCV
+        image_ocv = image_zed.get_data()
 
-    # Display frame
-    cv2.imshow('Camera 0', frame)
+        # Display the image
+        cv2.imshow("ZED Camera", image_ocv)
 
     # Press 'q' to quit
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 # Cleanup
-cap.release()
+zed.close()
 cv2.destroyAllWindows()
