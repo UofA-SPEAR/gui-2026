@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 import cv2
 
-# Open camera 0
-cap = cv2.VideoCapture(0)
+# GStreamer pipeline for Tegra camera
+gst_pipeline = (
+    "v4l2src device=/dev/video0 ! "
+    "video/x-raw, width=1280, height=720, framerate=30/1 ! "
+    "videoconvert ! "
+    "appsink"
+)
+
+print("Trying GStreamer pipeline...")
+cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
 
 if not cap.isOpened():
-    print("Error: Cannot open camera 0")
+    print("Error: Cannot open camera with GStreamer")
     exit()
 
-print("Press 'q' to quit")
+print("Camera opened successfully! Press 'q' to quit")
 
 while True:
     # Read frame
