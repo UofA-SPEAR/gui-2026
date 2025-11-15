@@ -5,10 +5,15 @@ import pyzed.sl as sl
 # Create a ZED camera object
 zed = sl.Camera()
 
-# Set configuration parameters
+# Set configuration parameters for GMSL camera
 init_params = sl.InitParameters()
 init_params.camera_resolution = sl.RESOLUTION.HD720  # Use HD720 video mode
 init_params.camera_fps = 30  # Set fps at 30
+
+# For ZED X cameras connected via GMSL2, specify the input type
+input_type = sl.InputType()
+input_type.set_from_camera_id(0, sl.BUS_TYPE.GMSL)  # Use first GMSL camera
+init_params.input_t = input_type
 
 # Open the camera
 err = zed.open(init_params)
