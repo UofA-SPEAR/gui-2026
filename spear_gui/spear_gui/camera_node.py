@@ -33,10 +33,10 @@ class CameraNode(Node):
         self.target_positions = [
             [[0, 0], [1, 0]],
             [[0, 0], [2.0/3.0, 0], [0.5, 1]],
-            [[0, 0], [0, 0.5], [0.5, 0.5], [0, 1]],
-            [[0, 0], [0.5, 0], [0.5, 0], [0.5, 0.5], [1.0/3.0, 0.5]],
-            [[0, 0], [0.5, 0], [2.0/3.0, 0.5], [1.0/3.0, 0.5], [1.0/3.0, 0], [0, 0.5]],
-            [[0, 0], [2.0/3.0, 0], [2.0/3.0, 0.5], [1.0/3.0, 0.5], [0, 0.5], [1.0/3.0, 0]]
+            [[0, 0], [0.5, 0], [0.5, 0.5], [0, 1]],
+            [[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5], [1.0/3.0, 0.5]],
+            [[0, 0], [0.5, 0], [2.0/3.0, 0.5], [1.0/3.0, 0.5], [0, 0.5], [0, 0.5]],
+            [[1.0/3.0, 0], [2.0/3.0, 0], [2.0/3.0, 0.5], [1.0/3.0, 0.5], [0, 0.5], [0, 0]]
         ]
 
         self.key_subscription = self.create_subscription(
@@ -74,10 +74,26 @@ class CameraNode(Node):
         used = {idx for idx in self.indexes if idx != -1}
         self.get_logger().info(f"Used indexes: {used}")
         return used
+    
+    def get_inactive_indexes(self):
+        get_inactive_indexes = {}
+        for i in range(len(self.active)):
+            if not self.active[i]:
+                active.append(i)
+        return inactive
+
+    def get_active_indexes(self):
+        active = []
+        for i in range(len(self.active)):
+            if self.active[i]:
+                active.append(i)
+        return active
 
     def get_available_index(self):
         used = self.get_used_indexes()
         available_index = next((i for i in range(self.total_cameras) if i not in used), None)
+        if available_index == None:
+            available_index = next(get_inactive_indexes())
         self.get_logger().info(f"Available index: {available_index}")
         return available_index
 
@@ -97,12 +113,12 @@ class CameraNode(Node):
         self.set_camera_positions()
 
     def deactivate_camera(self):
-        used = self.get_used_indexes()
-        if not used:
+        active = self.get_active_indexes()
+        if not active:
             self.get_logger().info("No active cameras to deactivate.")
             return
 
-        idx = max(used)
+        idx = max(active)
         self.get_logger().info(f"Deactivating camera {idx}")
         self.active[idx] = False
         rect = self.rectangles.pop(idx, None)
