@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QGraphicsRectItem
-from PySide6.QtCore import QTimer, QPropertyAnimation, QPointF, QRectF, QEasingCurve, Qt
+from PySide6.QtCore import QTimer, QVariantAnimation, QPointF, QRectF, QEasingCurve, Qt
 from PySide6.QtGui import QPen, QPainter
 from std_msgs.msg import String
 
@@ -143,21 +143,31 @@ class CameraNode(Node):
             self.get_logger().error(f"Invalid target for animation: {rect}")
             return
 
-        # Animate position using QPropertyAnimation
-        position_animation = QPropertyAnimation(rect, b"pos")
-        position_animation.setDuration(duration)
-        position_animation.setStartValue(rect.pos())
-        position_animation.setEndValue(QPointF(end_x, end_y))
-        position_animation.setEasingCurve(ease_style)
-        position_animation.start()
+        start_rect = rect.rect()
+        start_pos = rect.pos()
 
-        # Animate size using QPropertyAnimation
-        size_animation = QPropertyAnimation(rect, b"rect")
-        size_animation.setDuration(duration)
-        size_animation.setStartValue(rect.rect())
-        size_animation.setEndValue(QRectF(end_x, end_y, end_w, end_h))
-        size_animation.setEasingCurve(ease_style)
-        size_animation.start()
+        animation = QVariantAnimation()
+        animation.setDuration(duration)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(ease_style)
+
+        def update_rect(value):
+            # Interpolate position
+            new_x = start_pos.x() + (end_x - start_pos.x()) * value
+            new_y = start_pos.y() + (end_y - start_pos.y()) * value
+            rect.setPos(new_x, new_y)
+
+            # Interpolate size
+            new_w = start_rect.width() + (end_w - start_rect.width()) * value
+            new_h = start_rect.height() + (end_h - start_rect.height()) * value
+            rect.setRect(0, 0, new_w, new_h)
+
+        animation.valueChanged.connect(update_rect)
+        animation.start()
+
+        # Store animation to prevent garbage collection
+        self.animations[id(rect)] = animation
 
     def set_camera_positions(self):
         active_rects = [cam_id for cam_id, active in enumerate(self.active) if active]
