@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'main_gui = spear_gui.main_gui:main',
+            'camera_node = spear_gui.camera_node:main'
         ],
     },
 )
