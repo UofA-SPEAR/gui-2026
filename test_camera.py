@@ -1,45 +1,35 @@
 #!/usr/bin/env python3
 import cv2
-import pyzed.sl as sl
 
-# Create a ZED camera object
-zed = sl.Camera()
+# GStreamer pipeline for ZED X One camera
+gst_pipeline = (
+    "zedxonesrc camera-id=0 camera-resolution=2 camera-fps=30 ! "
+    "queue ! "
+    "videoconvert ! "
+    "video/x-raw, format=BGR ! "
+    "appsink"
+)
 
-# Set configuration parameters for GMSL camera
-init_params = sl.InitParameters()
-init_params.camera_resolution = sl.RESOLUTION.HD720  # Use HD720 video mode
-init_params.camera_fps = 30  # Set fps at 30
+print("Opening ZED X One camera with GStreamer...")
+cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
 
-# For ZED X cameras connected via GMSL2, use set_from_camera_id
-init_params.set_from_camera_id(0)
-
-# Open the camera
-err = zed.open(init_params)
-if err != sl.ERROR_CODE.SUCCESS:
-    print(f"Error opening ZED camera: {err}")
+if not cap.isOpened():
+    print("Error: Cannot open ZED X One camera")
     exit(-1)
 
-print("ZED camera opened successfully! Press 'q' to quit")
-
-# Create sl.Mat objects to store images
-image_zed = sl.Mat()
+print("ZED X One camera opened successfully! Press 'q' to quit")
 
 while True:
-    # Grab a new frame
-    if zed.grab() == sl.ERROR_CODE.SUCCESS:
-        # Retrieve the left image
-        zed.retrieve_image(image_zed, sl.VIEW.LEFT)
+    ret, frame = cap.read()
 
-        # Convert to numpy array for OpenCV
-        image_ocv = image_zed.get_data()
+    if not ret:
+        print("Error: Failed to read frame")
+        break
 
-        # Display the image
-        cv2.imshow("ZED Camera", image_ocv)
+    cv2.imshow("ZED X One Camera", frame)
 
-    # Press 'q' to quit
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Cleanup
-zed.close()
+cap.release()
 cv2.destroyAllWindows()
