@@ -5,9 +5,9 @@ from gi.repository import Gst, GstVideo, GLib
 import sys
 import rclpy
 from rclpy.node import Node
-from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QGraphicsRectItem, QScrollArea, QWidget, QVBoxLayout
-from PySide6.QtCore import QTimer, QVariantAnimation, QPointF, QRectF, QEasingCurve, Qt
-from PySide6.QtGui import QPen, QPainter
+from PySide6.QtWidgets import QApplication, QWidget, QLabel
+from PySide6.QtCore import QThread, Signal, QTimer, QVariantAnimation, QEasingCurve, Qt, QObject, QEvent
+from PySide6.QtGui import QColor
 from std_msgs.msg import String
 from collections import deque
 
@@ -29,6 +29,9 @@ class KeyEventFilter(QObject):
         return False
 
 # ------------------------ GStreamer ------------------------
+class GStreamerThread(QThread):
+    finished = Signal()
+    error_occured = Signal(str)
 
     def __init__(self, pipeline_str, window_id=None, parent=None):
         super().__init__(parent)
@@ -38,18 +41,53 @@ class KeyEventFilter(QObject):
         self.bus = None
         self.loop = GLib.MainLoop()
 
-        Gst.init(None)
-        self.pipeline = Gst.parse_launch(pipeline_str)
+        try:
+            Gst.init(None)
+            self.pipeline = Gst.parse_launch(self.pipeline_str)
 
+            if not self.pipeline:
+                raise RuntimeError(f"Failed to create pipeline: {self.pipeline_str}")
+
+            self.bus = self.pipeline.get_bus()
+            self.bus.add_signal_watch()
+            self.bus.connect("message", self.on_message)
+            
+            if self.window_id is not None:
+                self.bus.enable_sync_message_emission()
+                self.bus.connect("sync-message::element", self.on_sync_message)
+        except Exception as e:
+            error_msg = f"Pipeline creation failed: {e}"
+            print(error_msg, file=sys.stderr)
+            self.error_occured.emit(error_msg)
+            self.pipeline = None
+
+    def on_sync_message(self, bus, message):
+        if message.get_structure() and message.get_structure().get_name() == 'prepare-window-handle':
+            if self.window_id is not None:
+                try:
+                    print(f"Setting window handle in sync: {self.window_id}")
+                    message.src.set_window_handle(self.window_id)
+                except Exception as e:
+                    print(f"Failed to set window handle: {e}", file=sys.stderr)
+
+    def run(self):
         if not self.pipeline:
-            raise RuntimeError(f"Failed to create pipeline: {pipeline_str}")
-        
-        self.bus = self.pipeline.get_bus()
-        self.bus.add_signal_watch()
-        self.bus.connect("message", self.on_message)
+            print("Pipeline not initialized, cannot run", file=sys.stderr)
+            return
+            
+        ret = self.pipeline.set_state(Gst.State.PLAYING)
+        if ret == Gst.StateChangeReturn.FAILURE:
+            print("Unable to set the pipeline to playing state", file=sys.stderr)
+            self.error_occured.emit("Failed to set pipeline to PLAYING state")
+            return
 
-        self.setLayout(QVBoxLayout())
-        self.setFixedSize(640, 480) 
+        print("Pipeline is running.")
+        self.loop.run()
+
+    def stop(self):
+        if self.pipeline:
+            self.pipeline.set_state(Gst.State.NULL)
+        self.loop.quit()
 
     def on_message(self, bus, message):
         mtype = message.type
@@ -65,18 +103,116 @@ class KeyEventFilter(QObject):
             self.loop.quit()
 
         return True
+    
+class GStreamerVideoWidget(QWidget):
+    def __init__(self, pipeline_str, camera_name="", camera_id="", use_overlay=True, parent=None):
+        super().__init__(parent)
+        self.pipeline_str = pipeline_str
+        self.use_overlay = use_overlay
+        self.thread = None
+        self.placeholder_label = None
+        
+        self.setStyleSheet("background-color: black; border: 3px solid red;")
+        
+        self.name_label = QLabel(camera_name, self)
+        self.name_label.setAlignment(Qt.AlignCenter)
+        self.name_label.setStyleSheet("""
+            color: white; 
+            font-size: 14px; 
+            font-weight: bold; 
+            background-color: rgba(0, 0, 0, 150); 
+            border: none;
+            padding: 2px;
+        """)
+
+        self.id_label = QLabel(f"ID: {camera_id}", self)
+        self.id_label.setAlignment(Qt.AlignCenter)
+        self.id_label.setStyleSheet("""
+            color: white; 
+            font-size: 10px; 
+            background-color: rgba(0, 0, 0, 150); 
+            border: none;
+            padding: 2px;
+        """)
+        
+        if use_overlay:
+            self.setAttribute(Qt.WA_NativeWindow)
+        else:
+            self.placeholder_label = QLabel("No Camera\nDetected", self)
+            self.placeholder_label.setAlignment(Qt.AlignCenter)
+            self.placeholder_label.setStyleSheet("color: white; font-size: 16px; background-color: #1a1a1a;")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        
+        name_height = 20
+        self.name_label.setGeometry(0, 5, self.width(), name_height)
+        
+        id_height = 15
+        self.id_label.setGeometry(0, 5 + name_height, self.width(), id_height)
+        
+        if self.placeholder_label:
+            self.placeholder_label.setGeometry(0, 0, self.width(), self.height())
 
     def start(self):
-        ret = self.pipeline.set_state(Gst.State.PLAYING)
-        if ret == Gst.StateChangeReturn.FAILURE:
-            print("Unable to set the pipeline to playing state", file=sys.stderr)
+        if not self.use_overlay:
+            print("Overlay disabled, showing placeholder")
+            self.name_label.raise_()
+            self.id_label.raise_() 
             return
-
-        print("Pipeline is running.")
-        self.loop.run()
+            
+        self.show()
+        QApplication.processEvents()
+        
+        print(f"Widget winId: {self.winId()}, size: {self.size()}, visible: {self.isVisible()}")
+        self.thread = GStreamerThread(self.pipeline_str, self.winId(), parent=self)
+        self.thread.finished.connect(self.on_finished)
+        self.thread.error_occured.connect(self.on_error)
+        self.thread.start()
+        
+        self.name_label.raise_()
+        self.id_label.raise_()
 
     def stop(self):
-        self.pipeline.set_state(Gst.State.NULL)
+        if self.thread:
+            self.thread.stop()
+            self.thread.wait(1000)
+
+    def on_error(self, error_msg):
+        print(f"GStreamer error: {error_msg}")
+        if self.placeholder_label:
+            self.placeholder_label.setText("An Error\nOccured")
+
+    def on_finished(self):
+        print("GStreamer pipeline finished.")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.name_label.raise_()
+        self.id_label.raise_()
+        self.name_label.show() 
+        self.id_label.show()   
+
+    def update_labels(self, camera_name, camera_id):
+        self.name_label.setText(camera_name)
+        self.id_label.setText(f"ID: {camera_id}")
+        self.name_label.raise_()
+        self.id_label.raise_()
+
+    def set_border_color(self, color):
+        self.setStyleSheet(f"background-color: black; border: 3px solid {color};")
+        if self.placeholder_label:
+            self.placeholder_label.setStyleSheet(f"color: white; font-size: 16px; background-color: #1a1a1a; border: 3px solid {color};")
+
+class ResizableContainer(QWidget):
+    resized = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
 
 # ------------------------ Camera Node ------------------------
 
@@ -93,13 +229,12 @@ class CameraNode(Node):
     def __init__(self):
         super().__init__('camera_node')
 
-        self.scene = None
-        self.view = None
+        self.container = None
+        self.command_queue = deque()
+        self.processing_command = False
 
-        self.window_width = 400
-        self.window_height = 200
-
-        self.camera_id = [0, 1, 2, 3, 4, 5]
+        self.camera_name = ["Placeholder 1", "Placeholder 2", "Placeholder 3", "Placeholder 4", "Placeholder 5", "Placeholder 6"]
+        self.camera_id = [307142683, 1, 2, 3, 4, 5]
         self.camera_total = len(self.camera_id)
         self.camera_current = 0
         self.camera = [Camera(i) for i in range(self.camera_total)]
@@ -161,12 +296,15 @@ class CameraNode(Node):
         return 'fakesink'
 
     def setup_gui(self, parent=None):
-        self.scene = QGraphicsScene()
-        self.view = QGraphicsView(self.scene, parent)
-        self.view.setRenderHint(QPainter.Antialiasing)
-        self.view.setRenderHint(QPainter.SmoothPixmapTransform)
-        self.view.setFixedSize(self.window_width, self.window_height)
-        self.get_logger().info("GUI setup complete.")
+        self.container = ResizableContainer(parent)
+        self.container.setMinimumSize(400, 200)
+        self.container.resize(800, 400)
+        self.container.setStyleSheet("background-color: #2b2b2b;")
+        self.container.resized.connect(self.on_container_resized)
+        print("GUI setup complete.")
+    
+    def on_container_resized(self):
+        self.set_camera_positions()
 
     # ------------------------ Key Listener ------------------------
 
@@ -221,16 +359,12 @@ class CameraNode(Node):
 
     # Activates the lowest position camera with the lowest camera index.
     def activate_camera(self):
-        inactive_cams = [cam for cam in self.camera if not cam.active]
-        if not inactive_cams:
-            self.logger().info("No inactive cameras to activate.")
-            return
-        
-        if not inactive_cams:
-            self.get_logger().info("No inactive cameras to activate.")
+        try:
+            cam = next(cam for cam in self.camera if not cam.active)
+        except StopIteration:
+            print("No inactive cameras to activate.")
             return
 
-        cam = min(inactive_cams, key=lambda c: c.position)
         cam.active = True
 
         active_indexes = {c.index for c in self.camera if c.active and c is not cam}
@@ -256,15 +390,7 @@ class CameraNode(Node):
             return
         
         cam.active = False
-        if cam.rect:
-            self.scene.removeItem(cam.rect)
-            cam.rect = None
         
-        if cam.feed_widget:
-            cam.feed_widget.stop()
-            self.scene.removeItem(cam.feed_widget)
-            cam.feed_widget = None
-
         active_positions = [c.position for c in self.camera if c.active]
 
         def _remove_feed_widget(camera_obj):
@@ -333,7 +459,10 @@ class CameraNode(Node):
     # ------------------------ Move Index ------------------------
 
     def move_index(self, direction):
-        # Moves the selected screen's camera index up or down 1. Attempts to find the nearest unique index in its direction.
+        if self.camera_current is None:
+            print("No camera currently selected.")
+            return
+
         cam = self.camera[self.camera_current]
         if not cam.active:
             print(f"Camera {self.camera_current} is not active.")
@@ -366,34 +495,46 @@ class CameraNode(Node):
         size = self.target_sizes[max(max_pos - 1, 0)][cam.position]
         pos = self.target_positions[max(max_pos - 1, 0)][cam.position]
 
-        x = pos[0] * self.view.width()
-        y = pos[1] * self.view.height()
-        w = size[0] * self.view.width()
-        h = size[1] * self.view.height()
+        x = int(pos[0] * self.container.width())
+        y = int(pos[1] * self.container.height())
+        w = int(size[0] * self.container.width())
+        h = int(size[1] * self.container.height())
 
-        rect = QGraphicsRectItem(0, 0, w, h)
-        rect.setBrush(Qt.lightGray)
-
-        pen = QPen(Qt.red)
-        pen.setWidth(3)
-        rect.setPen(pen)
-
-        rect.setPos(x, y)
-
-        camera_feed_widget = GStreamerVideoWidget(f"zedxonesrc ! queue ! autovideoconvert ! queue ! fpsdisplaysink", parent=self.view)
-        camera_feed_widget.start()
-
-        proxy_widget = QGraphicsProxyWidget()
-        proxy_widget.setWidget(camera_feed_widget)
-        proxy_widget.setPos(x, y)
-        proxy_widget.setGeometry(x, y, w, h)
+        use_camera = self.zed_available and self.use_video_overlay
         
-        self.scene.addItem(proxy_widget)
+        if use_camera:
+            pipeline = f"zedxonesrc camera-id={self.camera_id[cam.index]} ! queue ! videoconvert ! queue ! {self.video_sink}"
+        else:
+            pipeline = None
 
-        cam.rect = rect
-        cam.feed_widget = camera_feed_widget
-
-        self.scene.addItem(rect)
+        try:
+            camera_feed_widget = GStreamerVideoWidget(
+                pipeline if pipeline else "", 
+                camera_name=self.camera_name[cam.index],
+                camera_id=str(self.camera_id[cam.index]),
+                use_overlay=use_camera, 
+                parent=self.container
+            )
+            camera_feed_widget.setGeometry(x, y, w, h)
+            camera_feed_widget.show()
+            
+            camera_feed_widget.name_label.show()
+            camera_feed_widget.id_label.show()
+            camera_feed_widget.name_label.raise_()
+            camera_feed_widget.id_label.raise_()
+            
+            if use_camera:
+                QApplication.processEvents()
+                camera_feed_widget.start()
+            
+            cam.feed_widget = camera_feed_widget
+        except Exception as e:
+            self.get_logger().error(f"Failed to create camera widget: {e}")
+            placeholder = QWidget(self.container)
+            placeholder.setGeometry(x, y, w, h)
+            placeholder.setStyleSheet("background-color: #1a1a1a; border: 3px solid red;")
+            placeholder.show()
+            cam.feed_widget = placeholder
 
     def set_camera_positions(self):
         active_positions = [c.position for c in self.camera if c.active]
@@ -413,11 +554,11 @@ class CameraNode(Node):
             size = self.target_sizes[max_pos][cam.position]
             pos = self.target_positions[max_pos][cam.position]
 
-            end_x = pos[0] * self.view.width()
-            end_y = pos[1] * self.view.height()
-            end_w = size[0] * self.view.width()
-            end_h = size[1] * self.view.height()
-            self.tween_position_and_size(cam.rect, end_x, end_y, end_w, end_h)
+            end_x = int(pos[0] * self.container.width())
+            end_y = int(pos[1] * self.container.height())
+            end_w = int(size[0] * self.container.width())
+            end_h = int(size[1] * self.container.height())
+            self.tween_position_and_size(cam.feed_widget, end_x, end_y, end_w, end_h, duration = 500)
 
         self.update_camera_borders()
 
@@ -439,25 +580,32 @@ class CameraNode(Node):
         for cam in self.camera:
             if not cam.feed_widget:
                 continue
-            pen = QPen(Qt.red if cam.position != self.camera_current else Qt.blue)
-            pen.setWidth(3)
-            cam.rect.setPen(pen)
+            color = "blue" if cam.position == self.camera_current else "red"
+            if hasattr(cam.feed_widget, 'set_border_color'):
+                cam.feed_widget.set_border_color(color)
 
     # ------------------------ Tween Animation ------------------------
+    def stop_animation_for_widget(self, widget):
+        if not widget:
+            return
+        wid = id(widget)
+        if wid in self.animations:
+            anim = self.animations.pop(wid)
+            if anim:
+                anim.stop()
+                anim.deleteLater()
 
-    def tween_position_and_size(self, rect, end_x, end_y, end_w, end_h, ease_style = QEasingCurve.InOutQuad, duration = 500):
-        if not isinstance(rect, QGraphicsRectItem):
-            self.get_logger().error(f"Invalid target for animation: {rect}")
+    def tween_position_and_size(self, widget, end_x, end_y, end_w, end_h, ease_style=QEasingCurve.InOutQuad, duration=500):
+        if not widget or not widget.parent():
             return
 
-        cam = next((cam for cam in self.camera if cam.rect == rect), None)
-        if not cam:
+        cam = next((cam for cam in self.camera if cam.feed_widget == widget), None)
+        if not cam: #or not cam.active:
             return
 
-        start_rect = rect.rect()
-        start_pos = rect.pos()
+        self.stop_animation_for_widget(widget)
 
-        proxy_widget = cam.feed_widget.parentWidget()
+        start_geom = widget.geometry()
 
         animation = QVariantAnimation()
         animation.setDuration(duration)
@@ -465,17 +613,15 @@ class CameraNode(Node):
         animation.setEndValue(1.0)
         animation.setEasingCurve(ease_style)
 
-        def update_rect(value):
-            new_x = start_pos.x() + (end_x - start_pos.x()) * value
-            new_y = start_pos.y() + (end_y - start_pos.y()) * value
-            rect.setPos(new_x, new_y)
-            new_w = start_rect.width() + (end_w - start_rect.width()) * value
-            new_h = start_rect.height() + (end_h - start_rect.height()) * value
-            rect.setRect(0, 0, new_w, new_h)
-
-            if proxy_widget:
-                proxy_widget.setGeometry(new_x, new_y, new_w, new_h)
-
+        def update_geometry(value):
+            if not widget or widget.parent() is None or not cam.active:
+                animation.stop()
+                return
+            new_x = int(start_geom.x() + (end_x - start_geom.x()) * value)
+            new_y = int(start_geom.y() + (end_y - start_geom.y()) * value)
+            new_w = int(start_geom.width() + (end_w - start_geom.width()) * value)
+            new_h = int(start_geom.height() + (end_h - start_geom.height()) * value)
+            widget.setGeometry(new_x, new_y, new_w, new_h)
 
         animation.valueChanged.connect(update_geometry)
         animation.start()
@@ -484,9 +630,9 @@ class CameraNode(Node):
     # ------------------------ Print Information ------------------------
 
     def print_infomation(self):
-        self.get_logger().info(F"Current Selected: {self.camera_current}")
-        self.get_logger().info(f"{'Pos':>3} | {'Active':>6} | {'ID':>2} | {'X':>4} | {'Y':>4} | {'W':>4} | {'H':>4}")
-        self.get_logger().info("-" * 35)
+        print(f"Current Selected: {self.camera_current}")
+        print(f"{'Pos':>3} | {'Active':>6} | {'Index':>5} | {'ID':>9} | {'X':>4} | {'Y':>4} | {'W':>4} | {'H':>4}")
+        print("-" * 50)
         for cam in self.camera:
             widget = cam.feed_widget
             if widget:
@@ -494,8 +640,8 @@ class CameraNode(Node):
                 x, y, w, h = geom.x(), geom.y(), geom.width(), geom.height()
             else:
                 x = y = w = h = 0
-            active_str = "\033[92mTrue \033[0m" if cam.active else "\033[91mFalse\033[0m"
-            self.get_logger().info(f"{cam.position:>3} | {active_str:>6} | {cam.id:>2} | {x:>4} | {y:>4} | {w:>4} | {h:>4}")
+            active_str = "\033[92mTrue  \033[0m" if cam.active else "\033[91mFalse \033[0m"
+            print(f"{cam.position:>3} | {active_str} | {cam.index:>5} | {cam.id:>9} | {x:>4} | {y:>4} | {w:>4} | {h:>4}")
 
 
 def main():
@@ -504,9 +650,8 @@ def main():
 
     app = QApplication([])
 
-    scroll = QScrollArea()
-    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    key_filter = KeyEventFilter(node)
+    app.installEventFilter(key_filter)
 
     node.setup_gui()
     node.container.show()
