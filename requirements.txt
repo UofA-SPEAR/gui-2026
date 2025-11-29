@@ -1,5 +1,6 @@
 pyside6
 pyopengl
 laspy
-laszrs
+lazrs
 laszip
+scipy
