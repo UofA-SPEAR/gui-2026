@@ -484,7 +484,7 @@ class CameraNode(Node):
                 str(self.camera_id[cam.index])
             )
         
-        self.set_camera_positions()
+        # self.set_camera_positions()
 
     # ------------------------ Camera Widgets ------------------------
 
@@ -575,6 +575,7 @@ class CameraNode(Node):
                 self.stop_animation_for_widget(child)
                 child.hide()
                 child.deleteLater()
+
     def update_camera_borders(self):
         for cam in self.camera:
             if not cam.feed_widget:
