@@ -110,6 +110,102 @@ class GStreamerThread(QThread):
                 print(f"Pipeline state changed to: {state_name}")
 
         return True
+
+# ------------------------ Corner Indicator ------------------------
+class CornerIndicator(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setParent(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setStyleSheet("background: transparent;")
+        
+        self.gap = 8  # Constant gap from edges
+        self.corner_length = 30  # Length of each corner line
+        self.line_thickness = 3
+        self.color = QColor(0, 120, 255)  # Blue color
+        
+        self.current_progress = 0.0  # 0 = away from corners, 1 = at corners
+        self.position_animation = None
+        
+        # Create 8 corner lines (2 per corner)
+        self.corner_lines = []
+        for i in range(8):
+            line = QFrame(self)
+            line.hide()
+            self.corner_lines.append(line)
+        
+        self.is_selected = False
+        
+    def set_selected(self, selected):
+        if self.is_selected == selected:
+            return
+            
+        self.is_selected = selected
+        target_progress = 1.0 if selected else 0.0
+        
+        if self.position_animation:
+            self.position_animation.stop()
+        
+        self.position_animation = QVariantAnimation()
+        self.position_animation.setDuration(400)
+        self.position_animation.setStartValue(self.current_progress)
+        self.position_animation.setEndValue(target_progress)
+        self.position_animation.setEasingCurve(QEasingCurve.OutCubic)
+        
+        def update_progress(value):
+            self.current_progress = value
+            self.update_corners_animated(value)
+        
+        self.position_animation.valueChanged.connect(update_progress)
+        self.position_animation.start()
+    
+    def update_corners_animated(self, progress):
+        if not self.parent():
+            return
+            
+        w = self.parent().width()
+        h = self.parent().height()
+        adjusted_progress = min(1, max(1 - (1 - progress) ** 8.0, 0))
+        
+        max_offset_x = (1 - adjusted_progress) * (w / 2 - self.gap - self.corner_length)
+        max_offset_y = (1 - adjusted_progress) * (h / 2 - self.gap - self.corner_length)
+        tweened_corner_length = adjusted_progress * self.corner_length
+        tweened_line_thickness = adjusted_progress * self.line_thickness
+        offset_x = int(max_offset_x)
+        offset_y = int(max_offset_y)
+        
+        # Define geometry for all 8 lines (x, y, width, height)
+        geometries = [
+            # Top-left corner
+            (self.gap + offset_x, self.gap + offset_y, tweened_corner_length, tweened_line_thickness),  # Horizontal
+            (self.gap + offset_x, self.gap + offset_y, tweened_line_thickness, tweened_corner_length),  # Vertical
+            # Top-right corner
+            (w - self.gap - tweened_corner_length - offset_x, self.gap + offset_y, tweened_corner_length, tweened_line_thickness),  # Horizontal
+            (w - self.gap - tweened_line_thickness - offset_x, self.gap + offset_y, tweened_line_thickness, tweened_corner_length),  # Vertical
+            # Bottom-right corner
+            (w - self.gap - tweened_corner_length - offset_x, h - self.gap - tweened_line_thickness - offset_y, tweened_corner_length, tweened_line_thickness),  # Horizontal
+            (w - self.gap - tweened_line_thickness - offset_x, h - self.gap - tweened_corner_length - offset_y, tweened_line_thickness, tweened_corner_length),  # Vertical
+            # Bottom-left corner
+            (self.gap + offset_x, h - self.gap - tweened_line_thickness - offset_y, tweened_corner_length, tweened_line_thickness),  # Horizontal
+            (self.gap + offset_x, h - self.gap - tweened_corner_length - offset_y, tweened_line_thickness, tweened_corner_length),  # Vertical
+        ]
+        
+        for i, (x, y, width, height) in enumerate(geometries):
+            self.corner_lines[i].setGeometry(x, y, width, height)
+            self.corner_lines[i].setStyleSheet(f"background-color: white;")
+            if progress > 0.01:
+                self.corner_lines[i].show()
+            else:
+                self.corner_lines[i].hide()
+        
+        self.raise_()
+        for line in self.corner_lines:
+            line.raise_()
+    
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_corners_animated(self.current_progress)
+        self.setGeometry(0, 0, self.parent().width(), self.parent().height())
     
 class GStreamerVideoWidget(QWidget):
     pipeline_ready = Signal()
@@ -123,7 +219,13 @@ class GStreamerVideoWidget(QWidget):
         
         self.camera_aspect_ratio = cam_width / cam_height
 
-        self.setStyleSheet("background-color: black; border: 3px solid red;")
+        # Set only background color, no border
+        self.setStyleSheet("background-color: black;")
+        
+        # Create border overlay widget (sits on top of video)
+        self.border_overlay = QFrame(self)
+        self.border_overlay.setStyleSheet("background: transparent; border: 3px solid white;")
+        self.border_overlay.setAttribute(Qt.WA_TransparentForMouseEvents)
         
         self.name_label = QLabel(camera_name, self)
         self.name_label.setAlignment(Qt.AlignCenter)
@@ -145,9 +247,9 @@ class GStreamerVideoWidget(QWidget):
             border: none;
             padding: 2px;
         """)
-
-        self.name_label.raise_()
-        self.id_label.raise_()
+        
+        # Create corner indicator
+        self.corner_indicator = CornerIndicator(self)
         
         if use_overlay:
             self.setAttribute(Qt.WA_NativeWindow)
@@ -159,6 +261,9 @@ class GStreamerVideoWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         
+        # Make border overlay cover entire widget
+        self.border_overlay.setGeometry(0, 0, self.width(), self.height())
+        
         name_height = 20
         self.name_label.setGeometry(0, 5, self.width(), name_height)
         
@@ -168,8 +273,16 @@ class GStreamerVideoWidget(QWidget):
         if self.placeholder_label:
             self.placeholder_label.setGeometry(0, 0, self.width(), self.height())
         
+        # Ensure proper z-order - these should always be on top
+        self.border_overlay.raise_()
         self.name_label.raise_()
         self.id_label.raise_()
+        if hasattr(self, 'corner_indicator'):
+            self.corner_indicator.raise_()
+        
+        # Trigger corner indicator update when widget is resized
+        if hasattr(self, 'corner_indicator'):
+            self.corner_indicator.update_corners_animated(self.corner_indicator.current_progress)
 
     def _resize_video_area(self):
         container_w, container_h = self.width(), self.height()
@@ -233,21 +346,38 @@ class GStreamerVideoWidget(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.border_overlay.raise_()
         self.name_label.raise_()
         self.id_label.raise_()
+        if hasattr(self, 'corner_indicator'):
+            self.corner_indicator.raise_()
         self.name_label.show() 
         self.id_label.show()   
 
     def update_labels(self, camera_name, camera_id):
         self.name_label.setText(camera_name)
         self.id_label.setText(f"ID: {camera_id}")
+        self.border_overlay.raise_()
         self.name_label.raise_()
         self.id_label.raise_()
 
     def set_border_color(self, color):
-        self.setStyleSheet(f"background-color: black; border: 3px solid {color};")
+        # Only update border overlay, not the main widget
+        self.border_overlay.setStyleSheet(f"background: transparent; border: 3px solid {color};")
         if self.placeholder_label:
-            self.placeholder_label.setStyleSheet(f"color: white; font-size: 16px; background-color: #1a1a1a; border: 3px solid {color};")
+            self.placeholder_label.setStyleSheet(f"color: white; font-size: 16px; background-color: #1a1a1a;")
+    
+    def set_selected(self, selected):
+        if hasattr(self, 'corner_indicator'):
+            self.corner_indicator.set_selected(selected)
+            # Ensure proper z-order when selection changes
+            if selected:
+                self.border_overlay.raise_()
+                self.corner_indicator.raise_()
+                for line in self.corner_indicator.corner_lines:
+                    line.raise_()
+                self.name_label.raise_()
+                self.id_label.raise_()
 
 class ResizableContainer(QWidget):
     resized = Signal()
@@ -268,12 +398,6 @@ class LoadingAnimationWidget(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setStyleSheet("background: transparent;")
         
-        self.outline_rect = QWidget(self)
-        self.outline_rect.setStyleSheet("background: transparent; border: 2px solid white;")
-        
-        self.fill_rect = QWidget(self.outline_rect)
-        self.fill_rect.setStyleSheet("background: rgba(100, 200, 255, 200); border: none;")
-        
         self.outline_animation = None
         self.fill_animation = None
         self.fade_animation = None
@@ -283,34 +407,17 @@ class LoadingAnimationWidget(QWidget):
         self.outline_drawn = False
         self.current_progress = 0.0
 
-        # Thickness of the animated border
-        self.outline_thickness = 4  # adjust as needed
+        self.outline_thickness = 2
 
         # --- Animated segments (4 sides) ---
+        self.outline_segments = [] # Order: Left, Down, Right, Up
 
-        # Top: grows left → right
-        self.left_segment = QFrame(self)
-        self.left_segment.setStyleSheet("background-color: white;")
-        self.left_segment.setGeometry(0, 0, 0, self.outline_thickness)
-        self.left_segment.hide()
-
-        # Right: grows top → bottom
-        self.down_segment = QFrame(self)
-        self.down_segment.setStyleSheet("background-color: white;")
-        self.down_segment.setGeometry(0, 0, self.outline_thickness, 0)
-        self.down_segment.hide()
-
-        # Bottom: grows right → left
-        self.right_segment = QFrame(self)
-        self.right_segment.setStyleSheet("background-color: white;")
-        self.right_segment.setGeometry(0, 0, 0, self.outline_thickness)
-        self.right_segment.hide()
-
-        # Left: grows bottom → top
-        self.up_segment = QFrame(self)
-        self.up_segment.setStyleSheet("background-color: white;")
-        self.up_segment.setGeometry(0, 0, self.outline_thickness, 0)
-        self.up_segment.hide()
+        for i in range(4):
+            segment = QFrame(self)
+            segment.setStyleSheet("background-color: white;")
+            segment.setGeometry(0, 0, 0, self.outline_thickness)
+            segment.hide()
+            self.outline_segments.append(segment)
 
         # Final static rectangle that replaces segments after animation
         self.outline_rect = QFrame(self)
@@ -325,14 +432,13 @@ class LoadingAnimationWidget(QWidget):
         self.draw_timer = QTimer()
         self.draw_timer.timeout.connect(self.animate_outline_draw)
         self.draw_progress = 0.0
-        self.draw_step = 0.05
+        self.draw_step = 0.04
         
     def start_loading_animation(self, center_x, center_y, bar_width=200, bar_height=20):
         self.bar_width = bar_width
         self.bar_height = bar_height
-        p = self.parent()
-        self.center_x = p.width() // 2
-        self.center_y = p.height() // 2
+        self.center_x = self.parent().width() // 2
+        self.center_y = self.parent().height() // 2
         self.gap = 4
 
         self.outline_rect.setGeometry(
@@ -347,128 +453,41 @@ class LoadingAnimationWidget(QWidget):
         
     def animate_outline_draw(self):
         self.draw_progress += self.draw_step
-
-        raw_t = min(self.draw_progress, 1.0)
-
-        if hasattr(self, "ease_func") and callable(self.ease_func):
-            t = self.ease_func(raw_t)
-        else:
-            t = raw_t
-        # -------------------------------------------------------------
-
-        # Total perimeter
-        P = 2 * (self.bar_width + self.bar_height)
+        t = min(1 - (1 - self.draw_progress) ** 5, 1.0)
+        self.center_x = self.parent().width() // 2
+        self.center_y = self.parent().height() // 2
 
         if t >= 1.0: # Animation is done
+            for segment in self.outline_segments:
+                segment.hide()
+            
             self.draw_timer.stop()
-            self.outline_drawn = True
+            if not self.outline_drawn:
+                self.outline_rect.show()
+                self.fill_rect.show()
+                self.outline_drawn = True
 
             final_x = self.center_x - self.bar_width // 2
             final_y = self.center_y - self.bar_height // 2
             self.outline_rect.setGeometry(final_x, final_y, self.bar_width, self.bar_height)
-            self.fill_rect.setGeometry(
-                self.gap,
-                self.gap,
-                0,
-                self.bar_height - 2 * self.gap
-            )
-            self.outline_rect.show()
-            self.fill_rect.show()
-
-            for seg in (self.left_segment, self.down_segment, self.right_segment, self.up_segment):
-                seg.hide()
-
-            # Create the progress bar fill
-            self.fill_rect.setGeometry(
-                self.gap,
-                self.gap,
-                0,
-                self.bar_height - 2 * self.gap
-            )
-            self.fill_rect.show()
+            self.fill_rect.setGeometry(self.gap, self.gap, 0, self.bar_height - 2 * self.gap)
             return
 
-        # Convert eased progress → perimeter distance
-        d = t * P
-
-        L = self.bar_width
-        H = self.bar_height
-        L2 = self.bar_width
-        H2 = self.bar_height
-
+        # Converting eased progress → perimeter distance
+        for segment in self.outline_segments:
+            segment.show()
+        
+        d = t * 2 * (self.bar_width + self.bar_height) # Distance (min = 0, max = perimeter)
+        w = self.bar_width
+        h = self.bar_height
         x0 = self.center_x - self.bar_width // 2
         y0 = self.center_y - self.bar_height // 2
 
-        self.left_segment.show()
-        self.down_segment.show()
-        self.right_segment.show()
-        self.up_segment.show()
+        self.outline_segments[0].setGeometry(x0, y0, int(min(d, w)), self.outline_thickness)
+        self.outline_segments[1].setGeometry(x0 + w - self.outline_thickness, y0, self.outline_thickness, int(min(d - (w + h), h)))
+        self.outline_segments[2].setGeometry(x0 + max(0, w - int(d - (w + h))), y0 + h - self.outline_thickness, int(max(0, min(d - (w + h), w))), self.outline_thickness)
+        self.outline_segments[3].setGeometry(x0, y0 + h - max(0, int(d - (2 * w + h))), self.outline_thickness, int(max(0, d - (2 * w + h))))
 
-        # ---------------- TOP SEGMENT (left → right) ----------------
-        if d <= L:
-            self.left_segment.setGeometry(
-                x0, y0,
-                int(d), self.outline_thickness
-            )
-            self.down_segment.resize(0, 0)
-            self.right_segment.resize(0, 0)
-            self.up_segment.resize(0, 0)
-            return
-
-        self.left_segment.setGeometry(
-            x0, y0,
-            L, self.outline_thickness
-        )
-
-        # ---------------- RIGHT SEGMENT (top → bottom) ----------------
-        if d <= L + H:
-            h = int(d - L)
-            self.down_segment.setGeometry(
-                x0 + L - self.outline_thickness,
-                y0,
-                self.outline_thickness,
-                h
-            )
-            self.right_segment.resize(0, 0)
-            self.up_segment.resize(0, 0)
-            return
-
-        self.down_segment.setGeometry(
-            x0 + L - self.outline_thickness,
-            y0,
-            self.outline_thickness,
-            H
-        )
-
-        # ---------------- BOTTOM SEGMENT (right → left) ----------------
-        if d <= L + H + L2:
-            w = int(d - (L + H))
-            self.right_segment.setGeometry(
-                x0 + L - w,
-                y0 + H - self.outline_thickness,
-                w,
-                self.outline_thickness
-            )
-            self.up_segment.resize(0, 0)
-            return
-
-        self.right_segment.setGeometry(
-            x0,
-            y0 + H - self.outline_thickness,
-            L,
-            self.outline_thickness
-        )
-
-        # ---------------- LEFT SEGMENT (bottom → top) ----------------
-        remaining = d - (L + H + L2)
-        self.up_segment.setGeometry(
-            x0,
-            y0 + H - remaining,
-            self.outline_thickness,
-            int(remaining)
-        )
-
-        
     def update_progress(self, progress):
         if not self.outline_drawn or self.is_complete:
             return
@@ -487,12 +506,7 @@ class LoadingAnimationWidget(QWidget):
         
         def update_fill_width(value):
             if self.fill_rect:
-                self.fill_rect.setGeometry(
-                    self.gap,
-                    self.gap,
-                    int(value),
-                    self.bar_height - 2 * self.gap
-                )
+                self.fill_rect.setGeometry(self.gap, self.gap, int(value), self.bar_height - 2 * self.gap)
         
         self.fill_animation.valueChanged.connect(update_fill_width)
         self.fill_animation.start()
@@ -511,12 +525,7 @@ class LoadingAnimationWidget(QWidget):
         
         def update_fill_complete(value):
             if self.fill_rect:
-                self.fill_rect.setGeometry(
-                    self.gap,
-                    self.gap,
-                    int(value),
-                    self.bar_height - 2 * self.gap
-                )
+                self.fill_rect.setGeometry(self.gap, self.gap, int(value), self.bar_height - 2 * self.gap)
         
         self.fill_animation.valueChanged.connect(update_fill_complete)
         self.fill_animation.finished.connect(self.expand_to_border)
@@ -544,6 +553,9 @@ class LoadingAnimationWidget(QWidget):
         fill_h = self.fill_rect.height()
         
         def update_expansion(value):
+            self.center_x = self.parent().width() // 2
+            self.center_y = self.parent().height() // 2
+
             if not self.outline_rect or not self.fill_rect:
                 return
                 
@@ -559,8 +571,10 @@ class LoadingAnimationWidget(QWidget):
             
             self.fill_rect.setGeometry(self.gap, self.gap, fill_new_w, fill_new_h)
             
-            opacity = int(200 * (1 - value))
-            self.fill_rect.setStyleSheet(f"background: rgba(100, 200, 255, {opacity}); border: none;")
+            opacity = max(0, int(200 * (1 - value) ** 5))
+            if value >= 0.95:
+                self.fill_rect.hide()
+            self.fill_rect.setStyleSheet(f"background: rgba(255, 255, 255, {opacity}); border: none;")
             
         self.expand_animation.valueChanged.connect(update_expansion)
         self.expand_animation.finished.connect(self.finish_and_cleanup)
@@ -582,7 +596,7 @@ class LoadingAnimationWidget(QWidget):
         if self.parent():
             parent = self.parent()
             if hasattr(parent, 'set_border_color'):
-                parent.set_border_color("red")
+                parent.set_border_color("white")
         
         self.hide()
         QTimer.singleShot(100, self.cleanup_widgets)
@@ -620,11 +634,12 @@ class CameraNode(Node):
         self.command_queue = deque()
         self.processing_command = False
 
-        self.camera_name = ["Placeholder 1", "Placeholder 2", "Placeholder 3", "Placeholder 4", "Placeholder 5", "Placeholder 6"]
-        self.camera_id = [307142683, 302801547, 58896881, 3, 4, 5]
-        self.camera_ratios = [[1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080]]
+        self.camera_name = ["Placeholder 1", "Placeholder 2", "Placeholder 3", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
+        self.camera_id = [307142683, 302801547, 58896881, 3, 4, 5, 6, 7]
+        self.camera_ratios = [[1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080], [1920, 1080]]
         self.camera_total = len(self.camera_id)
         self.camera_current = 0
+        self.camera_display_type = 0
         self.camera = [Camera(i) for i in range(self.camera_total)]
         self.switching_cams = False
 
@@ -634,22 +649,19 @@ class CameraNode(Node):
         self.focused_camera = None
         self.pre_focus_geometries = {}
 
-        self.target_sizes = [
-            [[1, 1], [0, 1]], 
-            [[2.0/3.0, 1], [1.0/3.0, 1], [1.0/3.0, 0]], 
-            [[0.5, 1], [0.5, 0.5], [0.5, 0.5], [0.5, 0]], 
-            [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0, 0.5]], 
-            [[0.5, 0.5], [0.5, 0.5], [1.0/3.0, 0.5], [1.0/3.0, 0.5], [1.0/3.0, 0.5], [0, 0.5]], 
-            [[1.0/3.0, 0.5], [1.0/3.0, 0.5], [1.0/3.0, 0.5], [1.0/3.0, 0.5], [1.0/3.0, 0.5], [1.0/3.0, 0.5]]
+        # [Target Camera][Display Mode][Scales][Position(0-1),Size(2-3)]
+        # Display Mode only gets infomation starting from [max(0,i-1)] up to the last change, each step increases by 1 until it stops.
+        self.display_dimentions = [ 
+            [[[0,1,1,1],[0,0,1,1],[1/6,0,5/6,1],[1/6,0,5/6,1],[1/6,0,5/6,1],[1/6,0,5/6,1],[1/6,0,4/6,1]],[[0,1,1,1],[0,0,1,1],[0,0,1,1/2],[0,0,1,1/2],[0,0,1/2,1/2],[0,0,1/2,1/2],[0,0,1/3,1/2],[0,0,1/3,1/2],[0,0,1/4,1/2]],[[0,1,1,1],[0,0,1,1],[0,0,1,1/2]]],
+            [[[-1/6,0,1/6,1],[0,0,1/6,1],[0,0,1/6,1/2],[0,0,1/6,1/3],[0,0,1/6,1/4]],[[0,1,1,1/2],[0,1/2,1,1/2],[0,1/2,1/2,1/2],[1/2,0,1/2,1/2],[1/2,0,1/2,1/2],[1/3,0,1/3,1/2],[1/3,0,1/3,1/2],[1/4,0,1/4,1/2]],[[0,1,1,1/2],[0,1/2,1,1/2],[0,1/2,1/2,1/2]]],
+            [[[0,1,1/6,1/2],[0,1/2,1/6,1/2],[0,1/3,1/6,1/3],[0,1/4,1/6,1/4]],[[1,1/2,1/2,1/2],[1/2,1/2,1/2,1/2],[0,1/2,1/2,1/2],[0,1/2,1/3,1/2],[2/3,0,1/3,1/2],[2/3,0,1/3,1/2],[2/4,0,1/4,1/2]],[[1,1/2,1/2,1/2],[1/2,1/2,1/2,1/2],[1/2,1/2,1/2,1/4],[1/2,1/2,1/2,1/4],[1/2,1/2,1/4,1/4],[1/2,1/2,1/4,1/4],[1/2,1/2,1/6.0,1/4]]],
+            [[[0,1,1/6,1/3],[0,2/3,1/6,1/3],[0,2/4,1/6,1/4]],[[1,1/2,1/2,1/2],[1/2,1/2,1/2,1/2],[1/3,1/2,1/3,1/2],[0,1/2,1/3,1/2],[0,1/2,1/4,1/2],[3/4,0,1/4,1/2]],[[1/2,1,1/2,1/4],[1/2,3/4,1/2,1/4],[1/2,3/4,1/4,1/4],[3/4,1/2,1/4,1/4],[3/4,1/2,1/4,1/4],[4/6,1/2,1/6,1/4]]],
+            [[[0,1,1/6,1/4],[0,3/4,1/6,1/4]],[[1,1/2,1/3,1/2],[2/3,1/2,1/3,1/2],[1/3,1/2,1/3,1/2],[1/4,1/2,1/4,1/2],[0,1/2,1/4,1/2]],[[1,3/4,1/4,1/4],[3/4,3/4,1/4,1/4],[1/2,3/4,1/4,1/4],[1/2,3/4,1/6,1/4],[5/6,1/2,1/6,1/4]]],
+            [[[1,0,1/6,1],[5/6,0,1/6,1],[5/6,0,1/6,1/2],[5/6,0,1/6,1/3]],[[1,1/2,1/3,1/2],[2/3,1/2,1/3,1/2],[2/4,1/2,1/4,1/2],[1/4,1/2,1/4,1/2]],[[1,3/4,1/4,1/4],[3/4,3/4,1/4,1/4],[4/6,3/4,1/6,1/4],[1/2,3/4,1/6,1/4]]],
+            [[[5/6,1,1/6,1/2],[5/6,1/2,1/6,1/2],[5/6,1/3,1/6,1/3]],[[1,1/2,1/4,1/2],[3/4,1/2,1/4,1/2],[2/4,1/2,1/4,1/2]],[[1,3/4,1/6,1/4],[5/6,3/4,1/6,1/4],[4/6,3/4,1/6,1/4]]],
+            [[[5/6,1,1/6,1/3],[5/6,2/3,1/6,1/3]],[[1,1/2,1/4,1/2],[3/4,1/2,1/4,1/2]],[[1,3/4,1/6,1/4],[5/6,3/4,1/6,1/4]]],
         ]
-        self.target_positions = [
-            [[0, 0], [1, 0]],
-            [[0, 0], [2.0/3.0, 0], [2.0/3.0, 1]],
-            [[0, 0], [0.5, 0], [0.5, 0.5], [0, 1]],
-            [[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5], [0, 0.5]],
-            [[0, 0], [0.5, 0], [2.0/3.0, 0.5], [1.0/3.0, 0.5], [0, 0.5], [0, 0]],
-            [[1.0/3.0, 0], [2.0/3.0, 0], [2.0/3.0, 0.5], [1.0/3.0, 0.5], [0, 0.5], [0, 0]]
-        ]
+        self.total_display_types = len(self.display_dimentions[0])
 
         self.zed_available = self.check_gstreamer_element('zedxonesrc')
         if not self.zed_available:
@@ -731,13 +743,19 @@ class CameraNode(Node):
                 self.move_index(1)
             case 'a':
                 self.move_index(-1)
+            case 'n':
+                self.shift_camera_display_type(-1)
+            case 'm':
+                self.shift_camera_display_type(1)
             case 'f':
                 self.toggle_focus()
             case 'r':
                 self.switching_cams = not self.switching_cams
-            case "0" | "1" | "2" | "3" | "4" | "5":
+            case "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7":
                 if self.switching_cams:
                     self.switch_cam(int(key))
+                else:
+                    self.select_camera(int(key))
             case _:
                 if self.switching_cams:
                     self.switching_cams = False
@@ -750,12 +768,9 @@ class CameraNode(Node):
     def get_active_cameras(self):
         return list(filter(lambda c: c.active, self.camera))
 
-    def get_unused_indexes(self):
-        used = {cam.index for cam in self.camera if cam.index != -1}
-        return [i for i in range(self.camera_total) if i not in used]
-
     def get_available_index(self):
-        unused = self.get_unused_indexes()
+        used = {cam.index for cam in self.camera if cam.index != -1}
+        unused = [i for i in range(self.camera_total) if i not in used]
         return unused[0] if unused else None
 
     # ------------------------ Activation / Deactivation ------------------------
@@ -795,7 +810,7 @@ class CameraNode(Node):
         
         cam.active = False
         
-        active_positions = [c.position for c in self.camera if c.active]
+        active_positions = [c.absolute_position for c in self.camera if c.active]
 
         def _remove_feed_widget(camera_obj):
             if camera_obj.feed_widget:
@@ -833,7 +848,7 @@ class CameraNode(Node):
                 if not hasattr(cam.feed_widget, 'placeholder_label') or cam.feed_widget.placeholder_label is None:
                     cam.feed_widget.placeholder_label = QLabel("Inactive", cam.feed_widget)
                     cam.feed_widget.placeholder_label.setAlignment(Qt.AlignCenter)
-                    cam.feed_widget.placeholder_label.setStyleSheet("color: red; font-size: 16px; background-color: #1a1a1a;")
+                    cam.feed_widget.placeholder_label.setStyleSheet("color: white; font-size: 16px; background-color: #1a1a1a;")
                     cam.feed_widget.placeholder_label.setGeometry(0, 0, cam.feed_widget.width(), cam.feed_widget.height())
                 else:
                     cam.feed_widget.placeholder_label.setText("Inactive")
@@ -848,6 +863,13 @@ class CameraNode(Node):
         self.set_camera_positions()
 
     # ------------------------ Selection & Switch & Focus ------------------------
+
+    def select_camera(self, index):
+        if not self.camera[index].active:
+            print("Selected camera is not active.")
+            return
+        self.camera_current = index
+        self.update_camera_borders()
 
     def select_next_camera(self, direction):
         if self.camera_current is None:
@@ -940,6 +962,12 @@ class CameraNode(Node):
 
             self.set_camera_positions()
             print("Exited focus mode")
+    
+    def shift_camera_display_type(self, direction):
+        self.camera_display_type = (self.camera_display_type + direction) % self.total_display_types
+        print(self.camera_display_type)
+        self.set_camera_positions()
+        
 
     # ------------------------ Move Index ------------------------
 
@@ -982,13 +1010,12 @@ class CameraNode(Node):
         active_positions = [c.position for c in self.camera if c.active] or [cam.position]
         max_pos = max(active_positions)
 
-        size = self.target_sizes[max(max_pos - 1, 0)][cam.position]
-        pos = self.target_positions[max(max_pos - 1, 0)][cam.position]
+        dimention = self.display_dimentions[max(max_pos, 0)][self.camera_display_type][0]
 
-        x = int(pos[0] * self.container.width())
-        y = int(pos[1] * self.container.height())
-        w = int(size[0] * self.container.width())
-        h = int(size[1] * self.container.height())
+        x = int(dimention[0] * self.container.width())
+        y = int(dimention[1] * self.container.height())
+        w = int(dimention[2] * self.container.width())
+        h = int(dimention[3] * self.container.height())
 
         use_camera = self.zed_available and self.use_video_overlay
 
@@ -1079,7 +1106,7 @@ class CameraNode(Node):
 
             placeholder = QWidget(self.container)
             placeholder.setGeometry(x, y, w, h)
-            placeholder.setStyleSheet("background-color: #1a1a1a; border: 3px solid red;")
+            placeholder.setStyleSheet("background-color: #1a1a1a; border: 2px solid white;")
             placeholder.show()
             cam.feed_widget = placeholder
 
@@ -1093,18 +1120,16 @@ class CameraNode(Node):
             if not cam.active and cam.feed_widget:
                 self.stop_animation_for_widget(cam.feed_widget)
                 continue
-
+        
+        i = -1
         for cam in self.camera:
-            if not cam.active:
-                continue
-
-            size = self.target_sizes[max_pos][cam.position]
-            pos = self.target_positions[max_pos][cam.position]
-
-            end_x = int(pos[0] * self.container.width())
-            end_y = int(pos[1] * self.container.height())
-            end_w = int(size[0] * self.container.width())
-            end_h = int(size[1] * self.container.height())
+            i += 1
+            valid_dimentions = self.display_dimentions[i][self.camera_display_type]
+            dimention = valid_dimentions[max(0, min(max_pos + 1 - i, len(valid_dimentions) - 1))]
+            end_x = int(dimention[0] * self.container.width())
+            end_y = int(dimention[1] * self.container.height())
+            end_w = int(dimention[2] * self.container.width())
+            end_h = int(dimention[3] * self.container.height())
             self.tween_position_and_size(cam.feed_widget, end_x, end_y, end_w, end_h, duration = 500)
 
         self.update_camera_borders()
@@ -1127,9 +1152,23 @@ class CameraNode(Node):
         for cam in self.camera:
             if not cam.feed_widget:
                 continue
-            color = "blue" if cam.position == self.camera_current else "red"
-            if hasattr(cam.feed_widget, 'set_border_color'):
-                cam.feed_widget.set_border_color(color)
+            is_selected = cam.position == self.camera_current
+            if hasattr(cam.feed_widget, 'set_selected'):
+                cam.feed_widget.set_selected(is_selected)
+        
+        # After updating all borders, ensure all overlays are properly raised
+        for cam in self.camera:
+            if cam.feed_widget:
+                if hasattr(cam.feed_widget, 'name_label'):
+                    cam.feed_widget.name_label.raise_()
+                if hasattr(cam.feed_widget, 'id_label'):
+                    cam.feed_widget.id_label.raise_()
+                if hasattr(cam.feed_widget, 'corner_indicator'):
+                    cam.feed_widget.corner_indicator.raise_()
+                    for line in cam.feed_widget.corner_indicator.corner_lines:
+                        line.raise_()
+                if hasattr(cam.feed_widget, 'border_overlay'):
+                    cam.feed_widget.border_overlay.raise_()
 
     # ------------------------ Tween Animation ------------------------
     def stop_animation_for_widget(self, widget):
@@ -1169,9 +1208,18 @@ class CameraNode(Node):
             new_w = int(start_geom.width() + (end_w - start_geom.width()) * value)
             new_h = int(start_geom.height() + (end_h - start_geom.height()) * value)
             widget.setGeometry(new_x, new_y, new_w, new_h)
+            
+            # Ensure overlays stay on top during animation
             if hasattr(widget, 'name_label') and hasattr(widget, 'id_label'):
                 widget.name_label.raise_()
                 widget.id_label.raise_()
+            if hasattr(widget, 'corner_indicator'):
+                widget.corner_indicator.raise_()
+                widget.corner_indicator.update_corners_animated(widget.corner_indicator.current_progress)
+                for line in widget.corner_indicator.corner_lines:
+                    line.raise_()
+            if hasattr(widget, 'border_overlay'):
+                widget.border_overlay.raise_()
 
         animation.valueChanged.connect(update_geometry)
         animation.start()
