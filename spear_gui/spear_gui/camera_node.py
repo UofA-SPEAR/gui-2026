@@ -184,7 +184,7 @@ class CornerIndicator(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setStyleSheet("background: transparent;")
         
-        self.gap, self.length, self.thickness = 8, 40, 2
+        self.gap, self.length, self.thickness = 8, 40, 4
         self.progress = 0.0
         self.animation = None
         self.lines = [QFrame(self) for _ in range(8)]
@@ -209,11 +209,11 @@ class CornerIndicator(QWidget):
             return
         
         w, h = self.parent().width(), self.parent().height()
-        t = min(1, max(math.sqrt(1 - (progress - 1) ** 2), 0))
+        t = min(1, max(math.sqrt(1 - (progress - 1) ** 4), 0))
         
         ox = int((1 - t) * (w / 2 - self.gap - self.length))
         oy = int((1 - t) * (h / 2 - self.gap - self.length))
-        l, th = t * self.length, self.thickness
+        l, th = t * self.length, math.ceil(t * self.thickness)
         
         geometries = [
             (self.gap + ox, self.gap + oy, l, th),
@@ -228,7 +228,7 @@ class CornerIndicator(QWidget):
         
         for i, (x, y, width, height) in enumerate(geometries):
             self.lines[i].setGeometry(x, y, width, height)
-            self.lines[i].setStyleSheet("background-color: white;")
+            self.lines[i].setStyleSheet("background-color: rgba(255, 255, 255, 255);")
             self.lines[i].setVisible(progress > 0.01)
     
     def resizeEvent(self, event):
@@ -502,6 +502,7 @@ class CameraNode(Node):
         self.display_mode = 0
         self.focus_mode = False
         self.switching_mode = False
+        self.always_remove_inactive_cams = True
         
         self.container = None
         self.anim_manager = AnimationManager()
@@ -618,6 +619,7 @@ class CameraNode(Node):
             print(f"Camera {self.current} not active")
             return
         
+        original_pos = cam.position
         cam.active = False
         active_positions = [c.position for c in self.cameras if c.active]
         
@@ -632,17 +634,34 @@ class CameraNode(Node):
         
         # Remove widgets beyond max active position
         for c in self.cameras:
-            if not c.active and c.position > max_pos:
+            if not c.active and (self.always_remove_inactive_cams or c.position > max_pos):
                 self._remove_widget(c)
         
-        if cam.position > max_pos:
+        if self.always_remove_inactive_cams:
+            self._remove_widget(cam)
+            found_inactive = True
+            while found_inactive:
+                print("AAAAAAAAAAAAAAAAAAAAAAA")
+                found_inactive = False
+                for i in range(len(self.cameras)):
+                    print("Finding cameras to remove")
+                    if not self.cameras[i].active and self.cameras[i].position < max_pos:
+                        print("Found it")
+                        found_inactive = True
+                        self._select_camera(i, True)
+                        self._switch_cameras(i + 1, True)
+                        self._print_status()
+            self._select_camera(original_pos)
+                        
+        elif cam.position > max_pos:
             self._remove_widget(cam)
         else:
             # Show inactive placeholder
             if cam.widget:
                 self.anim_manager.stop(cam.widget)
                 cam.widget.stop()
-                if not hasattr(cam.widget, 'placeholder') or cam.widget.placeholder is None:
+                if not cam.widget.placeholder is None:
+                    print("Test")
                     cam.widget.placeholder = QLabel("Inactive", cam.widget.video_layer)
                     cam.widget.placeholder.setAlignment(Qt.AlignCenter)
                     cam.widget.placeholder.setStyleSheet("color: white; font-size: 16px; background-color: #1a1a1a;")
@@ -655,12 +674,15 @@ class CameraNode(Node):
         
         self._update_layout()
     
-    def _select_camera(self, index):
+    def _select_camera(self, index, bypass_inactive=False):
         # Select camera by position
-        if not self.cameras[index].active:
+        if not bypass_inactive and not self.cameras[index].active:
             print(f"Camera {index} not active")
             return
+        if bypass_inactive:
+            index = next((c.position for c in self.cameras if c.position == index), 0)
         self.current = index
+        print(f"Current Index: {index}")
         self._update_borders()
     
     def _select_next(self, direction):
@@ -672,12 +694,13 @@ class CameraNode(Node):
         self.current = (self.current + direction) % (max_pos + 1)
         self._update_borders()
     
-    def _switch_cameras(self, target_pos):
+    def _switch_cameras(self, target_pos, bypass_inactive=False):
         # Switch two camera positions
         cam_current = next((c for c in self.cameras if c.position == self.current), None)
         cam_target = next((c for c in self.cameras if c.position == target_pos), None)
-        
-        if not cam_current or not cam_target:
+        active_positions = [c.position for c in self.cameras if c.active]
+
+        if not bypass_inactive and (not cam_current or not cam_target or not active_positions or max(active_positions) < cam_target.position):
             return
         
         print(f"Switched cameras {self.current} <-> {target_pos}")
