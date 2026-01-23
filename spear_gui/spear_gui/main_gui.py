@@ -1,43 +1,51 @@
 #!/usr/bin/env python3
+"""display mini map of rover's current position"""
 import sys
+import os
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
 from PySide6.QtCore import QTimer
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+from sensor_msgs.msg import NavSatFix
+from map_viewer import MapViewer
 
-
-class ListenerNode(Node):
+# ------------------------ rover position tracker listener ------------------------
+class TrackRoverPosition(Node):
     def __init__(self):
         super().__init__('gui_listener')
+
+        self.lat = None
+        self.lon = None
 
         # Publisher for key events
         self.key_pub = self.create_publisher(String, "key", 10)
 
-        # Subscriber for any other messages (optional)
-        self.sub = self.create_subscription(
-            String, 'chatter', self.callback, 10
-        )
+        self.gps_sub = self.create_subscription(NavSatFix, "/gps/fix", self.gps_callback, 10)
 
-        self.last_msg = ""
-
-    def callback(self, msg):
-        """Update last received message."""
-        self.last_msg = msg.data
-        self.get_logger().info(f"Received message: {msg.data}")
-
+    def gps_callback(self, msg: NavSatFix):
+        self.lat = msg.latitude
+        self.lon = msg.longitude
 
 class MainWindow(QMainWindow):
-    def __init__(self, node):
+    def __init__(self, node: TrackRoverPosition):
         super().__init__()
         self.node = node
 
-        self.setWindowTitle("ROS2 GUI")
+        # window setup
+        self.setWindowTitle("ROS2 GUI - Rover Mini Map")
         self.resize(400, 200)
 
-        self.label = QLabel("Waiting for messages...")
+        # finds the script's directory and build path from there
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        tiles_path = os.path.join(script_dir, "../../MDRS_2025-11-25_163543/Bing Satellite")
+        tiles_path = os.path.normpath(tiles_path)  # Cleaning up the path
+        
+        # creating map viewer widget to display minimap
+        self.map_viewer = MapViewer(tiles_path, self)
+
         layout = QVBoxLayout()
-        layout.addWidget(self.label)
+        layout.addWidget(self.map_viewer)
 
         container = QWidget()
         container.setLayout(layout)
@@ -45,7 +53,7 @@ class MainWindow(QMainWindow):
 
         # Timer to update GUI from ROS2 callbacks
         self.timer = QTimer()
-        self.timer.timeout.connect(self.update_label)
+        self.timer.timeout.connect(self.update_rover)
         self.timer.start(200)
 
     def keyPressEvent(self, event):
@@ -57,15 +65,16 @@ class MainWindow(QMainWindow):
             self.node.key_pub.publish(msg)
             print(f"Published key: {key}")  # Also logs in terminal
 
-    def update_label(self):
-        """Update label with latest message from 'chatter' topic."""
-        if self.node.last_msg:
-            self.label.setText(f"Latest message: {self.node.last_msg}")
-
+    def update_rover(self):
+        """Update label with latest position for the rover"""
+        if self.node.lat is None or self.node.lon is None:
+            return
+        
+        self.map_viewer.update_marker_gps(self.node.lat, self.node.lon)
 
 def main():
     rclpy.init()
-    node = ListenerNode()
+    node = TrackRoverPosition()
 
     app = QApplication(sys.argv)
     window = MainWindow(node)
