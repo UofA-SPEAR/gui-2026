@@ -33,7 +33,7 @@ class CameraConfig:
          [[0,1,1,1/2],[0,1/2,1,1/2],[0,1/2,1/2,1/2]]],
         [[[0,1,1/6,1/2],[0,1/2,1/6,1/2],[0,1/3,1/6,1/3],[0,1/4,1/6,1/4]],
          [[1,1/2,1/2,1/2],[1/2,1/2,1/2,1/2],[0,1/2,1/2,1/2],[0,1/2,1/3,1/2],[2/3,0,1/3,1/2],[2/3,0,1/3,1/2],[2/4,0,1/4,1/2]],
-         [[1,1/2,1/2,1/2],[1/2,1/2,1/2,1/2],[1/2,1/2,1/2,1/4],[1/2,1/2,1/2,1/4],[1/2,1/2,1/4,1/4],[1/2,1/2,1/4,1/4],[1/2,1/2,1/6.0,1/4]]],
+         [[1,1/2,1/2,1/2],[1/2,1/2,1/2,1/2],[1/2,1/2,1/2,1/4],[1/2,1/2,1/2,1/4],[1/2,1/2,1/4,1/4],[1/2,1/2,1/4,1/4],[1/2,1/2,1/6,1/4]]],
         [[[0,1,1/6,1/3],[0,2/3,1/6,1/3],[0,2/4,1/6,1/4]],
          [[1,1/2,1/2,1/2],[1/2,1/2,1/2,1/2],[1/3,1/2,1/3,1/2],[0,1/2,1/3,1/2],[0,1/2,1/4,1/2],[3/4,0,1/4,1/2]],
          [[1/2,1,1/2,1/4],[1/2,3/4,1/2,1/4],[1/2,3/4,1/4,1/4],[3/4,1/2,1/4,1/4],[3/4,1/2,1/4,1/4],[4/6,1/2,1/6,1/4]]],
@@ -79,8 +79,7 @@ class AnimationManager:
             anim.deleteLater()
     
     def tween(self, widget, end_x, end_y, end_w, end_h, duration=500, easing=QEasingCurve.OutExpo):
-        if not widget or not widget.parent():
-            return
+        if not widget or not widget.parent(): return
         
         self.stop(widget)
         start = widget.geometry()
@@ -146,8 +145,7 @@ class GStreamerThread(QThread):
                     print(f"Failed to set window handle: {e}", file=sys.stderr)
 
     def run(self):
-        if not self.pipeline:
-            return
+        if not self.pipeline: return
         
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             self.error_occurred.emit("Failed to set pipeline to PLAYING")
@@ -204,9 +202,11 @@ class CornerIndicator(QWidget):
         self.animation.start()
     
     def _update(self, progress):
-        self.progress = progress
-        if not self.parent():
+        try:
+            if not self.parent(): return
+        except:
             return
+        self.progress = progress
         
         w, h = self.parent().width(), self.parent().height()
         t = min(1, max(math.sqrt(1 - (progress - 1) ** 4), 0))
@@ -225,7 +225,7 @@ class CornerIndicator(QWidget):
             (self.gap + ox, h - self.gap - th - oy, l, th),
             (self.gap + ox, h - self.gap - l - oy, th, l),
         ]
-        
+
         for i, (x, y, width, height) in enumerate(geometries):
             self.lines[i].setGeometry(x, y, width, height)
             self.lines[i].setStyleSheet("background-color: rgba(255, 255, 255, 255);")
@@ -302,7 +302,10 @@ class LoadingAnimation(QWidget):
     
     def update_progress(self, progress):
         # Update fill progress
-        if self.is_complete or not self.fill or self.fill.isHidden():
+        try:
+            if self.is_complete or not self.fill or self.fill.isHidden():
+                return
+        except:
             return
         
         target = int((self.bar_w - 2 * self.gap) * progress)
@@ -313,8 +316,11 @@ class LoadingAnimation(QWidget):
         anim.setEasingCurve(QEasingCurve.InOutCubic)
         
         def update_fill(v):
-            if self.fill and not self.fill.isHidden():
-                self.fill.setGeometry(self.gap, self.gap, int(v), self.bar_h - 2 * self.gap)
+            try:
+                if self.fill and not self.fill.isHidden():
+                    self.fill.setGeometry(self.gap, self.gap, int(v), self.bar_h - 2 * self.gap)
+            except:
+                return
         
         anim.valueChanged.connect(update_fill)
         anim.start()
@@ -322,7 +328,10 @@ class LoadingAnimation(QWidget):
     
     def complete_animation(self):
         # Complete and expand to border
-        if self.is_complete or not self.fill or self.fill.isHidden():
+        try:
+            if self.is_complete or not self.fill or self.fill.isHidden():
+                return
+        except:
             return
         self.is_complete = True
         
@@ -344,7 +353,10 @@ class LoadingAnimation(QWidget):
     
     def _expand_to_border(self):
         # Expand to fill parent
-        if not self.parent() or not self.outline or not self.fill:
+        try:
+            if not self.parent() or not self.outline or not self.fill:
+                return
+        except:
             return
         
         pw, ph = self.parent().width(), self.parent().height()
@@ -388,12 +400,12 @@ class LoadingAnimation(QWidget):
         self._expand_anim = anim  # Keep reference
 
 class VideoWidget(QWidget):
-    # Video display widget with overlays
     pipeline_ready = Signal()
     
-    def __init__(self, pipeline_str, name="", cam_id="", use_overlay=True, parent=None):
+    def __init__(self, pipeline_str, name="", cam_id="", use_overlay=True, parent=None, cam_width=1920, cam_height=1080):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
+        self.camera_aspect_ratio = cam_width / cam_height
         
         # Video layer
         self.video_layer = QWidget(self)
@@ -440,16 +452,36 @@ class VideoWidget(QWidget):
         self.id_label.raise_()
         self.corner.raise_()
     
+    def _resize_video_area(self):
+        # Resize video layer to maintain aspect ratio
+        container_w, container_h = self.width(), self.height()
+        target_ar = self.camera_aspect_ratio
+        container_ar = container_w / container_h
+
+        if container_ar > target_ar:  # container is wider
+            video_h = container_h
+            video_w = int(video_h * target_ar)
+        else:  # container is taller
+            video_w = container_w
+            video_h = int(video_w / target_ar)
+
+        video_x = (container_w - video_w) // 2
+        video_y = (container_h - video_h) // 2
+        
+        self.video_layer.setGeometry(video_x, video_y, video_w, video_h)
+    
     def resizeEvent(self, event):
         super().resizeEvent(event)
         w, h = self.width(), self.height()
-        self.video_layer.setGeometry(0, 0, w, h)
+        
+        self._resize_video_area()
+        
         self.overlay.setGeometry(0, 0, w, h)
         self.border.setGeometry(0, 0, w, h)
         self.name_label.setGeometry(0, 5, w, 20)
         self.id_label.setGeometry(0, 25, w, 15)
         if self.placeholder:
-            self.placeholder.setGeometry(0, 0, w, h)
+            self.placeholder.setGeometry(0, 0, self.video_layer.width(), self.video_layer.height())
         self.corner._update(self.corner.progress)
     
     def start(self):
@@ -457,11 +489,16 @@ class VideoWidget(QWidget):
             return
         
         self.show()
+        self.video_layer.show()
         QApplication.processEvents()
+        
+        print(f"Video layer winId: {self.video_layer.winId()}, size: {self.video_layer.size()}, visible: {self.video_layer.isVisible()}")
         
         self.thread = GStreamerThread(self.pipeline_str, self.video_layer.winId())
         self.thread.state_changed.connect(lambda s: self.pipeline_ready.emit() if s == "playing" else None)
         self.thread.start()
+        
+        self._setup_layers()
     
     def stop(self):
         if self.thread:
@@ -620,6 +657,7 @@ class CameraNode(Node):
             return
         
         original_pos = cam.position
+        print(original_pos)
         cam.active = False
         active_positions = [c.position for c in self.cameras if c.active]
         
@@ -641,17 +679,13 @@ class CameraNode(Node):
             self._remove_widget(cam)
             found_inactive = True
             while found_inactive:
-                print("AAAAAAAAAAAAAAAAAAAAAAA")
                 found_inactive = False
                 for i in range(len(self.cameras)):
-                    print("Finding cameras to remove")
                     if not self.cameras[i].active and self.cameras[i].position < max_pos:
-                        print("Found it")
                         found_inactive = True
                         self._select_camera(i, True)
                         self._switch_cameras(i + 1, True)
                         self._print_status()
-            self._select_camera(original_pos)
                         
         elif cam.position > max_pos:
             self._remove_widget(cam)
@@ -671,6 +705,10 @@ class CameraNode(Node):
         # Update current selection
         candidates = [p for p in active_positions if p < self.current]
         self.current = max(candidates) if candidates else self.current
+        if self.always_remove_inactive_cams:
+            self._select_camera(original_pos, True)
+            if not self.cameras[self.current].active:
+                self._select_camera(max(candidates), True)
         
         self._update_layout()
     
@@ -787,10 +825,10 @@ class CameraNode(Node):
         max_pos = max(active_positions) if active_positions else cam.position
         
         dims = self.config.layouts[max(max_pos, 0)][self.display_mode][0]
-        x = int(dims[0] * self.container.width())
-        y = int(dims[1] * self.container.height())
-        w = int(dims[2] * self.container.width())
-        h = int(dims[3] * self.container.height())
+        x = round(dims[0] * self.container.width())
+        y = round(dims[1] * self.container.height())
+        w = round(dims[2] * self.container.width())
+        h = round(dims[3] * self.container.height())
         
         use_camera = self.zed_available and self.use_overlay
         pipeline = f"zedxonesrc camera-id={self.config.ids[cam.index]} ! queue ! videoconvert ! queue ! {self.video_sink}" if use_camera else ""
@@ -801,7 +839,9 @@ class CameraNode(Node):
                 self.config.names[cam.index],
                 str(self.config.ids[cam.index]),
                 use_camera,
-                self.container
+                self.container,
+                self.config.ratios[cam.index][0],
+                self.config.ratios[cam.index][1]
             )
             widget.setGeometry(x, y, w, h)
             widget.show()
@@ -898,7 +938,7 @@ class CameraNode(Node):
         # Print current camera status
         print(f"\nCurrent: {self.current}")
         print(f"{'Pos':>3} | {'Active':>6} | {'Index':>5} | {'ID':>9} | {'Geometry':>20}")
-        print("-" * 60)
+        print(f"{'-' * 4}+{'-' * 8}+{'-' * 7}+{'-' * 11}+{'-' * 26}")
         for cam in self.cameras:
             if cam.widget:
                 g = cam.widget.geometry()
