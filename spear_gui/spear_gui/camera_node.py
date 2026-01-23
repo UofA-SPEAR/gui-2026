@@ -562,18 +562,24 @@ class CameraNode(Node):
         self.create_subscription(String, 'key', self._on_key, 10)
     
     def _check_element(self, name):
-        # Check if GStreamer element exists
         try:
-            return Gst.ElementFactory.make(name, None) is not None
-        except:
+            element = Gst.ElementFactory.make(name, None)
+            if element is not None:
+                return True
+            else:
+                self.get_logger().warn(f"GStreamer element '{name}' not found")
+                return False
+        except Exception as e:
+            self.get_logger().error(f"Failed to check GStreamer element '{name}': {e}")
             return False
-    
+
     def _find_video_sink(self):
-        # Find best available video sink
-        for sink in ['ximagesink', 'xvimagesink', 'glimagesink', 'autovideosink']:
+        sinks = ['ximagesink', 'xvimagesink', 'glimagesink', 'autovideosink']
+        
+        for sink in sinks:
             if self._check_element(sink):
+                print(f"Found video sink: {sink}")
                 return sink
-        return 'fakesink'
     
     def setup_gui(self, parent=None):
         # Initialize GUI container
