@@ -276,10 +276,26 @@ class CameraNode(Node):
 
         self.always_remove_inactive_cams = True
         self.animations = {} 
+        
+        self.key_pub = self.create_publisher(String, "key", 10)
+        self.key_subscription = self.create_subscription(
+            String, 'key', self.key_listener, 10
+        )
 
-        self.zed_available = self.check_gstreamer_element('zedxonesrc')
-        if not self.zed_available:
-            self.get_logger().warn("\033[93mWarning: ZED SDK not detected. Camera display is disabled.\033[0m")
+        self.zed_sources = {
+            "zedxone": "zedxonesrc",
+            "zedxmini": "zedxminisrc",
+        }
+
+        self.available_zed_sources = {
+            name: self.check_gstreamer_element(element)
+            for name, element in self.zed_sources.items()
+        }
+
+        if not any(self.available_zed_sources.values()):
+            self.get_logger().warn(
+                "\033[93mWarning: No ZED SDK cameras detected. Camera display is disabled.\033[0m"
+            )
 
         self.video_sink = self.find_best_video_sink()
         print(f"Using video sink: {self.video_sink}")
@@ -287,19 +303,21 @@ class CameraNode(Node):
         self.use_video_overlay = self.video_sink in ['ximagesink', 'xvimagesink', 'glimagesink']
         if not self.use_video_overlay:
             self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
-        
-        self.key_pub = self.create_publisher(String, "key", 10)
-        self.key_subscription = self.create_subscription(
-            String, 'key', self.key_listener, 10
-        )
-        self.zed_serials = self.get_zed_serials()
+
+        self.zed_serials = {}
+
+        for name, element in self.zed_sources.items():
+            if self.available_zed_sources.get(name):
+                serials = self.get_zed_serials(element)
+                if serials:
+                    self.zed_serials[name] = serials
 
         if not self.zed_serials:
             self.get_logger().warn(
-                "No ZED X One cameras detected. Running in placeholder mode."
+                "No ZED X One or ZED X Mini cameras detected. Running in placeholder mode."
             )
 
-        print(f"Detected ZED serials: {self.zed_serials}")
+        print(f"Detected ZED cameras: {self.zed_serials}")
 
 
     # ------------------------ Setup ------------------------
@@ -392,14 +410,10 @@ class CameraNode(Node):
         unused = [i for i in range(len(self.cameras)) if i not in used]
         return unused[0] if unused else None
     
-    def get_zed_serials(self):
-        """
-        Query available ZED X One serial numbers.
-        This is intentionally conservative.
-        """
+    def get_zed_serials(self, element):
         try:
             from subprocess import check_output
-            output = check_output(["zedxonesrc", "--list"], text=True)
+            output = check_output([element, "--list"], text=True)
             serials = []
             for line in output.splitlines():
                 if "Serial" in line:
@@ -656,7 +670,7 @@ class CameraNode(Node):
         w = round(dims[2] * self.container.width())
         h = round(dims[3] * self.container.height())
 
-        use_camera = self.zed_available and self.use_video_overlay
+        use_camera = self.use_video_overlay
         
         if use_camera:
             pipeline = f"zedxonesrc camera-id={self.config.ids[cam.index]} ! queue ! videoconvert ! queue ! {self.video_sink}"
