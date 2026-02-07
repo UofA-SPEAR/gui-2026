@@ -105,7 +105,7 @@ class GStreamerThread(QThread):
         return True
     
 class GStreamerVideoWidget(QWidget):
-    def __init__(self, pipeline_str, camera_name="", camera_id="", use_overlay=True, parent=None):
+    def __init__(self, pipeline_str, camera_name="", camera_serial="", use_overlay=True, parent=None):
         super().__init__(parent)
         self.pipeline_str = pipeline_str
         self.use_overlay = use_overlay
@@ -125,7 +125,7 @@ class GStreamerVideoWidget(QWidget):
             padding: 2px;
         """)
 
-        self.id_label = QLabel(f"ID: {camera_id}", self)
+        self.id_label = QLabel(f"SN: {camera_serial}", self)
         self.id_label.setAlignment(Qt.AlignCenter)
         self.id_label.setStyleSheet("""
             color: white; 
@@ -193,9 +193,9 @@ class GStreamerVideoWidget(QWidget):
         self.name_label.show() 
         self.id_label.show()   
 
-    def update_labels(self, camera_name, camera_id):
+    def update_labels(self, camera_name, camera_serial):
         self.name_label.setText(camera_name)
-        self.id_label.setText(f"ID: {camera_id}")
+        self.id_label.setText(f"SN: {camera_serial}")
         self.name_label.raise_()
         self.id_label.raise_()
 
@@ -217,8 +217,12 @@ class ResizableContainer(QWidget):
 # ------------------------ Camera Node ------------------------
 
 class CameraConfig:
-    names = ["Placeholder 1", "Placeholder 2", "Placeholder 3", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
-    ids = [305325257, 309256978, 2, 3, 4, 5, 6, 7]
+    names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
+    # Serial numbers (8+ digit numbers identifying the physical camera)
+    serials = [309256978, 305325257, 58896881, 0, 0, 0, 0, 0]
+    default_resolutions = [4, 4, 6, 0, 0, 0, 0, 0]
+    # Camera IDs for GStreamer (0, 1, 2, the order ZED SDK sees them, this should be seperate for different source types)
+    camera_ids = [0, 1, 0, 3, 4, 5, 6, 7]
     ratios = [[1920, 1080]] * 8
     layout = [
         [[[0,1,1,1],[0,0,1,1],[1/6,0,5/6,1],[1/6,0,5/6,1],[1/6,0,5/6,1],[1/6,0,5/6,1],[1/6,0,4/6,1]],
@@ -248,14 +252,16 @@ class CameraConfig:
     ]
 
 class Camera:
-    def __init__(self, position):
-        self.serial = None
-        self.id = 0
-        self.index = -1
+    def __init__(self, position, default_resolution):
+        self.serial = None  # The actual serial number (8+ digits)
+        self.camera_id = 0  # The GStreamer camera-id (0, 1, 2, etc.)
+        self.index = -1     # Index into config arrays
         self.position = position
         self.active = False
         self.widget = None
         self.pipeline = None
+        self.source_type = None
+        self.resolution = default_resolution
     
 class CameraNode(Node):
     def __init__(self):
@@ -266,7 +272,7 @@ class CameraNode(Node):
         self.processing_command = False
 
         self.config = CameraConfig()
-        self.cameras = [Camera(i) for i in range(len(self.config.ids))]
+        self.cameras = [Camera(i, self.config.default_resolutions[i]) for i in range(len(self.config.serials))]
         
         self.camera_current = 0
         self.focused_camera = None
@@ -284,13 +290,18 @@ class CameraNode(Node):
 
         self.zed_sources = {
             "zedxone": "zedxonesrc",
-            "zedxmini": "zedxminisrc",
+            "zed": "zedsrc",
         }
 
         self.available_zed_sources = {
             name: self.check_gstreamer_element(element)
             for name, element in self.zed_sources.items()
         }
+
+        print(f"Checking available ZED GStreamer elements:")
+        for name, element in self.zed_sources.items():
+            status = "✓ Available" if self.available_zed_sources[name] else "✗ Not found"
+            print(f"  {element}: {status}")
 
         if not any(self.available_zed_sources.values()):
             self.get_logger().warn(
@@ -304,20 +315,17 @@ class CameraNode(Node):
         if not self.use_video_overlay:
             self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
 
-        self.zed_serials = {}
+        # Manual mapping: serial number -> (camera type, gstreamer source, camera-id)
+        # camera-id is the index that the ZED SDK assigns to each camera
+        self.camera_info = {
+            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0},
+            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1},
+            58896881: {"type": "ZED X Mini", "source": "zedsrc", "camera_id": 0},  # First ZED X Mini = ID 0 for that source
+        }
 
-        for name, element in self.zed_sources.items():
-            if self.available_zed_sources.get(name):
-                serials = self.get_zed_serials(element)
-                if serials:
-                    self.zed_serials[name] = serials
-
-        if not self.zed_serials:
-            self.get_logger().warn(
-                "No ZED X One or ZED X Mini cameras detected. Running in placeholder mode."
-            )
-
-        print(f"Detected ZED cameras: {self.zed_serials}")
+        print(f"\nConfigured cameras:")
+        for serial, info in self.camera_info.items():
+            print(f"  Serial {serial}: {info['type']} using {info['source']} (camera-id={info['camera_id']})")
 
 
     # ------------------------ Setup ------------------------
@@ -409,18 +417,6 @@ class CameraNode(Node):
         used = {cam.index for cam in self.cameras if cam.index != -1}
         unused = [i for i in range(len(self.cameras)) if i not in used]
         return unused[0] if unused else None
-    
-    def get_zed_serials(self, element):
-        try:
-            from subprocess import check_output
-            output = check_output([element, "--list"], text=True)
-            serials = []
-            for line in output.splitlines():
-                if "Serial" in line:
-                    serials.append(line.split(":")[-1].strip())
-            return serials
-        except Exception:
-            return []
 
 
     # ------------------------ Activation / Deactivation ------------------------
@@ -435,26 +431,43 @@ class CameraNode(Node):
         
         cam = next(cam for cam in self.cameras if not cam.active)
         cam.active = True
-
-        # used_serials = {c.serial for c in self.cameras if c.serial}
-
-        # available_serials = [
-        #     s for s in self.zed_serials if s not in used_serials
-        # ]
-
-        # if not available_serials:
-        #     print("No additional ZED cameras available.")
-        #     return
-
-        # cam = inactive[0]
-        # cam.active = True
-        # cam.serial = available_serials[0]
-        # self.camera_current = cam.position
-
+            
         active_indexes = {c.index for c in self.cameras if c.active and c is not cam}
         if cam.index in (-1, *active_indexes):
             cam.index = self.get_available_index()
-        cam.serial = self.config.ids[cam.index]
+        
+        # Set the serial number from config
+        cam.serial = self.config.serials[cam.index]
+        
+        # Get camera info from the mapping
+        if cam.serial in self.camera_info:
+            info = self.camera_info[cam.serial]
+            cam.source_type = info["source"]
+            cam.camera_id = info["camera_id"]
+            
+            # Check if the required GStreamer element is available
+            source_available = False
+            for name, element in self.zed_sources.items():
+                if element == cam.source_type and self.available_zed_sources.get(name):
+                    source_available = True
+                    break
+            
+            if source_available:
+                print(f"Activated {info['type']} (Serial: {cam.serial}, Source: {cam.source_type}, Camera ID: {cam.camera_id})")
+            else:
+                print(f"ERROR: {info['type']} requires {cam.source_type} which is not available!")
+                cam.source_type = None
+                cam.camera_id = 0
+        else:
+            # Fallback for unconfigured cameras
+            cam.camera_id = self.config.camera_ids[cam.index]
+            if self.available_zed_sources.get("zedxone"):
+                cam.source_type = "zedxonesrc"
+                print(f"Warning: Using zedxonesrc for unknown camera serial {cam.serial}")
+            else:
+                cam.source_type = None
+                print(f"Warning: No ZED source available for camera {cam.serial}")
+        
         self.camera_current = cam.position
 
         print(f'Current Camera: {self.camera_current}')
@@ -613,13 +626,13 @@ class CameraNode(Node):
         if cam_current.widget and hasattr(cam_current.widget, 'update_labels'):
             cam_current.widget.update_labels(
                 self.config.names[cam_current.index] if cam_current.index >= 0 else "Unknown",
-                str(self.config.ids[cam_current.index]) if cam_current.index >= 0 else "N/A"
+                str(self.config.serials[cam_current.index]) if cam_current.index >= 0 else "N/A"
             )
         
         if cam_target.widget and hasattr(cam_target.widget, 'update_labels'):
             cam_target.widget.update_labels(
                 self.config.names[cam_target.index] if cam_target.index >= 0 else "Unknown",
-                str(self.config.ids[cam_target.index]) if cam_target.index >= 0 else "N/A"
+                str(self.config.serials[cam_target.index]) if cam_target.index >= 0 else "N/A"
             )
         
         self.camera_current = self.camera_current  # Keep current selection on same position
@@ -648,15 +661,22 @@ class CameraNode(Node):
             active_indexes = [c.index for c in list(filter(lambda c: c.active, self.cameras))]
             if current_index not in active_indexes or current_index == start_index:
                 cam.index = current_index
+                cam.serial = self.config.serials[cam.index]
+                
+                # Update camera info
+                if cam.serial in self.camera_info:
+                    info = self.camera_info[cam.serial]
+                    cam.source_type = info["source"]
+                    cam.camera_id = info["camera_id"]
+                else:
+                    cam.camera_id = self.config.camera_ids[cam.index]
                 break
 
         if cam.widget and hasattr(cam.widget, 'update_labels'):
             cam.widget.update_labels(
-                self.self.config.names[cam.index],
-                str(self.config.ids[cam.index])
+                self.config.names[cam.index],
+                str(self.config.serials[cam.index])
             )
-        
-        # self.set_camera_positions()
 
     # ------------------------ Camera Widgets ------------------------
 
@@ -670,10 +690,12 @@ class CameraNode(Node):
         w = round(dims[2] * self.container.width())
         h = round(dims[3] * self.container.height())
 
-        use_camera = self.use_video_overlay
+        use_camera = self.use_video_overlay and cam.source_type is not None
         
         if use_camera:
-            pipeline = f"zedxonesrc camera-id={self.config.ids[cam.index]} ! queue ! videoconvert ! queue ! {self.video_sink}"
+            # Use camera_id (0, 1, 2) NOT the serial number
+            print(f"Creating pipeline with {cam.source_type} for camera-id={cam.camera_id} (Serial: {cam.serial})")
+            pipeline = f"{cam.source_type} camera-id={cam.camera_id} ! queue ! videoconvert ! queue ! {self.video_sink} force-aspect-ratio=true"
         else:
             pipeline = None
 
@@ -681,7 +703,7 @@ class CameraNode(Node):
             camera_feed_widget = GStreamerVideoWidget(
                 pipeline if pipeline else "", 
                 camera_name=self.config.names[cam.index],
-                camera_id=str(self.config.ids[cam.index]),
+                camera_serial=str(cam.serial),
                 use_overlay=use_camera, 
                 parent=self.container
             )
@@ -812,8 +834,8 @@ class CameraNode(Node):
 
     def print_infomation(self):
         print(f"Current Selected: {self.camera_current}")
-        print(f"{'Pos':>3} | {'Active':>6} | {'Index':>5} | {'ID':>9} | {'X':>4} | {'Y':>4} | {'W':>4} | {'H':>4}")
-        print("-" * 50)
+        print(f"{'Pos':>3} | {'Active':>6} | {'Index':>5} | {'Serial':>9} | {'CamID':>5} | {'X':>4} | {'Y':>4} | {'W':>4} | {'H':>4}")
+        print("-" * 75)
         for cam in self.cameras:
             widget = cam.widget
             if widget:
@@ -822,7 +844,8 @@ class CameraNode(Node):
             else:
                 x = y = w = h = 0
             active_str = "\033[92mTrue  \033[0m" if cam.active else "\033[91mFalse \033[0m"
-            print(f"{cam.position:>3} | {active_str} | {cam.index:>5} | {cam.id:>9} | {x:>4} | {y:>4} | {w:>4} | {h:>4}")
+            serial_str = str(cam.serial) if cam.serial else "N/A"
+            print(f"{cam.position:>3} | {active_str} | {cam.index:>5} | {serial_str:>9} | {cam.camera_id:>5} | {x:>4} | {y:>4} | {w:>4} | {h:>4}")
 
 
 def main():
