@@ -11,6 +11,10 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from std_msgs.msg import String
 from collections import deque
 
+import os
+font_path = os.path.join(os.path.dirname(__file__), "Oxanium-VariableFont.ttf")
+QFontDatabase.addApplicationFont(font_path)
+
 # ------------------------ Key Event Filter ------------------------
 class KeyEventFilter(QObject):
     def __init__(self, node):
@@ -128,6 +132,7 @@ class GStreamerVideoWidget(QWidget):
             color: white;
             font-size: 14px;
             font-weight: bold;
+            font-family: 'Oxanium';
             background-color: rgba(0,0,0,150);
             padding: 2px;
         """)
@@ -137,8 +142,19 @@ class GStreamerVideoWidget(QWidget):
         self.id_label.setStyleSheet("""
             color: white;
             font-size: 10px;
+            font-family: 'Oxanium';
             background-color: rgba(0,0,0,150);
             padding: 2px;
+        """)
+
+        self.stats_label = QLabel("", self)
+        self.stats_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.stats_label.setStyleSheet("""
+            color: white;
+            font-size: 11px;
+            font-family: 'Oxanium';
+            background-color: rgba(0,0,0,150);
+            padding: 3px;
         """)
 
         if not use_overlay:
@@ -149,6 +165,7 @@ class GStreamerVideoWidget(QWidget):
             self.placeholder_label.setStyleSheet("""
                 color: white;
                 font-size: 16px;
+                font-family: 'Oxanium';
                 background-color: #1a1a1a;
             """)
 
@@ -170,6 +187,10 @@ class GStreamerVideoWidget(QWidget):
         id_height = 15
         self.id_label.setGeometry(3, 3 + name_height, w - 6, id_height)
 
+        stats_height = 52
+        self.stats_label.setGeometry(3, h - stats_height - 3, 160, stats_height)
+        self.stats_label.raise_()
+
         self.name_label.raise_()
         self.id_label.raise_()
 
@@ -181,7 +202,6 @@ class GStreamerVideoWidget(QWidget):
             w - 2 * bw,
             h - 2 * bw
         )
-
 
     def start(self):
         if not self.use_overlay:
@@ -229,6 +249,14 @@ class GStreamerVideoWidget(QWidget):
     def update_labels(self, camera_name, camera_serial):
         self.name_label.setText(camera_name)
         self.id_label.setText(f"SN: {camera_serial}")
+    
+    def update_stats(self, exposure, gain, gamma):
+        self.stats_label.setText(
+            f"Exposure: {exposure} µs\n"
+            f"Gain: {gain}\n"
+            f"Gamma: {gamma}"
+        )
+
 
     def set_border_color(self, color):
         self.border_color = QColor(color)
@@ -320,6 +348,7 @@ class Camera:
         self.resolution = default_resolution
         self.exposure = 5000
         self.gain = 40
+        self.gamma = 2
     
 class CameraNode(Node):
     def __init__(self):
@@ -377,11 +406,11 @@ class CameraNode(Node):
         # camera-id is the index that the ZED SDK assigns to each camera
         self.camera_info = {
             309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
-                        "exposure": 5000, "gain": 40},   # exposure in microseconds
+                        "exposure": 10000, "gain": 30000, "gamma": 2},   # exposure in microseconds
             305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
-                        "exposure": 5000, "gain": 40},
+                        "exposure": 10000, "gain": 30000, "gamma": 2},
             58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
-                        "exposure": 50,   "gain": 40},   # exposure as percentage 0-100
+                        "exposure": 50,   "gain": 30000, "gamma": 2},   # exposure as percentage 0-100
         }
 
         print(f"\nConfigured cameras:")
@@ -468,17 +497,23 @@ class CameraNode(Node):
                     self.switching_mode = False
                 else:
                     print(f'Failed to swap with {key}')
-            case 'i':  # increase exposure
-                self.adjust_current_camera('exposure', +3000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else +30)
+            case 'o':  # increase exposure
+                self.adjust_current_camera('exposure', +10000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else +30)
                 self.restart_current_camera()
-            case 'k':  # decrease exposure
-                self.adjust_current_camera('exposure', -3000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else -30)
+            case 'l':  # decrease exposure
+                self.adjust_current_camera('exposure', -10000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else -30)
                 self.restart_current_camera()
-            case 'l':  # increase gain
-                self.adjust_current_camera('gain', +5)
+            case 'i':  # increase gain
+                self.adjust_current_camera('gain', +5000)
                 self.restart_current_camera()
-            case 'j':  # decrease gain
-                self.adjust_current_camera('gain', -5)
+            case 'k':  # decrease gain
+                self.adjust_current_camera('gain', -5000)
+                self.restart_current_camera()
+            case 'u':  # increase gamma
+                self.adjust_current_camera('gamma', +7)
+                self.restart_current_camera()
+            case 'j':  # decrease gamma
+                self.adjust_current_camera('gamma', -7)
                 self.restart_current_camera()
         self.print_infomation()
         self.cleanup_orphaned_widgets()
@@ -497,6 +532,8 @@ class CameraNode(Node):
         current = getattr(cam, attr, 0)
         setattr(cam, attr, max(0, current + delta))
         print(f"  {attr} -> {getattr(cam, attr)}")
+        if cam.widget and hasattr(cam.widget, 'update_stats'):
+            cam.widget.update_stats(cam.exposure, cam.gain, cam.gamma)
 
     def restart_current_camera(self):
         cam = self.cameras[self.camera_current]
@@ -531,8 +568,9 @@ class CameraNode(Node):
             cam.camera_id = info["camera_id"]
             cam.source_type = info["source"]
             cam.camera_id   = info["camera_id"]
-            cam.exposure    = info.get("exposure", 5000)
-            cam.gain        = info.get("gain", 40)
+            cam.exposure    = info.get("exposure")
+            cam.gain        = info.get("gain")
+            cam.gamma       = info.get("gamma")
             
             source_available = False
             for name, element in self.zed_sources.items():
@@ -611,7 +649,7 @@ class CameraNode(Node):
                 if not hasattr(cam.widget, 'placeholder_label') or cam.widget.placeholder_label is None:
                     cam.widget.placeholder_label = QLabel("Inactive", cam.widget)
                     cam.widget.placeholder_label.setAlignment(Qt.AlignCenter)
-                    cam.widget.placeholder_label.setStyleSheet("color: red; font-size: 16px; background-color: #1a1a1a;")
+                    cam.widget.placeholder_label.setStyleSheet("color: red; font-size: 16px; font-family: Oxanium; background-color: #1a1a1a;")
                     cam.widget.placeholder_label.setGeometry(0, 0, cam.widget.width(), cam.widget.height())
                 else:
                     cam.widget.placeholder_label.setText("Inactive")
@@ -782,6 +820,7 @@ class CameraNode(Node):
             cid = cam.camera_id
             exp = cam.exposure
             gain = cam.gain
+            gamma = cam.gamma
 
             if src == "zedxonesrc":
                 cam_props = (
@@ -790,7 +829,8 @@ class CameraNode(Node):
                     f"ctrl-auto-exposure-range-min={exp} "
                     f"ctrl-auto-exposure-range-max={exp} "
                     f"ctrl-exposure-time={exp} "
-                    f"ctrl-analog-gain={gain}"
+                    f"ctrl-analog-gain={gain} "
+                    f"ctrl-gamma={gamma}"
                 )
             else:
                 cam_props = f"camera-id={cid} aec-agc=false exposure={exp} gain={gain}"
@@ -824,6 +864,8 @@ class CameraNode(Node):
                 camera_feed_widget.start()
             
             cam.widget = camera_feed_widget
+            if use_camera and hasattr(camera_feed_widget, 'update_stats'):
+                camera_feed_widget.update_stats(cam.exposure, cam.gain, cam.gamma)
         except Exception as e:
             self.get_logger().error(f"Failed to create camera widget: {e}")
             placeholder = QWidget(self.container)
