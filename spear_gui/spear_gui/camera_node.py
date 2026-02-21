@@ -7,7 +7,7 @@ import rclpy
 from rclpy.node import Node
 from PySide6.QtWidgets import QApplication, QWidget, QLabel
 from PySide6.QtCore import QThread, Signal, QTimer, QVariantAnimation, QEasingCurve, Qt, QObject, QEvent
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter, QPen
 from std_msgs.msg import String
 from collections import deque
 
@@ -103,106 +103,164 @@ class GStreamerThread(QThread):
             self.loop.quit()
 
         return True
-    
+
 class GStreamerVideoWidget(QWidget):
     def __init__(self, pipeline_str, camera_name="", camera_serial="", use_overlay=True, parent=None):
         super().__init__(parent)
+
         self.pipeline_str = pipeline_str
         self.use_overlay = use_overlay
         self.thread = None
         self.placeholder_label = None
-        
-        self.setStyleSheet("background-color: black; border: 3px solid red;")
-        
+        self.video_resize_enabled = True
+
+        self.setStyleSheet("background-color: black;")
+        self.border_color = QColor("red")
+        self.border_width = 3
+
+        self.video_surface = QWidget(self)
+        self.video_surface.setAttribute(Qt.WA_NativeWindow)
+        self.video_surface.setStyleSheet("background:black;")
+
         self.name_label = QLabel(camera_name, self)
         self.name_label.setAlignment(Qt.AlignCenter)
         self.name_label.setStyleSheet("""
-            color: white; 
-            font-size: 14px; 
-            font-weight: bold; 
-            background-color: rgba(0, 0, 0, 150); 
-            border: none;
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            background-color: rgba(0,0,0,150);
             padding: 2px;
         """)
 
         self.id_label = QLabel(f"SN: {camera_serial}", self)
         self.id_label.setAlignment(Qt.AlignCenter)
         self.id_label.setStyleSheet("""
-            color: white; 
-            font-size: 10px; 
-            background-color: rgba(0, 0, 0, 150); 
-            border: none;
+            color: white;
+            font-size: 10px;
+            background-color: rgba(0,0,0,150);
             padding: 2px;
         """)
-        
-        if use_overlay:
-            self.setAttribute(Qt.WA_NativeWindow)
-        else:
-            self.placeholder_label = QLabel("No Camera\nDetected", self)
+
+        if not use_overlay:
+            self.placeholder_label = QLabel(
+                "No Camera\nDetected", self
+            )
             self.placeholder_label.setAlignment(Qt.AlignCenter)
-            self.placeholder_label.setStyleSheet("color: white; font-size: 16px; background-color: #1a1a1a;")
+            self.placeholder_label.setStyleSheet("""
+                color: white;
+                font-size: 16px;
+                background-color: #1a1a1a;
+            """)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        
+
+        w, h = self.width(), self.height()
+
+        bw = self.border_width
+        self.video_surface.setGeometry(
+            bw, bw,
+            w - 2 * bw,
+            h - 2 * bw
+        )
+
         name_height = 20
-        self.name_label.setGeometry(0, 5, self.width(), name_height)
-        
+        self.name_label.setGeometry(3, 3, w - 6, name_height)
+
         id_height = 15
-        self.id_label.setGeometry(0, 5 + name_height, self.width(), id_height)
-        
+        self.id_label.setGeometry(3, 3 + name_height, w - 6, id_height)
+
+        self.name_label.raise_()
+        self.id_label.raise_()
+
         if self.placeholder_label:
-            self.placeholder_label.setGeometry(0, 0, self.width(), self.height())
+            self.placeholder_label.setGeometry(0, 0, w, h)
+            self.placeholder_label.raise_()
+
+        self.update_video_render_rectangle(
+            w - 2 * bw,
+            h - 2 * bw
+        )
+
 
     def start(self):
         if not self.use_overlay:
-            print("Overlay disabled, showing placeholder")
-            self.name_label.raise_()
-            self.id_label.raise_() 
             return
-            
+
         self.show()
         QApplication.processEvents()
-        
-        print(f"Widget winId: {self.winId()}, size: {self.size()}, visible: {self.isVisible()}")
-        self.thread = GStreamerThread(self.pipeline_str, self.winId(), parent=self)
+
+        self.thread = GStreamerThread(
+            self.pipeline_str,
+            self.video_surface.winId(),
+            parent=self
+        )
+
         self.thread.finished.connect(self.on_finished)
         self.thread.error_occured.connect(self.on_error)
         self.thread.start()
-        
-        self.name_label.raise_()
-        self.id_label.raise_()
 
     def stop(self):
         if self.thread:
             self.thread.stop()
             self.thread.wait(1000)
 
+    def update_video_render_rectangle(self, w, h):
+        if not self.thread or not self.thread.pipeline:
+            return
+
+        sink = self.thread.pipeline.get_by_interface(
+            GstVideo.VideoOverlay.__gtype__
+        )
+
+        if sink:
+            try:
+                sink.set_render_rectangle(0, 0, w, h)
+                sink.expose()
+            except Exception:
+                pass
+
     def on_error(self, error_msg):
-        print(f"GStreamer error: {error_msg}")
-        if self.placeholder_label:
-            self.placeholder_label.setText("An Error\nOccured")
+        print("GStreamer error:", error_msg)
 
     def on_finished(self):
-        print("GStreamer pipeline finished.")
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.name_label.raise_()
-        self.id_label.raise_()
-        self.name_label.show() 
-        self.id_label.show()   
+        print("Pipeline finished.")
 
     def update_labels(self, camera_name, camera_serial):
         self.name_label.setText(camera_name)
         self.id_label.setText(f"SN: {camera_serial}")
-        self.name_label.raise_()
-        self.id_label.raise_()
 
     def set_border_color(self, color):
-        self.setStyleSheet(f"background-color: black; border: 3px solid {color};")
-        if self.placeholder_label:
-            self.placeholder_label.setStyleSheet(f"color: white; font-size: 16px; background-color: #1a1a1a; border: 3px solid {color};")
+        self.border_color = QColor(color)
+        self.update()
+    
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        pen = QPen(self.border_color)
+        pen.setWidth(self.border_width)
+        painter.setPen(pen)
+
+        rect = self.rect().adjusted(
+            self.border_width // 2,
+            self.border_width // 2,
+            -self.border_width // 2,
+            -self.border_width // 2
+        )
+
+        painter.drawRect(rect)
+
+    def apply_video_resize(self):
+        if not self.video_resize_enabled:
+            return
+        bw = self.border_width
+        self.update_video_render_rectangle(
+            self.width() - 2 * bw,
+            self.height() - 2 * bw
+        )
+
+
 
 class ResizableContainer(QWidget):
     resized = Signal()
@@ -218,10 +276,8 @@ class ResizableContainer(QWidget):
 
 class CameraConfig:
     names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
-    # Serial numbers (8+ digit numbers identifying the physical camera)
     serials = [309256978, 305325257, 58896881, 0, 0, 0, 0, 0]
     default_resolutions = [4, 4, 6, 0, 0, 0, 0, 0]
-    # Camera IDs for GStreamer (0, 1, 2, the order ZED SDK sees them, this should be seperate for different source types)
     camera_ids = [0, 1, 0, 3, 4, 5, 6, 7]
     ratios = [[1920, 1080]] * 8
     layout = [
@@ -262,6 +318,8 @@ class Camera:
         self.pipeline = None
         self.source_type = None
         self.resolution = default_resolution
+        self.exposure = 5000
+        self.gain = 40
     
 class CameraNode(Node):
     def __init__(self):
@@ -318,9 +376,12 @@ class CameraNode(Node):
         # Manual mapping: serial number -> (camera type, gstreamer source, camera-id)
         # camera-id is the index that the ZED SDK assigns to each camera
         self.camera_info = {
-            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0},
-            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1},
-            58896881: {"type": "ZED X Mini", "source": "zedsrc", "camera_id": 0},  # First ZED X Mini = ID 0 for that source
+            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
+                        "exposure": 5000, "gain": 40},   # exposure in microseconds
+            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
+                        "exposure": 5000, "gain": 40},
+            58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
+                        "exposure": 50,   "gain": 40},   # exposure as percentage 0-100
         }
 
         print(f"\nConfigured cameras:")
@@ -407,6 +468,18 @@ class CameraNode(Node):
                     self.switching_mode = False
                 else:
                     print(f'Failed to swap with {key}')
+            case 'i':  # increase exposure
+                self.adjust_current_camera('exposure', +3000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else +30)
+                self.restart_current_camera()
+            case 'k':  # decrease exposure
+                self.adjust_current_camera('exposure', -3000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else -30)
+                self.restart_current_camera()
+            case 'l':  # increase gain
+                self.adjust_current_camera('gain', +5)
+                self.restart_current_camera()
+            case 'j':  # decrease gain
+                self.adjust_current_camera('gain', -5)
+                self.restart_current_camera()
         self.print_infomation()
         self.cleanup_orphaned_widgets()
         QTimer.singleShot(20, self.process_command_queue)
@@ -418,10 +491,24 @@ class CameraNode(Node):
         unused = [i for i in range(len(self.cameras)) if i not in used]
         return unused[0] if unused else None
 
+    def adjust_current_camera(self, attr, delta):
+        cam = self.cameras[self.camera_current]
+        if not cam.active: return
+        current = getattr(cam, attr, 0)
+        setattr(cam, attr, max(0, current + delta))
+        print(f"  {attr} -> {getattr(cam, attr)}")
+
+    def restart_current_camera(self):
+        cam = self.cameras[self.camera_current]
+        if not cam.active or not cam.widget: return
+        geom = cam.widget.geometry()
+        self.remove_widget(cam)
+        self.create_camera_widget(cam)
+        cam.widget.setGeometry(geom)
+
 
     # ------------------------ Activation / Deactivation ------------------------
 
-    # Activates the lowest position camera with the lowest camera index.
     def activate_camera(self):
         inactive = [c for c in self.cameras if not c.active]
 
@@ -436,16 +523,17 @@ class CameraNode(Node):
         if cam.index in (-1, *active_indexes):
             cam.index = self.get_available_index()
         
-        # Set the serial number from config
         cam.serial = self.config.serials[cam.index]
         
-        # Get camera info from the mapping
         if cam.serial in self.camera_info:
             info = self.camera_info[cam.serial]
             cam.source_type = info["source"]
             cam.camera_id = info["camera_id"]
+            cam.source_type = info["source"]
+            cam.camera_id   = info["camera_id"]
+            cam.exposure    = info.get("exposure", 5000)
+            cam.gain        = info.get("gain", 40)
             
-            # Check if the required GStreamer element is available
             source_available = False
             for name, element in self.zed_sources.items():
                 if element == cam.source_type and self.available_zed_sources.get(name):
@@ -474,7 +562,6 @@ class CameraNode(Node):
         self.create_camera_widget(cam)
         self.set_camera_positions()
 
-    # Deactivates the current camera and all other cameras past its index if those are inactive.
     def deactivate_camera(self):
         if self.camera_current is None:
             print("No camera currently selected.")
@@ -635,11 +722,10 @@ class CameraNode(Node):
                 str(self.config.serials[cam_target.index]) if cam_target.index >= 0 else "N/A"
             )
         
-        self.camera_current = self.camera_current  # Keep current selection on same position
+        self.camera_current = self.camera_current
         self.switching_mode = False
         
         self.set_camera_positions()
-    
 
     # ------------------------ Move Index ------------------------
 
@@ -663,7 +749,6 @@ class CameraNode(Node):
                 cam.index = current_index
                 cam.serial = self.config.serials[cam.index]
                 
-                # Update camera info
                 if cam.serial in self.camera_info:
                     info = self.camera_info[cam.serial]
                     cam.source_type = info["source"]
@@ -693,9 +778,28 @@ class CameraNode(Node):
         use_camera = self.use_video_overlay and cam.source_type is not None
         
         if use_camera:
-            # Use camera_id (0, 1, 2) NOT the serial number
-            print(f"Creating pipeline with {cam.source_type} for camera-id={cam.camera_id} (Serial: {cam.serial})")
-            pipeline = f"{cam.source_type} camera-id={cam.camera_id} ! queue ! videoconvert ! queue ! {self.video_sink} force-aspect-ratio=true"
+            src = cam.source_type
+            cid = cam.camera_id
+            exp = cam.exposure
+            gain = cam.gain
+
+            if src == "zedxonesrc":
+                cam_props = (
+                    f"camera-id={cid} "
+                    f"ctrl-auto-exposure=false "
+                    f"ctrl-auto-exposure-range-min={exp} "
+                    f"ctrl-auto-exposure-range-max={exp} "
+                    f"ctrl-exposure-time={exp} "
+                    f"ctrl-analog-gain={gain}"
+                )
+            else:
+                cam_props = f"camera-id={cid} aec-agc=false exposure={exp} gain={gain}"
+
+            pipeline = (
+                f"{src} {cam_props} "
+                f"! queue ! videoconvert ! videoscale "
+                f"! {self.video_sink} force-aspect-ratio=true"
+            )
         else:
             pipeline = None
 
@@ -791,7 +895,6 @@ class CameraNode(Node):
     def remove_widget(self, cam):
         # Remove widget from camera
         if cam.widget:
-            # self.anim_manager.stop(cam.widget)
             if hasattr(cam.widget, 'stop'):
                 cam.widget.stop()
             cam.widget.hide()
@@ -803,7 +906,7 @@ class CameraNode(Node):
             return
 
         cam = next((cam for cam in self.cameras if cam.widget == widget), None)
-        if not cam: #or not cam.active:
+        if not cam:
             return
 
         self.stop_animation_for_widget(widget)
@@ -829,6 +932,16 @@ class CameraNode(Node):
         animation.valueChanged.connect(update_geometry)
         animation.start()
         self.animations[id(widget)] = animation
+
+        if hasattr(widget, "video_resize_enabled"):
+            widget.video_resize_enabled = False
+
+        def finish_animation():
+            if hasattr(widget, "video_resize_enabled"):
+                widget.video_resize_enabled = True
+                widget.apply_video_resize()
+
+        animation.finished.connect(finish_animation)
 
     # ------------------------ Print Information ------------------------
 
