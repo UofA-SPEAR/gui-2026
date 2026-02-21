@@ -137,7 +137,7 @@ class GStreamerVideoWidget(QWidget):
         self.id_label.setStyleSheet("""
             color: white;
             font-size: 10px;
-            font-family: 'Oxanium Regular';
+            font-family: 'Oxanium';
             background-color: rgba(0,0,0,150);
             padding: 2px;
         """)
@@ -147,7 +147,7 @@ class GStreamerVideoWidget(QWidget):
         self.stats_label.setStyleSheet("""
             color: white;
             font-size: 11px;
-            font-family: 'Oxanium Regular';
+            font-family: 'Oxanium';
             background-color: rgba(0,0,0,150);
             padding: 3px;
         """)
@@ -160,7 +160,7 @@ class GStreamerVideoWidget(QWidget):
             self.placeholder_label.setStyleSheet("""
                 color: white;
                 font-size: 16px;
-                font-family: 'Oxanium Regular';
+                font-family: 'Oxanium';
                 background-color: #1a1a1a;
             """)
 
@@ -644,7 +644,7 @@ class CameraNode(Node):
                 if not hasattr(cam.widget, 'placeholder_label') or cam.widget.placeholder_label is None:
                     cam.widget.placeholder_label = QLabel("Inactive", cam.widget)
                     cam.widget.placeholder_label.setAlignment(Qt.AlignCenter)
-                    cam.widget.placeholder_label.setStyleSheet("color: red; font-size: 16px; font-family: Oxanium Regular; background-color: #1a1a1a;")
+                    cam.widget.placeholder_label.setStyleSheet("color: red; font-size: 16px; font-family: Oxanium; background-color: #1a1a1a;")
                     cam.widget.placeholder_label.setGeometry(0, 0, cam.widget.width(), cam.widget.height())
                 else:
                     cam.widget.placeholder_label.setText("Inactive")
