@@ -7,13 +7,9 @@ import rclpy
 from rclpy.node import Node
 from PySide6.QtWidgets import QApplication, QWidget, QLabel
 from PySide6.QtCore import QThread, Signal, QTimer, QVariantAnimation, QEasingCurve, Qt, QObject, QEvent
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QFontDatabase
 from std_msgs.msg import String
 from collections import deque
-
-import os
-font_path = os.path.join(os.path.dirname(__file__), "Oxanium-VariableFont.ttf")
-QFontDatabase.addApplicationFont(font_path)
 
 # ------------------------ Key Event Filter ------------------------
 class KeyEventFilter(QObject):
@@ -131,8 +127,7 @@ class GStreamerVideoWidget(QWidget):
         self.name_label.setStyleSheet("""
             color: white;
             font-size: 14px;
-            font-weight: bold;
-            font-family: 'Oxanium';
+            font-family: 'Oxanium SemiBold';
             background-color: rgba(0,0,0,150);
             padding: 2px;
         """)
@@ -142,7 +137,7 @@ class GStreamerVideoWidget(QWidget):
         self.id_label.setStyleSheet("""
             color: white;
             font-size: 10px;
-            font-family: 'Oxanium';
+            font-family: 'Oxanium Regular';
             background-color: rgba(0,0,0,150);
             padding: 2px;
         """)
@@ -152,7 +147,7 @@ class GStreamerVideoWidget(QWidget):
         self.stats_label.setStyleSheet("""
             color: white;
             font-size: 11px;
-            font-family: 'Oxanium';
+            font-family: 'Oxanium Regular';
             background-color: rgba(0,0,0,150);
             padding: 3px;
         """)
@@ -165,7 +160,7 @@ class GStreamerVideoWidget(QWidget):
             self.placeholder_label.setStyleSheet("""
                 color: white;
                 font-size: 16px;
-                font-family: 'Oxanium';
+                font-family: 'Oxanium Regular';
                 background-color: #1a1a1a;
             """)
 
@@ -649,7 +644,7 @@ class CameraNode(Node):
                 if not hasattr(cam.widget, 'placeholder_label') or cam.widget.placeholder_label is None:
                     cam.widget.placeholder_label = QLabel("Inactive", cam.widget)
                     cam.widget.placeholder_label.setAlignment(Qt.AlignCenter)
-                    cam.widget.placeholder_label.setStyleSheet("color: red; font-size: 16px; font-family: Oxanium; background-color: #1a1a1a;")
+                    cam.widget.placeholder_label.setStyleSheet("color: red; font-size: 16px; font-family: Oxanium Regular; background-color: #1a1a1a;")
                     cam.widget.placeholder_label.setGeometry(0, 0, cam.widget.width(), cam.widget.height())
                 else:
                     cam.widget.placeholder_label.setText("Inactive")
@@ -1008,6 +1003,11 @@ def main():
     node = CameraNode()
 
     app = QApplication([])
+
+    import os
+    font_path = os.path.join(os.path.dirname(__file__), "Oxanium-VariableFont.ttf")
+    QFontDatabase.addApplicationFont(font_path)
+
 
     key_filter = KeyEventFilter(node)
     app.installEventFilter(key_filter)
