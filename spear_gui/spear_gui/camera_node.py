@@ -5,21 +5,22 @@ from gi.repository import Gst, GstVideo, GLib
 import sys
 import rclpy
 from rclpy.node import Node
-from PySide6.QtWidgets import QApplication, QWidget, QLabel
+from PySide6.QtWidgets import QApplication, QWidget, QLabel, QSlider, QPushButton, QGraphicsDropShadowEffect
 from PySide6.QtCore import QThread, Signal, QTimer, QVariantAnimation, QEasingCurve, Qt, QObject, QEvent, QElapsedTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QFontDatabase
+from PySide6.QtGui import QColor, QPainter, QPen, QFontDatabase, QFont, QPolygonF
+from PySide6.QtCore import QPointF
 from std_msgs.msg import String
 from collections import deque
 from PySide6.QtCore import qInstallMessageHandler
 
 def _qt_message_handler(mode, context, message):
     if 'Painter not active' in message or 'painter' in message.lower() and 'not active' in message.lower():
-        return  # suppress noisy painter warnings from overlay
+        return
     print(message)
 
 qInstallMessageHandler(_qt_message_handler)
 
-# ------------------------ Key Event Filter ------------------------
+# ──────────────────────── Key Event Filter ────────────────────────
 class KeyEventFilter(QObject):
     def __init__(self, node):
         super().__init__()
@@ -41,11 +42,11 @@ class KeyEventFilter(QObject):
             return True
         return False
 
-# ------------------------ GStreamer ------------------------
+# ──────────────────────── GStreamer ────────────────────────
 class GStreamerThread(QThread):
     finished = Signal()
     error_occured = Signal(str)
-    video_loaded = Signal()  # emitted once when first frame is ready
+    video_loaded = Signal()
 
     def __init__(self, pipeline_str, window_id=None, parent=None):
         super().__init__(parent)
@@ -123,63 +124,144 @@ class GStreamerThread(QThread):
         return True
 
 
-# ------------------------ Loading Overlay ------------------------
-
-from dataclasses import dataclass, field
-from typing import List, Optional
-
-@dataclass
+# ──────────────────────── Loading Overlay ────────────────────────
 class Tween:
-    tx: float; ty: float; tw: float; th: float # Tween Geometry (0.0 - 1.0)
-    tween_start: float              # seconds
-    tween_dur:   float              # seconds
-    phase:       str                # 'create' or 'loaded'
-    ease:        object = QEasingCurve.OutQuint
-    color:       object = None      # QColor to lerp to (optional)
+    def __init__(self, x, y, w, h, s, d, p, e, c):
+        self.tx, self.ty, self.tw, self.th = x, y, w, h
+        self.tween_start = s
+        self.tween_dur = d
+        self.phase = p
+        self.ease = e
+        self.color = c
 
-@dataclass
 class RectDef:
-    ix: float; iy: float; iw: float; ih: float 
-    color: object = None
-    tweens: List[Tween] = field(default_factory=list)
+    def __init__(self, x, y, w, h, initial_color, is_uniform_scale, tween):
+        self.ix, self.iy, self.iw, self.ih = x, y, w, h
+        self.color = initial_color
+        self.uniform_scale = is_uniform_scale
+        self.tweens = tween
 
 RECT_DEFS = [
-    RectDef(ix=0.0, iy=0.0, iw=1.0, ih=1.0, color=QColor(20, 20, 20), tweens=[
-        Tween(tx=0.0, ty=-1.0, tw=1.0, th=1.0,
-              tween_start=0.0, tween_dur=0.45,
-              phase='loaded', ease=QEasingCurve.InOutQuint),
+    RectDef(0.00, 0.00, 1.00, 0.50, QColor(20, 20, 20), False, [
+        Tween(0.00, 0.00, 1.00, 0.00, 0.30, 0.50, 'loaded', QEasingCurve.InOutQuint, None)]),
+    RectDef(0.00, 0.50, 1.00, 0.50, QColor(20, 20, 20), False, [
+        Tween(0.00, 1.00, 1.00, 0.00, 0.30, 0.50, 'loaded', QEasingCurve.InOutQuint, None)]),
+    RectDef(0.00, 0.00, 0.50, 1.00, QColor(20, 20, 20), False, [
+        Tween(0.00, 0.00, 0.00, 1.00, 0.30, 0.50, 'loaded', QEasingCurve.InOutQuint, None)]),
+    RectDef(0.50, 0.00, 0.50, 1.00, QColor(20, 20, 20), False, [
+        Tween(1.00, 0.00, 0.00, 1.00, 0.30, 0.50, 'loaded', QEasingCurve.InOutQuint, None)]),
+
+    RectDef(0.00, -0.01, 0.50, 0, QColor(255, 255, 255), True, [
+        Tween(0.30, 0.47, 0.20, 0.01, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.25, 0.45, 0.10, 0.01, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.25, 0.45, 0.00, 0.01, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.50, -0.01, 0.50, 0, QColor(255, 255, 255), True, [
+        Tween(0.50, 0.47, 0.20, 0.01, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.65, 0.45, 0.10, 0.01, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.75, 0.45, 0.00, 0.01, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.00, 1.00, 0.50, 0, QColor(255, 255, 255), True, [
+        Tween(0.30, 0.53 - 0.01, 0.20, 0.01, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.25, 0.55 - 0.01, 0.10, 0.01, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.25, 0.55 - 0.01, 0.00, 0.01, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.50, 1.00, 0.50, 0, QColor(255, 255, 255), True, [
+        Tween(0.50, 0.53 - 0.01, 0.20, 0.01, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.65, 0.55 - 0.01, 0.10, 0.01, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.75, 0.55 - 0.01, 0.00, 0.01, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, None),
     ]),
 
-    RectDef(ix=0.0, iy=0.92, iw=1.0, ih=0.04, color=QColor(50, 50, 50), tweens=[
-        Tween(tx=0.0, ty=-1.0, tw=1.0, th=0.04,
-              tween_start=0.05, tween_dur=0.4,
-              phase='loaded', ease=QEasingCurve.InOutQuint),
+    RectDef(0.00, 0.00, 0.00, 0.50, QColor(255, 255, 255), True, [
+        Tween(0.30, 0.47, 0.005625, 0.03, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.25, 0.45, 0.005625, 0.02, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.25, 0.47, 0.005625, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.00, 0.50, 0.00, 0.50, QColor(255, 255, 255), True, [
+        Tween(0.30, 0.50, 0.005625, 0.03, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.25, 0.53, 0.005625, 0.02, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.25, 0.53, 0.005625, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(1.00, 0.00, 0.00, 0.50, QColor(255, 255, 255), True, [
+        Tween(0.70 - 0.005625, 0.47, 0.005625, 0.03, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.75 - 0.005625, 0.45, 0.005625, 0.02, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.75 - 0.005625, 0.47, 0.005625, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(1.00, 0.00, 0.00, 0.50, QColor(255, 255, 255), True, [
+        Tween(0.70 - 0.005625, 0.50, 0.005625, 0.03, 0.30, 0.25, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.75 - 0.005625, 0.53, 0.005625, 0.02, 0.55, 0.50, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.75 - 0.005625, 0.53, 0.005625, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
     ]),
 
-    RectDef(ix=0.0, iy=0.92, iw=0.0, ih=0.04, color=QColor(180, 180, 180), tweens=[
-        Tween(tx=0.0, ty=0.92, tw=1.0, th=0.04,
-              tween_start=0.0, tween_dur=4.0,
-              phase='create', ease=QEasingCurve.Linear),
-        Tween(tx=0.0, ty=0.92, tw=1.0, th=0.04,
-              tween_start=0.0, tween_dur=0.15,
-              phase='loaded', ease=QEasingCurve.OutQuint,
-              color=QColor(220, 220, 220)),
-        Tween(tx=0.0, ty=-1.0, tw=1.0, th=0.04,
-              tween_start=0.05, tween_dur=0.4,
-              phase='loaded', ease=QEasingCurve.InOutQuint),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(180, 180, 180), True, [
+        Tween(0.50 - 10/1920, 0.50 - 10/1080, 20/1920, 20/1080, 0.00, 0.30, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.23, 0.50 - 10/1080, 20/1920, 20/1080, 0.30, 1.00, 'create', QEasingCurve.OutBack, None),
+        Tween(0.25, 0.50 - 10/1080, 0.005625, 20/1080, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+        Tween(0.25, 0.50, 0.005625, 0, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(180, 180, 180), True, [
+        Tween(0.50 - 10/1920, 0.50 - 10/1080, 20/1920, 20/1080, 0.00, 0.30, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.77 - 20/1920, 0.50 - 10/1080, 20/1920, 20/1080, 0.30, 1.00, 'create', QEasingCurve.OutBack, None),
+        Tween(0.75 - 0.005625, 0.50 - 10/1080, 0.005625, 20/1080, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+        Tween(0.75 - 0.005625, 0.50, 0.005625, 0, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(180, 180, 180), True, [
+        Tween(0.50 - 5/1920, 0.50 - 5/1080, 10/1920, 10/1080, 0.00, 0.30, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.50 - 70/1920, 0.50 - 70/1080, 10/1920, 10/1080, 0.30, 1.00, 'create', QEasingCurve.OutBack, None),
+        Tween(0.50 - 5/1920, 0.50 - 70/1080, 10/1920, 10/1080, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+        Tween(0.50, 0.50, 0.00, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(180, 180, 180), True, [
+        Tween(0.50 - 5/1920, 0.50 - 5/1080, 10/1920, 10/1080, 0.00, 0.30, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.50 + 70/1920, 0.50 - 70/1080, 10/1920, 10/1080, 0.30, 1.00, 'create', QEasingCurve.OutBack, None),
+        Tween(0.50 - 5/1920, 0.50 - 70/1080, 10/1920, 10/1080, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+        Tween(0.50, 0.50, 0.00, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(180, 180, 180), True, [
+        Tween(0.50 - 5/1920, 0.50 - 5/1080, 10/1920, 10/1080, 0.00, 0.30, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.50 - 70/1920, 0.50 + 70/1080, 10/1920, 10/1080, 0.30, 1.00, 'create', QEasingCurve.OutBack, None),
+        Tween(0.50 - 5/1920, 0.50 + 70/1080, 10/1920, 10/1080, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+        Tween(0.50, 0.50, 0.00, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(180, 180, 180), True, [
+        Tween(0.50 - 5/1920, 0.50 - 5/1080, 10/1920, 10/1080, 0.00, 0.30, 'create', QEasingCurve.OutCirc, None),
+        Tween(0.50 + 70/1920, 0.50 + 70/1080, 10/1920, 10/1080, 0.30, 1.00, 'create', QEasingCurve.OutBack, None),
+        Tween(0.50 - 5/1920, 0.50 + 70/1080, 10/1920, 10/1080, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+        Tween(0.50, 0.50, 0.00, 0.00, 0.60, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+    ]),
+
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(120, 120, 120), True, [
+        Tween(0.25 + 0.005625 * 2, 0.45 + 0.01 * 2, 0.05625 - 0.005625 * 2 * 2, 0.0025, 0.30, 0.70, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 2, 0.45 + 0.01 * 2, 0.50 - 0.005625 * 2 * 2, 0.0025, 1.00, 1.00, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 2, 0.45 + 0.01 * 2, 0.50 - 0.005625 * 2 * 2, 0.0025, 0.30, 0.30, 'loaded', QEasingCurve.InOutQuad, QColor(255, 255, 255)),
+        Tween(-0.2 + 0.25 + 0.005625 * 2, 0.45 + 0.01 * 2, 0.00, 0.0025, 0.60, 1.20, 'loaded', QEasingCurve.OutQuint, None),
+    ]),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(120, 120, 120), True, [
+        Tween(0.25 + 0.005625 * 2, 0.55 - 0.01 * 2 - 0.0025, 0.05625 - 0.005625 * 2 * 2, 0.0025, 0.30, 0.70, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 2, 0.55 - 0.01 * 2 - 0.0025, 0.50 - 0.005625 * 2 * 2, 0.0025, 1.00, 1.00, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 2, 0.55 - 0.01 * 2 - 0.0025, 0.50 - 0.005625 * 2 * 2, 0.0025, 0.30, 0.30, 'loaded', QEasingCurve.InOutQuad, QColor(255, 255, 255)),
+        Tween(0.2 + 0.25 + 0.005625 * 2 + 0.50 - 0.005625 * 2 * 2, 0.55 - 0.01 * 2 - 0.0025, 0, 0.0025, 0.60, 1.20, 'loaded', QEasingCurve.OutQuint, None),
+    ]),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(120, 120, 120), True, [
+        Tween(0.25 + 0.005625 * 2, 0.45 + 0.01 * 2, 0.00140625, 0.10 - 0.01 * 2 * 2, 0.30, 0.70, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 2, 0.45 + 0.01 * 2 + 0.10 - 0.01 * 2 * 2, 0.00140625, 0.00, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+    ]),
+    RectDef(0.50, 0.50, 0.00, 0.00, QColor(120, 120, 120), True, [
+        Tween(0.25 + 0.005625 * 2 + 0.05625 - 0.005625 * 2 * 2, 0.45 + 0.01 * 2, 0.00140625, 0.10 - 0.01 * 2 * 2, 0.30, 0.70, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 2 + 0.50 - 0.005625 * 2 * 2 - 0.00140625, 0.45 + 0.01 * 2, 0.00140625, 0.10 - 0.01 * 2 * 2, 1.00, 1.00, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 2 + 0.50 - 0.005625 * 2 * 2 - 0.00140625, 0.45 + 0.01 * 2, 0.00140625, 0.00, 0.30, 0.30, 'loaded', QEasingCurve.OutCirc, QColor(255, 255, 255)),
+    ]),
+    
+    RectDef(0.50, 0.45 + 0.01 * 3, 0.00, 0.10 - 0.01 * 3 * 2, QColor(255, 255, 255), True, [
+        Tween(0.25 + 0.005625 * 3, 0.45 + 0.01 * 3, 0.05625 - 0.005625 * 3 * 2, 0.10 - 0.01 * 3 * 2, 0.30, 0.70, 'create', QEasingCurve.InOutQuad, None),
+        Tween(0.25 + 0.005625 * 3, 0.45 + 0.01 * 3, 0.50 - 0.005625 * 3 * 2, 0.10 - 0.01 * 3 * 2, 1.00, 1.80, 'create', QEasingCurve.InOutCirc, None),
+        Tween(0.25 + 0.005625 * 3, 0.45 + 0.01 * 3, 0.50 - 0.005625 * 3 * 2, 0.10 - 0.01 * 3 * 2, 0.00, 0.30, 'loaded', QEasingCurve.OutCirc, None),
+        Tween(0.50, 0.50, 0.00, 0.00, 0.30, 0.25, 'loaded', QEasingCurve.OutCirc, None),
     ]),
 ]
 
-def _lerp_color(a: QColor, b: QColor, t: float) -> QColor:
-    return QColor(
-        int(a.red()   + (b.red()   - a.red())   * t),
-        int(a.green() + (b.green() - a.green()) * t),
-        int(a.blue()  + (b.blue()  - a.blue())  * t),
-        int(a.alpha() + (b.alpha() - a.alpha()) * t),
-    )
-
 class LoadingRect:
-    """Tracks one rectangle across all its tweens in sequence."""
     def __init__(self, defn: RectDef):
         self.defn   = defn
         self.cur_x  = defn.ix
@@ -211,11 +293,11 @@ class LoadingRect:
 
             elapsed = create_elapsed if tween.phase == 'create' else loaded_elapsed
             if elapsed is None:
-                return  # phase not started yet
+                return
 
             local = elapsed - tween.tween_start
             if local < 0:
-                return  # not started yet
+                return
 
             t = min(1.0, local / tween.tween_dur) if tween.tween_dur > 0 else 1.0
             v = QEasingCurve(tween.ease).valueForProgress(t)
@@ -226,12 +308,16 @@ class LoadingRect:
             self.cur_h = self._tween_start_h + (tween.th - self._tween_start_h) * v
 
             if tween.color is not None:
-                self.cur_color = _lerp_color(self._tween_start_color, tween.color, v)
+                self.cur_color = QColor(
+                    int(self._tween_start_color.red()   + (tween.color.red()   - self._tween_start_color.red())   * v),
+                    int(self._tween_start_color.green() + (tween.color.green() - self._tween_start_color.green()) * v),
+                    int(self._tween_start_color.blue()  + (tween.color.blue()  - self._tween_start_color.blue())  * v),
+                    int(self._tween_start_color.alpha() + (tween.color.alpha() - self._tween_start_color.alpha()) * v),
+                )
 
             if t < 1.0:
                 return
 
-            # Snap and advance to next tween
             self.cur_x = tween.tx; self.cur_y = tween.ty
             self.cur_w = tween.tw; self.cur_h = tween.th
             if tween.color is not None:
@@ -247,12 +333,7 @@ class LoadingRect:
 
 
 class LoadingOverlay(QWidget):
-    """
-    Top-level frameless window that sits above the video surface.
-    'create' phase: timer from widget creation, freezes when video loads.
-    'loaded' phase: timer from first video frame.
-    """
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, cam_w: int = 1920, cam_h: int = 1080):
         super().__init__(parent)
         self.setWindowFlags(
             Qt.FramelessWindowHint |
@@ -262,6 +343,9 @@ class LoadingOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
+        self.cam_w = cam_w
+        self.cam_h = cam_h
+
         self._create_timer  = None
         self._create_frozen = None
         self._loaded_timer  = None
@@ -270,6 +354,20 @@ class LoadingOverlay(QWidget):
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(16)
         self._tick_timer.timeout.connect(self._tick)
+
+    def _apply_uniform_scale(self, nx: float, ny: float, nw: float, nh: float):
+        scale_w = self.width()  / self.cam_w
+        scale_h = self.height() / self.cam_h
+        scale   = min(scale_w, scale_h)
+
+        cx = scale / scale_w
+        cy = scale / scale_h
+
+        px = (0.5 + (nx - 0.5) * cx) * self.width()
+        py = (0.5 + (ny - 0.5) * cy) * self.height()
+        pw = nw * cx * self.width()
+        ph = nh * cy * self.height()
+        return int(px), int(py), int(pw), int(ph)
 
     def start(self):
         self._create_timer = QElapsedTimer()
@@ -287,8 +385,6 @@ class LoadingOverlay(QWidget):
             return
         if self._create_timer is not None:
             self._create_frozen = self._create_timer.elapsed() / 1000.0
-        # Force-complete any create-phase tween that is currently in progress
-        # so the rect snaps to its end position and the loaded tweens can start
         for rect in self._rects:
             if rect.hidden:
                 continue
@@ -349,10 +445,442 @@ class LoadingOverlay(QWidget):
         w, h = self.width(), self.height()
         for rect in self._rects:
             if not rect.hidden:
-                x, y, rw, rh = rect.to_rect(w, h)
+                if rect.defn.uniform_scale:
+                    x, y, rw, rh = self._apply_uniform_scale(rect.cur_x, rect.cur_y, rect.cur_w, rect.cur_h)
+                else:
+                    x, y, rw, rh = rect.to_rect(w, h)
                 painter.fillRect(x, y, rw, rh, rect.cur_color)
         painter.end()
 
+
+# ──────────────────────── Camera Settings Panel ────────────────────────
+
+# Video mode options per source type: (label, native_w, native_h, src_prop_value)
+# native_w/h are used for widget aspect ratio only — NOT injected into the pipeline caps.
+# src_prop_value is passed to the appropriate source property on the GStreamer element.
+# zedxonesrc uses the "stream-type" property; zedsrc uses "video-mode".
+RESOLUTION_OPTIONS = {
+    "zedxonesrc": [
+        ("4K  — 3840×2160",   3840, 2160, 0),
+        ("2.2K — 2208×1242",  2208, 1242, 1),
+        ("1080p — 1920×1080", 1920, 1080, 2),
+        ("720p  — 1280×720",  1280,  720, 3),
+        ("WVGA  — 752×480",    752,  480, 4),
+    ],
+    "zedsrc": [
+        ("2.2K — 2208×1242",  2208, 1242, 0),
+        ("1080p — 1920×1080", 1920, 1080, 1),
+        ("720p  — 1280×720",  1280,  720, 2),
+        ("WVGA  — 752×480",    752,  480, 3),
+        ("VGA   — 672×376",    672,  376, 4),
+        ("300FPS — 384×192",   384,  192, 5),
+        ("120FPS — 640×360",   640,  360, 6),
+    ],
+    "default": [
+        ("1080p — 1920×1080", 1920, 1080, 0),
+        ("720p  — 1280×720",  1280,  720, 1),
+    ],
+}
+
+# Map source type -> the GStreamer property name for video mode selection.
+# Set to None to disable (safe default until you confirm the property name
+# by running: gst-inspect-1.0 zedxonesrc | grep -i "resol\|mode\|fps"
+# on your system with the ZED SDK installed).
+_SRC_MODE_PROP = {
+    "zedxonesrc": None,   # e.g. "stream-type" or "resolution" — check gst-inspect-1.0
+    "zedsrc":     None,   # e.g. "video-mode" or "resolution" — check gst-inspect-1.0
+}
+
+class Slider(QSlider):
+    """QSlider with a rotated-square (diamond) handle drawn via paintEvent."""
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        
+        self.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 2px;
+                background: rgba(255,255,255,35);
+                border-radius: 1px;
+            }
+            QSlider::handle:horizontal {
+                background: transparent;
+                border: none;
+                width: 16px;
+                height: 16px;
+                margin: -7px 0;
+                image: none;
+            }
+            QSlider::sub-page:horizontal {
+                background: #ffffff;
+                border-radius: 1px;
+            }""")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        opt_w = self.width()
+        opt_h = self.height()
+        rng = self.maximum() - self.minimum()
+        if rng == 0:
+            ratio = 0.0
+        else:
+            ratio = (self.value() - self.minimum()) / rng
+
+        handle_size = 10
+        groove_margin = handle_size
+        usable_w = opt_w - 2 * groove_margin
+        cx = groove_margin + ratio * usable_w
+        cy = opt_h / 2
+
+        diamond = QPolygonF([
+            QPointF(cx,                cy - handle_size),
+            QPointF(cx + handle_size,  cy),
+            QPointF(cx,                cy + handle_size),
+            QPointF(cx - handle_size,  cy),
+        ])
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 255, 255))
+        painter.drawPolygon(diamond)
+        painter.end()
+
+
+class ResolutionSelector(QWidget):
+    changed = Signal(int)
+
+    def __init__(self, options, current_idx, parent=None):
+        super().__init__(parent)
+        self._options = options
+        self._selected = current_idx
+        self._btns = []
+        self.setStyleSheet("background: transparent;")
+
+        btn_h = 26
+        self.setFixedHeight(btn_h)
+
+        total = len(options)
+        self._total = total
+        for i, (label, *_) in enumerate(options):
+            btn = QPushButton(label, self)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setProperty("sel_idx", i)
+            btn.clicked.connect(lambda checked=False, idx=i: self._select(idx))
+            self._btns.append(btn)
+
+        self._refresh_styles()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w = self.width()
+        h = self.height()
+        n = len(self._btns)
+        btn_w = w // n
+        for i, btn in enumerate(self._btns):
+            btn.setGeometry(i * btn_w, 0, btn_w - 2, h)
+
+    def _select(self, idx):
+        self._selected = idx
+        self._refresh_styles()
+        self.changed.emit(idx)
+
+    def selected_index(self):
+        return self._selected
+
+    def _refresh_styles(self):
+        for i, btn in enumerate(self._btns):
+            if i == self._selected:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(255,255,255,220);
+                        color: #0a0a0e;
+                        border: none;
+                        border-radius: 2px;
+                        font-family: 'Oxanium SemiBold';
+                        font-size: 9px;
+                        letter-spacing: 1px;
+                        padding: 0 4px;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(255,255,255,10);
+                        color: rgba(255,255,255,140);
+                        border: 1px solid rgba(255,255,255,20);
+                        border-radius: 2px;
+                        font-family: 'Oxanium';
+                        font-size: 9px;
+                        letter-spacing: 1px;
+                        padding: 0 4px;
+                    }
+                    QPushButton:hover {
+                        background: rgba(255,255,255,20);
+                        color: rgba(255,255,255,220);
+                    }
+                """)
+
+
+class CameraSettingsPanel(QWidget):
+    applied   = Signal(int, int, int, int, int)  # exposure, gain, gamma, res_w, res_h
+    cancelled = Signal()
+
+    RANGES = { # Per-source slider ranges: (min, max, step)
+        "zedxonesrc": {
+            "exposure": (5000,  60000, 1000),
+            "gain":     (1000,  5000,  100),
+            "gamma":    (1,     10,     1),
+        },
+        "zedsrc": {
+            "exposure": (0,     100,    1),
+            "gain":     (0,     100,    1),
+            "gamma":    (1,     10,     1),
+        },
+        "default": {
+            "exposure": (0,     60000, 1000),
+            "gain":     (0,     5000,  100),
+            "gamma":    (1,     10,     1),
+        },
+    }
+
+    def __init__(self, cam, parent=None):
+        super().__init__(parent)
+        self.cam = cam
+
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool |
+            Qt.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        # Raise above everything on show
+        self.setWindowFlag(Qt.X11BypassWindowManagerHint, False)
+
+        src = getattr(cam, 'source_type', None) or 'default'
+        ranges = self.RANGES.get(src, self.RANGES['default'])
+        res_options = RESOLUTION_OPTIONS.get(src, RESOLUTION_OPTIONS['default'])
+
+        cur_res_idx = getattr(cam, 'resolution', 0)
+        cur_res_idx = max(0, min(cur_res_idx, len(res_options) - 1))
+
+        panel_w, panel_h = 960, 370
+        self.setFixedSize(panel_w, panel_h)
+
+        # Background
+        self._bg = QWidget(self)
+        self._bg.setGeometry(0, 0, panel_w, panel_h)
+        self._bg.setStyleSheet("""
+            background-color: rgba(8, 8, 10, 240);
+            border: 1px solid rgba(255,255,255,35);
+            border-radius: 3px;
+        """)
+
+        # Top Bar
+        accent = QWidget(self)
+        accent.setGeometry(0, 0, panel_w, 2)
+        accent.setStyleSheet("background-color: #ffffff; border-radius: 0px;")
+
+        # Title
+        title = QLabel("CAMERA SETTINGS", self)
+        title.setGeometry(20, 16, panel_w - 40, 20)
+        title.setStyleSheet("""
+            color: #ffffff;
+            font-family: 'Oxanium SemiBold';
+            font-size: 12px;
+            letter-spacing: 4px;
+            background: transparent;
+        """)
+
+        # Serial
+        subtitle = QLabel(f"SN: {cam.serial}", self)
+        subtitle.setGeometry(20, 36, panel_w - 40, 14)
+        subtitle.setStyleSheet("""
+            color: rgba(255,255,255,80);
+            font-family: 'Oxanium';
+            font-size: 9px;
+            letter-spacing: 1px;
+            background: transparent;
+        """)
+
+        # Seperator
+        sep = QWidget(self)
+        sep.setGeometry(20, 56, panel_w - 40, 1)
+        sep.setStyleSheet("background: rgba(255,255,255,20);")
+
+        # Slider Rows
+        init_exposure = cam.pending_exposure if cam.pending_exposure is not None else cam.exposure
+        init_gain     = cam.pending_gain     if cam.pending_gain     is not None else cam.gain
+        init_gamma    = cam.pending_gamma    if cam.pending_gamma    is not None else cam.gamma
+
+        self._sliders = {}
+        self._value_labels = {}
+
+        settings = [
+            ("EXPOSURE",  "exposure",  init_exposure, ranges["exposure"],  "µs"),
+            ("GAIN",      "gain",      init_gain,     ranges["gain"],      ""),
+            ("GAMMA",     "gamma",     init_gamma,    ranges["gamma"],     ""),
+        ]
+
+        y_start = 68
+        row_h   = 56
+
+        for i, (label_text, key, init_val, (rmin, rmax, rstep), unit) in enumerate(settings):
+            y = y_start + i * row_h
+
+            lbl = QLabel(label_text, self)
+            lbl.setGeometry(20, y, 120, 16)
+            lbl.setStyleSheet("""
+                color: rgba(255,255,255,130);
+                font-family: 'Oxanium';
+                font-size: 9px;
+                letter-spacing: 2px;
+                background: transparent;
+            """)
+
+            val_lbl = QLabel(f"{init_val}{(' ' + unit) if unit else ''}", self)
+            val_lbl.setGeometry(panel_w - 130, y, 110, 16)
+            val_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            val_lbl.setStyleSheet("""
+                color: #ffffff;
+                font-family: 'Oxanium SemiBold';
+                font-size: 11px;
+                background: transparent;
+            """)
+            self._value_labels[key] = (val_lbl, unit)
+
+            slider = Slider(Qt.Horizontal, self)
+            slider.setGeometry(20, y + 20, panel_w - 40, 24)
+            steps = max(1, (rmax - rmin) // rstep)
+            slider.setRange(0, steps)
+            init_step = max(0, min(steps, (init_val - rmin) // rstep))
+            slider.setValue(init_step)
+
+            def make_callback(mn, step, lbl_ref, unit_ref):
+                def on_change(v):
+                    actual = mn + v * step
+                    lbl_ref.setText(f"{actual}{(' ' + unit_ref) if unit_ref else ''}")
+                return on_change
+
+            slider.valueChanged.connect(make_callback(rmin, rstep, val_lbl, unit))
+            self._sliders[key] = (slider, rmin, rstep)
+
+        # Resolution
+        res_y = y_start + 3 * row_h + 4
+
+        sep_res = QWidget(self)
+        sep_res.setGeometry(20, res_y, panel_w - 40, 1)
+        sep_res.setStyleSheet("background: rgba(255,255,255,20);")
+
+        res_lbl = QLabel("RESOLUTION", self)
+        res_lbl.setGeometry(20, res_y + 10, 120, 16)
+        res_lbl.setStyleSheet("""
+            color: rgba(255,255,255,130);
+            font-family: 'Oxanium';
+            font-size: 9px;
+            letter-spacing: 2px;
+            background: transparent;
+        """)
+
+        self._res_selector = ResolutionSelector(res_options, cur_res_idx, self)
+        self._res_selector.setGeometry(20, res_y + 30, panel_w - 40, 26)
+        self._res_options = res_options
+
+        # Seperator
+        btn_sep_y = res_y + 68
+        sep2 = QWidget(self)
+        sep2.setGeometry(20, btn_sep_y, panel_w - 40, 1)
+        sep2.setStyleSheet("background: rgba(255,255,255,20);")
+
+        btn_y_pos = btn_sep_y + 12
+        btn_h = 32
+        btn_w = (panel_w - 60) // 2
+
+        # Cancel Button
+        self._btn_cancel = QPushButton("CANCEL", self)
+        self._btn_cancel.setGeometry(20, btn_y_pos, btn_w, btn_h)
+        self._btn_cancel.setCursor(Qt.PointingHandCursor)
+        self._btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,8);
+                color: rgba(255,255,255,120);
+                border: 1px solid rgba(255,255,255,25);
+                border-radius: 2px;
+                font-family: 'Oxanium SemiBold';
+                font-size: 10px;
+                letter-spacing: 2px;
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,16);
+                color: rgba(255,255,255,200);
+            }
+            QPushButton:pressed {
+                background: rgba(255,255,255,6);
+            }
+        """)
+        self._btn_cancel.clicked.connect(self._on_cancel)
+
+        # Apply Button
+        self._btn_apply = QPushButton("APPLY", self)
+        self._btn_apply.setGeometry(40 + btn_w, btn_y_pos, btn_w, btn_h)
+        self._btn_apply.setCursor(Qt.PointingHandCursor)
+        self._btn_apply.setStyleSheet("""
+            QPushButton {
+                background: #ffffff;
+                color: #0a0a0e;
+                border: none;
+                border-radius: 2px;
+                font-family: 'Oxanium SemiBold';
+                font-size: 10px;
+                letter-spacing: 2px;
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,210);
+            }
+            QPushButton:pressed {
+                background: rgba(255,255,255,160);
+            }
+        """)
+        self._btn_apply.clicked.connect(self._on_apply)
+
+    def _read_values(self):
+        result = {}
+        for key, (slider, rmin, rstep) in self._sliders.items():
+            result[key] = rmin + slider.value() * rstep
+        idx = self._res_selector.selected_index()
+        _, rw, rh, _ = self._res_options[idx]
+        result['res_w'] = rw
+        result['res_h'] = rh
+        return result
+
+    def _on_apply(self):
+        vals = self._read_values()
+        self.applied.emit(vals['exposure'], vals['gain'], vals['gamma'], vals['res_w'], vals['res_h'])
+        self.close()
+
+    def _on_cancel(self):
+        self.cancelled.emit()
+        self.close()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.end()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.raise_()
+        self.activateWindow()
+
+
+# ──────────────────────── GStreamer Video Widget ────────────────────────
 
 class GStreamerVideoWidget(QWidget):
     clicked = Signal()
@@ -429,8 +957,6 @@ class GStreamerVideoWidget(QWidget):
 
         scale_w = widget_w / cam_w
         scale_h = widget_h / cam_h
-
-        # Use the larger scale so the video covers the widget entirely
         scale = max(scale_w, scale_h)
 
         render_w = int(cam_w * scale)
@@ -449,6 +975,10 @@ class GStreamerVideoWidget(QWidget):
         inner_w = w - 2 * bw
         inner_h = h - 2 * bw
 
+        # video_surface fills the entire inner area; GStreamer renders into it at full size.
+        # force-aspect-ratio=false on the sink means the video stretches to fill — which is
+        # correct because _compute_video_rect already positions the surface with the right
+        # cover-crop so the aspect ratio is maintained at the widget level.
         x_off, y_off, render_w, render_h = self._compute_video_rect(inner_w, inner_h)
         self.video_surface.setGeometry(bw + x_off, bw + y_off, render_w, render_h)
 
@@ -508,12 +1038,19 @@ class GStreamerVideoWidget(QWidget):
         if not self.thread or not self.thread.pipeline:
             return
 
-        _, _, render_w, render_h = self._compute_video_rect(w, h)
+        # The video_surface child is already sized to fill the widget area (cover mode).
+        # Tell the GStreamer overlay to render into the full surface — it will letterbox
+        # or crop internally if force-aspect-ratio is set; here we disable that so it
+        # always fills the entire surface, matching the widget's intent.
+        surf_w = self.video_surface.width()
+        surf_h = self.video_surface.height()
+        if surf_w <= 0 or surf_h <= 0:
+            return
 
         sink = self.thread.pipeline.get_by_interface(GstVideo.VideoOverlay.__gtype__)
         if sink:
             try:
-                sink.set_render_rectangle(0, 0, render_w, render_h)
+                sink.set_render_rectangle(0, 0, surf_w, surf_h)
                 sink.expose()
             except Exception:
                 pass
@@ -538,7 +1075,6 @@ class GStreamerVideoWidget(QWidget):
         self.id_label.setText(f"SN: {camera_serial}")
     
     def update_stats(self, exposure, gain, gamma, pending=False):
-        # Show a * prefix on each line when there are unapplied changes
         prefix = "* " if pending else ""
         self.stats_label.setText(
             f"{prefix}Exposure: {exposure} µs\n"
@@ -586,7 +1122,7 @@ class ResizableContainer(QWidget):
         super().resizeEvent(event)
         self.resized.emit()
 
-# ------------------------ Camera Node ------------------------
+# ──────────────────────── Camera Node ────────────────────────
 
 class CameraConfig:
     names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
@@ -635,7 +1171,6 @@ class Camera:
         self.exposure = 5000
         self.gain = 40
         self.gamma = 2
-        # Pending (unapplied) settings — None means no pending change
         self.pending_exposure = None
         self.pending_gain = None
         self.pending_gamma = None
@@ -644,7 +1179,6 @@ class Camera:
         return any(v is not None for v in [self.pending_exposure, self.pending_gain, self.pending_gamma])
 
     def apply_pending(self):
-        # Commit pending values to live values and clear pending state.
         if self.pending_exposure is not None:
             self.exposure = self.pending_exposure
             self.pending_exposure = None
@@ -679,7 +1213,8 @@ class CameraNode(Node):
         self.display_mode = 0
 
         self.always_remove_inactive_cams = True
-        self.animations = {} 
+        self.animations = {}
+        self._settings_panel = None  # currently open settings panel
         
         self.key_pub = self.create_publisher(String, "key", 10)
         self.key_subscription = self.create_subscription(
@@ -719,14 +1254,14 @@ class CameraNode(Node):
             305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
                         "exposure": 10000, "gain": 30000, "gamma": 2},
             58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
-                        "exposure": 50,   "gain": 30000, "gamma": 2},
+                        "exposure": 50,   "gain": 50, "gamma": 2},
         }
 
         print(f"\nConfigured cameras:")
         for serial, info in self.camera_info.items():
             print(f"  Serial {serial}: {info['type']} using {info['source']} (camera-id={info['camera_id']})")
 
-    # ------------------------ Setup ------------------------
+    # ──────────────────────── Setup ────────────────────────
 
     def check_gstreamer_element(self, element_name):
         try:
@@ -757,7 +1292,6 @@ class CameraNode(Node):
     
     def on_container_resized(self):
         self.set_camera_positions()
-        # Reposition any active overlays to match new global coords
         for cam in self.cameras:
             if cam.widget and hasattr(cam.widget, 'loading_overlay') and cam.widget.loading_overlay:
                 try:
@@ -770,7 +1304,7 @@ class CameraNode(Node):
                 except RuntimeError:
                     cam.widget.loading_overlay = None
 
-    # ------------------------ Key Listener ------------------------
+    # ──────────────────────── Key Listener ────────────────────────
 
     def key_listener(self, key_msg):
         key = key_msg.data
@@ -817,25 +1351,25 @@ class CameraNode(Node):
                     self.switching_mode = False
                 else:
                     print(f'Failed to swap with {key}')
-            case 'o':  # increase exposure
+            case 'o':
                 self.adjust_current_camera('exposure', +10000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else +30)
-            case 'l':  # decrease exposure
+            case 'l':
                 self.adjust_current_camera('exposure', -10000 if self.cameras[self.camera_current].source_type == 'zedxonesrc' else -30)
-            case 'i':  # increase gain
+            case 'i':
                 self.adjust_current_camera('gain', +5000)
-            case 'k':  # decrease gain
+            case 'k':
                 self.adjust_current_camera('gain', -5000)
-            case 'u':  # increase gamma
+            case 'u':
                 self.adjust_current_camera('gamma', +7)
-            case 'j':  # decrease gamma
+            case 'j':
                 self.adjust_current_camera('gamma', -7)
-            case '\r':  # Enter — commit pending settings and restart camera
+            case '\r':
                 self.apply_pending_settings()
         self.print_infomation()
         self.cleanup_orphaned_widgets()
         QTimer.singleShot(20, self.process_command_queue)
 
-    # ------------------------ Camera Utilities ------------------------
+    # ──────────────────────── Camera Utilities ────────────────────────
 
     def get_available_index(self):
         used = {cam.index for cam in self.cameras if cam.index != -1}
@@ -854,7 +1388,6 @@ class CameraNode(Node):
 
         print(f"  {attr} (pending) -> {new_val}  [press Enter to apply]")
 
-        # Update stats label with pending marker
         if cam.widget and hasattr(cam.widget, 'update_stats'):
             disp_exposure = cam.pending_exposure if cam.pending_exposure is not None else cam.exposure
             disp_gain     = cam.pending_gain     if cam.pending_gain     is not None else cam.gain
@@ -877,7 +1410,60 @@ class CameraNode(Node):
         self.create_camera_widget(cam)
         cam.widget.setGeometry(geom)
 
-    # ------------------------ Activation / Deactivation ------------------------
+    # ──────────────────────── Settings Panel (Mouse) ────────────────────────
+
+    def show_settings_panel(self, cam):
+        """Open the mouse-driven CameraSettingsPanel for the given camera."""
+        if self._settings_panel is not None:
+            try:
+                self._settings_panel.close()
+            except RuntimeError:
+                pass
+            self._settings_panel = None
+
+        panel = CameraSettingsPanel(cam)
+
+        def on_apply(exposure, gain, gamma, res_w, res_h):
+            cam.pending_exposure = exposure
+            cam.pending_gain = gain
+            cam.pending_gamma = gamma
+            src = getattr(cam, 'source_type', None) or 'default'
+            opts = RESOLUTION_OPTIONS.get(src, RESOLUTION_OPTIONS['default'])
+            for label, ow, oh, ridx in opts:
+                if ow == res_w and oh == res_h:
+                    cam.resolution = ridx
+                    if cam.index >= 0:
+                        self.config.ratios[cam.index] = [res_w, res_h]
+                    break
+            cam.apply_pending()
+
+            geom = cam.widget.geometry()
+            self.remove_widget(cam)
+            self.create_camera_widget(cam)
+            cam.widget.setGeometry(geom)
+            self._settings_panel = None
+
+        def on_cancel():
+            cam.discard_pending()
+            if cam.widget and hasattr(cam.widget, 'update_stats'):
+                cam.widget.update_stats(cam.exposure, cam.gain, cam.gamma, pending=False)
+            self._settings_panel = None
+
+        panel.applied.connect(on_apply)
+        panel.cancelled.connect(on_cancel)
+
+        # Centre on primary screen
+        screen = QApplication.primaryScreen().geometry()
+        px = screen.left() + (screen.width()  - panel.width())  // 2
+        py = screen.top()  + (screen.height() - panel.height()) // 2
+
+        panel.move(px, py)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+        self._settings_panel = panel
+
+    # ──────────────────────── Activation / Deactivation ────────────────────────
 
     def activate_camera(self):
         inactive = [c for c in self.cameras if not c.active]
@@ -1001,7 +1587,7 @@ class CameraNode(Node):
         self.cleanup_orphaned_widgets()
         self.set_camera_positions()
 
-    # ------------------------ Selection ------------------------
+    # ──────────────────────── Selection ────────────────────────
 
     def select_camera(self, index, bypass_inactive=False):
         if not bypass_inactive and not self.cameras[index].active:
@@ -1069,7 +1655,6 @@ class CameraNode(Node):
                 reason += 'Target cam is out of max active positions.'
             
             print(f'Failed to switch due to the following reason(s): {reason}')
-
             return
         
         print(f"Switched cameras {self.camera_current} <-> {target_pos}")
@@ -1099,7 +1684,7 @@ class CameraNode(Node):
         
         self.set_camera_positions()
 
-    # ------------------------ Move Index ------------------------
+    # ──────────────────────── Move Index ────────────────────────
 
     def move_index(self, direction):
         if self.camera_current is None:
@@ -1135,7 +1720,7 @@ class CameraNode(Node):
                 str(self.config.serials[cam.index])
             )
 
-    # ------------------------ Camera Widgets ------------------------
+    # ──────────────────────── Camera Widgets ────────────────────────
 
     def create_camera_widget(self, cam):
         active_positions = [c.position for c in self.cameras if c.active] or [cam.position]
@@ -1159,9 +1744,14 @@ class CameraNode(Node):
             gain = cam.gain
             gamma = cam.gamma
 
+            mode_prop = _SRC_MODE_PROP.get(src, "")
+            mode_val  = getattr(cam, 'resolution', 0)
+            mode_str  = f"{mode_prop}={mode_val} " if mode_prop else ""
+
             if src == "zedxonesrc":
                 cam_props = (
                     f"camera-id={cid} "
+                    f"{mode_str}"
                     f"ctrl-auto-exposure=false "
                     f"ctrl-auto-exposure-range-min={exp} "
                     f"ctrl-auto-exposure-range-max={exp} "
@@ -1169,9 +1759,14 @@ class CameraNode(Node):
                     f"ctrl-analog-gain={gain} "
                     f"ctrl-gamma={gamma}"
                 )
-            else:
-                cam_props = f"camera-id={cid} aec-agc=false exposure={exp} gain={gain}"
+            elif src == "zedsrc":
+                cam_props = (
+                    f"camera-id={cid} "
+                    f"{mode_str}"
+                )
 
+            # No caps filter — let source negotiate resolution natively via stream-type/video-mode.
+            # cam_w/cam_h (from config.ratios) are used only for widget aspect ratio, not pipeline.
             pipeline = (
                 f"{src} {cam_props} "
                 f"! queue ! videoconvert ! videoscale "
@@ -1202,12 +1797,18 @@ class CameraNode(Node):
                 QApplication.processEvents()
                 camera_feed_widget.start()
 
-            camera_feed_widget.clicked.connect(
-                lambda pos=cam.position: self.select_camera(pos)
-            )
+            # Connect click: first click selects, second click on already-selected opens settings
+            def on_widget_clicked(pos=cam.position, c=cam):
+                if self.camera_current == pos and c.active:
+                    # Already selected — open settings panel
+                    self.show_settings_panel(c)
+                else:
+                    self.select_camera(pos)
+
+            camera_feed_widget.clicked.connect(on_widget_clicked)
 
             if use_camera:
-                overlay = LoadingOverlay(None)
+                overlay = LoadingOverlay(None, cam_w=cam_w, cam_h=cam_h)
                 overlay.setWindowFlags(
                     Qt.FramelessWindowHint |
                     Qt.WindowStaysOnTopHint |
@@ -1286,7 +1887,7 @@ class CameraNode(Node):
             if hasattr(cam.widget, 'set_border_color'):
                 cam.widget.set_border_color(color)
 
-    # ------------------------ Tween Animation ------------------------
+    # ──────────────────────── Tween Animation ────────────────────────
     def stop_animation_for_widget(self, widget):
         if not widget:
             return
@@ -1374,7 +1975,7 @@ class CameraNode(Node):
 
         animation.finished.connect(finish_animation)
 
-    # ------------------------ Print Information ------------------------
+    # ──────────────────────── Print Information ────────────────────────
 
     def print_infomation(self):
         print(f"Current Selected: {self.camera_current}")
