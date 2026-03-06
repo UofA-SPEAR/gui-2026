@@ -126,21 +126,6 @@ class GStreamerThread(QThread):
 
 
 # ──────────────────────── Loading Overlay ────────────────────────
-class Tween:
-    def __init__(self, x, y, w, h, s, d, p, e, c):
-        self.tx, self.ty, self.tw, self.th = x, y, w, h
-        self.tween_start = s
-        self.tween_dur = d
-        self.phase = p
-        self.ease = e
-        self.color = c
-
-class RectDef:
-    def __init__(self, x, y, w, h, initial_color, is_uniform_scale, tween):
-        self.ix, self.iy, self.iw, self.ih = x, y, w, h
-        self.color = initial_color
-        self.uniform_scale = is_uniform_scale
-        self.tweens = tween
 
 class LoadingRect:
     def __init__(self, defn: RectDef):
