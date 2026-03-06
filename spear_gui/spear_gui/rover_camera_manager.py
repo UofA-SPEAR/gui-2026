@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
+import gi
+gi.require_version('Gst', '1.0')
+gi.require_version('GstVideo', '1.0')
+from gi.repository import Gst, GLib
 import sys
 from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QThread, Signal, Qt
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -93,18 +97,33 @@ class GStreamerThread(QThread):
 
         return True
 
-
+class GStreamerVideoWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.pipeline_str = (
+                f"zedxonesrc camera-id=0 "
+                f"! queue ! videoconvert ! videoscale "
+                f"! ximagesink force-aspect-ratio=false"
+            )
+        self.video_surface = QWidget(self)
+        self.video_surface.setAttribute(Qt.WA_NativeWindow)
+        self.video_surface.setStyleSheet("background:black;")
+        self.thread = GStreamerThread(
+            self.pipeline_str,
+            self.video_surface.winId(),
+            parent=self
+        )
 
 def main():
     rclpy.init()
     node = ListenerNode()
 
+    app = QApplication([])
 
-    self.thread = GStreamerThread(
-        self.pipeline_str,
-        self.video_surface.winId(),
-        parent=self
-    )
+    print('did this do something')
+    camera_feed_widget = GStreamerVideoWidget()
+    print(camera_feed_widget.thread)
+    print('it probably did something')
 
     # Timer to spin ROS2 node periodically
     ros_timer = QTimer()
@@ -115,7 +134,6 @@ def main():
 
     node.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()
