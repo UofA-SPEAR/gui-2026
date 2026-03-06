@@ -1,3 +1,6 @@
+from PySide6.QtCore import QEasingCurve
+from PySide6.QtGui import QColor
+
 class Tween:
     def __init__(self, x, y, w, h, s, d, p, e, c):
         self.tx, self.ty, self.tw, self.th = x, y, w, h
