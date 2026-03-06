@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = 'spear_gui'
 
@@ -11,6 +13,8 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('lib/' + package_name, ['spear_gui/Oxanium-Regular.ttf', 'spear_gui/Oxanium-SemiBold.ttf']),
+        (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*.py'))),
+        (os.path.join('share', package_name, 'spear_gui'), glob(os.path.join('spear_gui', '*.py'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
