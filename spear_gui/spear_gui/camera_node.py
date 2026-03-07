@@ -321,10 +321,6 @@ class LoadingOverlay(QWidget):
 
 # ──────────────────────── Camera Settings Panel ────────────────────────
 
-# Video mode options per source type: (label, native_w, native_h, src_prop_value)
-# native_w/h are used for widget aspect ratio only — NOT injected into the pipeline caps.
-# src_prop_value is passed to the appropriate source property on the GStreamer element.
-# zedxonesrc uses the "stream-type" property; zedsrc uses "video-mode".
 RESOLUTION_OPTIONS = {
     "zedxonesrc": [
         ("4K  — 3840×2160",   3840, 2160, 0),
@@ -346,15 +342,6 @@ RESOLUTION_OPTIONS = {
         ("1080p — 1920×1080", 1920, 1080, 0),
         ("720p  — 1280×720",  1280,  720, 1),
     ],
-}
-
-# Map source type -> the GStreamer property name for video mode selection.
-# Set to None to disable (safe default until you confirm the property name
-# by running: gst-inspect-1.0 zedxonesrc | grep -i "resol\|mode\|fps"
-# on your system with the ZED SDK installed).
-_SRC_MODE_PROP = {
-    "zedxonesrc": None,   # e.g. "stream-type" or "resolution" — check gst-inspect-1.0
-    "zedsrc":     None,   # e.g. "video-mode" or "resolution" — check gst-inspect-1.0
 }
 
 class Slider(QSlider):
@@ -491,19 +478,21 @@ class ResolutionSelector(QWidget):
 
 
 class CameraSettingsPanel(QWidget):
-    applied   = Signal(int, int, int, int, int)  # exposure, gain, gamma, res_w, res_h
+    applied   = Signal(int, int, int, int, int, int)  # exposure, gain, gamma, denoising, res_w, res_h
     cancelled = Signal()
 
     RANGES = { # Per-source slider ranges: (min, max, step)
         "zedxonesrc": {
-            "exposure": (5000,  60000, 1000),
-            "gain":     (1000,  5000,  100),
-            "gamma":    (1,     10,     1),
+            "exposure": (1000,  66666,  1427), # Defualt: 10000
+            "gain":     (1000,  30000,  1000), # D: 30000
+            "gamma":    (1,     9,      1), # D: 2
+            "denoising": (0,     100,    1), # D: 50
         },
         "zedsrc": {
             "exposure": (0,     100,    1),
             "gain":     (0,     100,    1),
             "gamma":    (1,     10,     1),
+            "denoising": (0,    100,    1), # Unused for zedsrc
         },
         "default": {
             "exposure": (0,     60000, 1000),
@@ -534,7 +523,7 @@ class CameraSettingsPanel(QWidget):
         cur_res_idx = getattr(cam, 'resolution', 0)
         cur_res_idx = max(0, min(cur_res_idx, len(res_options) - 1))
 
-        panel_w, panel_h = 960, 370
+        panel_w, panel_h = 960, 450
         self.setFixedSize(panel_w, panel_h)
 
         # Background
@@ -563,7 +552,7 @@ class CameraSettingsPanel(QWidget):
         """)
 
         # Serial
-        subtitle = QLabel(f"SN: {cam.serial}", self)
+        subtitle = QLabel(f"SN: {cam.camera_sn}", self)
         subtitle.setGeometry(20, 36, panel_w - 40, 14)
         subtitle.setStyleSheet("""
             color: rgba(255,255,255,80);
@@ -582,14 +571,16 @@ class CameraSettingsPanel(QWidget):
         init_exposure = cam.pending_exposure if cam.pending_exposure is not None else cam.exposure
         init_gain     = cam.pending_gain     if cam.pending_gain     is not None else cam.gain
         init_gamma    = cam.pending_gamma    if cam.pending_gamma    is not None else cam.gamma
+        init_denoising = cam.pending_denoising if cam.pending_denoising is not None else cam.denoising
 
         self._sliders = {}
         self._value_labels = {}
 
         settings = [
             ("EXPOSURE",  "exposure",  init_exposure, ranges["exposure"],  "µs"),
-            ("GAIN",      "gain",      init_gain,     ranges["gain"],      ""),
-            ("GAMMA",     "gamma",     init_gamma,    ranges["gamma"],     ""),
+            ("GAIN",      "gain",      init_gain,     ranges["gain"],      "ISO"),
+            ("GAMMA",     "gamma",     init_gamma,    ranges["gamma"],     "γ"),
+            ("DENOISING", "denoising", init_denoising, ranges["denoising"],  ""),
         ]
 
         y_start = 68
@@ -636,7 +627,7 @@ class CameraSettingsPanel(QWidget):
             self._sliders[key] = (slider, rmin, rstep)
 
         # Resolution
-        res_y = y_start + 3 * row_h + 4
+        res_y = y_start + 4 * row_h + 4
 
         sep_res = QWidget(self)
         sep_res.setGeometry(20, res_y, panel_w - 40, 1)
@@ -725,7 +716,7 @@ class CameraSettingsPanel(QWidget):
 
     def _on_apply(self):
         vals = self._read_values()
-        self.applied.emit(vals['exposure'], vals['gain'], vals['gamma'], vals['res_w'], vals['res_h'])
+        self.applied.emit(vals['exposure'], vals['gain'], vals['gamma'], vals['denoising'], vals['res_w'], vals['res_h'])
         self.close()
 
     def _on_cancel(self):
@@ -751,8 +742,7 @@ class CameraSettingsPanel(QWidget):
 class GStreamerVideoWidget(QWidget):
     clicked = Signal()
 
-    def __init__(self, pipeline_str, camera_name="", camera_serial="", use_overlay=True,
-                 camera_width=1920, camera_height=1080, parent=None):
+    def __init__(self, pipeline_str, camera_name="", camera_sn="", use_overlay=True, camera_width=1920, camera_height=1080, parent=None):
         super().__init__(parent)
 
         self.pipeline_str = pipeline_str
@@ -783,7 +773,7 @@ class GStreamerVideoWidget(QWidget):
             padding: 2px;
         """)
 
-        self.id_label = QLabel(f"SN: {camera_serial}", self)
+        self.id_label = QLabel(f"SN: {camera_sn}", self)
         self.id_label.setAlignment(Qt.AlignCenter)
         self.id_label.setStyleSheet("""
             color: white;
@@ -841,10 +831,6 @@ class GStreamerVideoWidget(QWidget):
         inner_w = w - 2 * bw
         inner_h = h - 2 * bw
 
-        # video_surface fills the entire inner area; GStreamer renders into it at full size.
-        # force-aspect-ratio=false on the sink means the video stretches to fill — which is
-        # correct because _compute_video_rect already positions the surface with the right
-        # cover-crop so the aspect ratio is maintained at the widget level.
         x_off, y_off, render_w, render_h = self._compute_video_rect(inner_w, inner_h)
         self.video_surface.setGeometry(bw + x_off, bw + y_off, render_w, render_h)
 
@@ -904,10 +890,6 @@ class GStreamerVideoWidget(QWidget):
         if not self.thread or not self.thread.pipeline:
             return
 
-        # The video_surface child is already sized to fill the widget area (cover mode).
-        # Tell the GStreamer overlay to render into the full surface — it will letterbox
-        # or crop internally if force-aspect-ratio is set; here we disable that so it
-        # always fills the entire surface, matching the widget's intent.
         surf_w = self.video_surface.width()
         surf_h = self.video_surface.height()
         if surf_w <= 0 or surf_h <= 0:
@@ -936,16 +918,17 @@ class GStreamerVideoWidget(QWidget):
     def on_finished(self):
         print("Pipeline finished.")
 
-    def update_labels(self, camera_name, camera_serial):
+    def update_labels(self, camera_name, camera_sn):
         self.name_label.setText(camera_name)
-        self.id_label.setText(f"SN: {camera_serial}")
+        self.id_label.setText(f"SN: {camera_sn}")
     
-    def update_stats(self, exposure, gain, gamma, pending=False):
+    def update_stats(self, exposure, gain, gamma, denoising, pending=False):
         prefix = "* " if pending else ""
         self.stats_label.setText(
             f"{prefix}Exposure: {exposure} µs\n"
             f"{prefix}Gain: {gain}\n"
-            f"{prefix}Gamma: {gamma}"
+            f"{prefix}Gamma: {gamma}\n"
+            f"{prefix}Denoising: {denoising}"
         )
 
     def set_border_color(self, color):
@@ -989,18 +972,9 @@ class ResizableContainer(QWidget):
         self.resized.emit()
 
 # ──────────────────────── Camera Node ────────────────────────
-
-class CameraConfig:
-    names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
-    serials = [309256978, 305325257, 58896881, 0, 0, 0, 0, 0]
-    default_resolutions = [4, 4, 6, 0, 0, 0, 0, 0]
-    camera_ids = [0, 1, 0, 3, 4, 5, 6, 7]
-    ratios = [[1920, 1080]] * 8
-    layout = CAMERA_LAYOUT
-
 class Camera:
-    def __init__(self, position, default_resolution):
-        self.serial = None
+    def __init__(self, position):
+        self.camera_sn = None
         self.camera_id = 0
         self.index = -1
         self.position = position
@@ -1008,16 +982,18 @@ class Camera:
         self.widget = None
         self.pipeline = None
         self.source_type = None
-        self.resolution = default_resolution
+        self.resolution = 1
         self.exposure = 5000
         self.gain = 40
         self.gamma = 2
+        self.denoising = 50
         self.pending_exposure = None
         self.pending_gain = None
         self.pending_gamma = None
+        self.pending_denoising = None
 
     def has_pending_changes(self):
-        return any(v is not None for v in [self.pending_exposure, self.pending_gain, self.pending_gamma])
+        return any(v is not None for v in [self.pending_exposure, self.pending_gain, self.pending_gamma, self.pending_denoising])
 
     def apply_pending(self):
         if self.pending_exposure is not None:
@@ -1029,23 +1005,39 @@ class Camera:
         if self.pending_gamma is not None:
             self.gamma = self.pending_gamma
             self.pending_gamma = None
+        if self.pending_denoising is not None:
+            self.denoising = self.pending_denoising
+            self.pending_denoising = None
 
     def discard_pending(self):
         self.pending_exposure = None
         self.pending_gain = None
         self.pending_gamma = None
+        self.pending_denoising = None
 
-    
+
 class CameraNode(Node):
     def __init__(self):
         super().__init__('camera_node')
 
+        self.camera_info = {
+            309256978: {"type": "ZED X One",  "source": "zedxonesrc", "camera_id": 0,
+                        "name": "ZED X One #1",  "resolution": 1,
+                        "exposure": 10000, "gain": 30000, "gamma": 2, "denoising": 50},
+            305325257: {"type": "ZED X One",  "source": "zedxonesrc", "camera_id": 1,
+                        "name": "ZED X One #2",  "resolution": 1,
+                        "exposure": 10000, "gain": 30000, "gamma": 2, "denoising": 50},
+            58896881:  {"type": "ZED X Mini", "source": "zedsrc",     "camera_id": 0,
+                        "name": "ZED X Mini #1", "resolution": 1,
+                        "exposure": 50,    "gain": 50,    "gamma": 2, "denoising": 0},
+        }
+
+        self.camera_ratios = {i: [1920, 1080] for i in range(len(self.camera_info))}
+        self.cameras = [Camera(i) for i in range(len(self.camera_info))]
+
         self.container = None
         self.command_queue = deque()
         self.processing_command = False
-
-        self.config = CameraConfig()
-        self.cameras = [Camera(i, self.config.default_resolutions[i]) for i in range(len(self.config.serials))]
         
         self.camera_current = 0
         self.focused_camera = None
@@ -1055,8 +1047,8 @@ class CameraNode(Node):
 
         self.always_remove_inactive_cams = True
         self.animations = {}
-        self._settings_panel = None  # currently open settings panel
-        
+        self._settings_panel = None
+
         self.key_pub = self.create_publisher(String, "key", 10)
         self.key_subscription = self.create_subscription(
             String, 'key', self.key_listener, 10
@@ -1089,18 +1081,25 @@ class CameraNode(Node):
         if not self.use_video_overlay:
             self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
 
-        self.camera_info = {
-            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
-                        "exposure": 10000, "gain": 30000, "gamma": 2},
-            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
-                        "exposure": 10000, "gain": 30000, "gamma": 2},
-            58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
-                        "exposure": 50,   "gain": 50, "gamma": 2},
-        }
-
         print(f"\nConfigured cameras:")
-        for serial, info in self.camera_info.items():
-            print(f"  Serial {serial}: {info['type']} using {info['source']} (camera-id={info['camera_id']})")
+        for sn, info in self.camera_info.items():
+            print(f"  Serial {sn}: {info['type']} using {info['source']} (camera-id={info['camera_id']})")
+
+    # ──────────────────────── Helpers ────────────────────────
+
+    def _sn_for_index(self, index):
+        """Return the camera serial number for a given config index, or 0 if unknown."""
+        sns = list(self.camera_info.keys())
+        return sns[index] if 0 <= index < len(sns) else 0
+
+    def _name_for_index(self, index):
+        """Return a display name for a given config index."""
+        if index < 0:
+            return "Unknown"
+        for i, (sn, info) in enumerate(self.camera_info.items()):
+            if i == index:
+                return info.get("name", f"Camera {index}")
+        return f"Camera {index}"
 
     # ──────────────────────── Setup ────────────────────────
 
@@ -1233,6 +1232,7 @@ class CameraNode(Node):
             disp_exposure = cam.pending_exposure if cam.pending_exposure is not None else cam.exposure
             disp_gain     = cam.pending_gain     if cam.pending_gain     is not None else cam.gain
             disp_gamma    = cam.pending_gamma    if cam.pending_gamma    is not None else cam.gamma
+            disp_denoising = cam.pending_denoising if cam.pending_denoising is not None else cam.denoising
             cam.widget.update_stats(disp_exposure, disp_gain, disp_gamma, pending=True)
 
     def apply_pending_settings(self):
@@ -1274,7 +1274,7 @@ class CameraNode(Node):
                 if ow == res_w and oh == res_h:
                     cam.resolution = ridx
                     if cam.index >= 0:
-                        self.config.ratios[cam.index] = [res_w, res_h]
+                        self.camera_ratios[cam.index] = [res_w, res_h]
                     break
             cam.apply_pending()
 
@@ -1287,7 +1287,7 @@ class CameraNode(Node):
         def on_cancel():
             cam.discard_pending()
             if cam.widget and hasattr(cam.widget, 'update_stats'):
-                cam.widget.update_stats(cam.exposure, cam.gain, cam.gamma, pending=False)
+                cam.widget.update_stats(cam.exposure, cam.gain, cam.gamma, cam.denoising, pending=False)
             self._settings_panel = None
 
         panel.applied.connect(on_apply)
@@ -1320,10 +1320,10 @@ class CameraNode(Node):
         if cam.index in (-1, *active_indexes):
             cam.index = self.get_available_index()
         
-        cam.serial = self.config.serials[cam.index]
+        cam.camera_sn = self._sn_for_index(cam.index)
         
-        if cam.serial in self.camera_info:
-            info = self.camera_info[cam.serial]
+        if cam.camera_sn in self.camera_info:
+            info = self.camera_info[cam.camera_sn]
             cam.source_type = info["source"]
             cam.camera_id = info["camera_id"]
             cam.source_type = info["source"]
@@ -1331,6 +1331,7 @@ class CameraNode(Node):
             cam.exposure    = info.get("exposure")
             cam.gain        = info.get("gain")
             cam.gamma       = info.get("gamma")
+            cam.denoising   = info.get("denoising")
             
             source_available = False
             for name, element in self.zed_sources.items():
@@ -1339,19 +1340,19 @@ class CameraNode(Node):
                     break
             
             if source_available:
-                print(f"Activated {info['type']} (Serial: {cam.serial}, Source: {cam.source_type}, Camera ID: {cam.camera_id})")
+                print(f"Activated {info['type']} (Serial: {cam.camera_sn}, Source: {cam.source_type}, Camera ID: {cam.camera_id})")
             else:
                 print(f"ERROR: {info['type']} requires {cam.source_type} which is not available!")
                 cam.source_type = None
                 cam.camera_id = 0
         else:
-            cam.camera_id = self.config.camera_ids[cam.index]
+            cam.camera_id = cam.index  # fallback: camera-id matches config index
             if self.available_zed_sources.get("zedxone"):
                 cam.source_type = "zedxonesrc"
-                print(f"Warning: Using zedxonesrc for unknown camera serial {cam.serial}")
+                print(f"Warning: Using zedxonesrc for unknown camera serial {cam.camera_sn}")
             else:
                 cam.source_type = None
-                print(f"Warning: No ZED source available for camera {cam.serial}")
+                print(f"Warning: No ZED source available for camera {cam.camera_sn}")
         
         self.camera_current = cam.position
 
@@ -1453,7 +1454,7 @@ class CameraNode(Node):
         self.update_camera_borders()
 
     def change_display(self, direction):
-        self.display_mode = (self.display_mode + direction) % len(self.config.layout[0])
+        self.display_mode = (self.display_mode + direction) % len(CAMERA_LAYOUT[0])
         self.set_camera_positions()
 
     def toggle_focus(self):
@@ -1510,14 +1511,14 @@ class CameraNode(Node):
         
         if cam_current.widget and hasattr(cam_current.widget, 'update_labels'):
             cam_current.widget.update_labels(
-                self.config.names[cam_current.index] if cam_current.index >= 0 else "Unknown",
-                str(self.config.serials[cam_current.index]) if cam_current.index >= 0 else "N/A"
+                self._name_for_index(cam_current.index),
+                str(self._sn_for_index(cam_current.index))
             )
         
         if cam_target.widget and hasattr(cam_target.widget, 'update_labels'):
             cam_target.widget.update_labels(
-                self.config.names[cam_target.index] if cam_target.index >= 0 else "Unknown",
-                str(self.config.serials[cam_target.index]) if cam_target.index >= 0 else "N/A"
+                self._name_for_index(cam_target.index),
+                str(self._sn_for_index(cam_target.index))
             )
         
         self.camera_current = self.camera_current
@@ -1545,20 +1546,20 @@ class CameraNode(Node):
             active_indexes = [c.index for c in list(filter(lambda c: c.active, self.cameras))]
             if current_index not in active_indexes or current_index == start_index:
                 cam.index = current_index
-                cam.serial = self.config.serials[cam.index]
+                cam.camera_sn = self._sn_for_index(cam.index)
                 
-                if cam.serial in self.camera_info:
-                    info = self.camera_info[cam.serial]
+                if cam.camera_sn in self.camera_info:
+                    info = self.camera_info[cam.camera_sn]
                     cam.source_type = info["source"]
                     cam.camera_id = info["camera_id"]
                 else:
-                    cam.camera_id = self.config.camera_ids[cam.index]
+                    cam.camera_id = cam.index  # fallback: camera-id matches config index
                 break
 
         if cam.widget and hasattr(cam.widget, 'update_labels'):
             cam.widget.update_labels(
-                self.config.names[cam.index],
-                str(self.config.serials[cam.index])
+                self._name_for_index(cam.index),
+                str(self._sn_for_index(cam.index))
             )
 
     # ──────────────────────── Camera Widgets ────────────────────────
@@ -1567,7 +1568,7 @@ class CameraNode(Node):
         active_positions = [c.position for c in self.cameras if c.active] or [cam.position]
         max_pos = max(active_positions)
 
-        dims = self.config.layout[max(max_pos, 0)][self.display_mode][0]
+        dims = CAMERA_LAYOUT[max(max_pos, 0)][self.display_mode][0]
         x = round(dims[0] * self.container.width())
         y = round(dims[1] * self.container.height())
         w = round(dims[2] * self.container.width())
@@ -1575,39 +1576,41 @@ class CameraNode(Node):
 
         use_camera = self.use_video_overlay and cam.source_type is not None
 
-        cam_ratio = self.config.ratios[cam.index] if cam.index >= 0 else [1920, 1080]
+        cam_ratio = self.camera_ratios.get(cam.index, [1920, 1080])
         cam_w, cam_h = cam_ratio[0], cam_ratio[1]
 
         if use_camera:
             src = cam.source_type
-            cid = cam.camera_id
-            exp = cam.exposure
-            gain = cam.gain
-            gamma = cam.gamma
 
-            mode_prop = _SRC_MODE_PROP.get(src, "")
+            mode_prop = ""
             mode_val  = getattr(cam, 'resolution', 0)
             mode_str  = f"{mode_prop}={mode_val} " if mode_prop else ""
 
             if src == "zedxonesrc":
                 cam_props = (
-                    f"camera-id={cid} "
-                    f"{mode_str}"
+                    f"camera-id={cam.camera_id} "
+                    f"camera-sn={cam.camera_sn} "
+                    f"{mode_str} "
                     f"ctrl-auto-exposure=false "
-                    f"ctrl-auto-exposure-range-min={exp} "
-                    f"ctrl-auto-exposure-range-max={exp} "
-                    f"ctrl-exposure-time={exp} "
-                    f"ctrl-analog-gain={gain} "
-                    f"ctrl-gamma={gamma}"
+                    f"ctrl-auto-exposure-range-min={cam.exposure} "
+                    f"ctrl-auto-exposure-range-max={cam.exposure} "
+                    f"ctrl-exposure-time={cam.exposure} "
+                    f"ctrl-analog-gain={cam.gain} "
+                    f"ctrl-gamma={cam.gamma} "
+                    f"ctrl-denoising={cam.denoising}"
                 )
             elif src == "zedsrc":
                 cam_props = (
-                    f"camera-id={cid} "
-                    f"{mode_str}"
+                    f"camera-id={cam.camera_id} "
+                    f"camera-sn={cam.camera_sn} "
+                    f"{mode_str} "
+                    f"ctrl-aec-agc=false "
+                    f"ctrl-exposure-range-min={cam.exposure} "
+                    f"ctrl-exposure-range-max={cam.exposure} "
+                    f"ctrl-gain={cam.gain} "
+                    f"ctrl-gamma={cam.gamma} "
                 )
 
-            # No caps filter — let source negotiate resolution natively via stream-type/video-mode.
-            # cam_w/cam_h (from config.ratios) are used only for widget aspect ratio, not pipeline.
             pipeline = (
                 f"{src} {cam_props} "
                 f"! queue ! videoconvert ! videoscale "
@@ -1619,8 +1622,8 @@ class CameraNode(Node):
         try:
             camera_feed_widget = GStreamerVideoWidget(
                 pipeline if pipeline else "", 
-                camera_name=self.config.names[cam.index],
-                camera_serial=str(cam.serial),
+                camera_name=self._name_for_index(cam.index),
+                camera_sn=str(cam.camera_sn),
                 use_overlay=use_camera,
                 camera_width=cam_w,
                 camera_height=cam_h,
@@ -1638,10 +1641,8 @@ class CameraNode(Node):
                 QApplication.processEvents()
                 camera_feed_widget.start()
 
-            # Connect click: first click selects, second click on already-selected opens settings
             def on_widget_clicked(pos=cam.position, c=cam):
                 if self.camera_current == pos and c.active:
-                    # Already selected — open settings panel
                     self.show_settings_panel(c)
                 else:
                     self.select_camera(pos)
@@ -1656,21 +1657,15 @@ class CameraNode(Node):
                     Qt.Tool
                 )
                 overlay.setStyleSheet("background: transparent;")
-                global_pos = self.container.mapToGlobal(
-                    self.container.rect().topLeft()
-                )
-                overlay.setGeometry(
-                    global_pos.x() + x,
-                    global_pos.y() + y,
-                    w, h
-                )
+                global_pos = self.container.mapToGlobal(self.container.rect().topLeft())
+                overlay.setGeometry(global_pos.x() + x, global_pos.y() + y, w, h)
                 overlay.show()
                 camera_feed_widget.loading_overlay = overlay
                 overlay.start()
 
             cam.widget = camera_feed_widget
             if use_camera and hasattr(camera_feed_widget, 'update_stats'):
-                camera_feed_widget.update_stats(cam.exposure, cam.gain, cam.gamma)
+                camera_feed_widget.update_stats(cam.exposure, cam.gain, cam.gamma, cam.denoising)
         except Exception as e:
             self.get_logger().error(f"Failed to create camera widget: {e}")
             placeholder = QWidget(self.container)
@@ -1694,7 +1689,7 @@ class CameraNode(Node):
             if not cam.widget:
                 continue
 
-            layouts = self.config.layout[i][self.display_mode]
+            layouts = CAMERA_LAYOUT[i][self.display_mode]
             dims = layouts[max(0, min(max_pos + 1 - i, len(layouts) - 1))]
             
             x = round(dims[0] * self.container.width())
@@ -1830,7 +1825,7 @@ class CameraNode(Node):
             else:
                 x = y = w = h = 0
             active_str = "\033[92mTrue  \033[0m" if cam.active else "\033[91mFalse \033[0m"
-            serial_str = str(cam.serial) if cam.serial else "N/A"
+            serial_str = str(cam.camera_sn) if cam.camera_sn else "N/A"
             print(f"{cam.position:>3} | {active_str} | {cam.index:>5} | {serial_str:>9} | {cam.camera_id:>5} | {x:>4} | {y:>4} | {w:>4} | {h:>4}")
 
 

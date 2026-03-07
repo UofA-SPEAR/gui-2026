@@ -6,11 +6,6 @@ Captures from ZED camera and streams over UDP to a receiver machine.
 
 Usage:
     python3 jetson_camera_sender.py --host 192.168.1.100 --port 5000 --camera-id 0
-
-Requirements:
-    - ZED SDK with GStreamer plugin (zedxonesrc)
-    - gstreamer1.0-plugins-good (for rtph264pay, udpsink)
-    - gstreamer1.0-plugins-bad or nvidia plugins for encoding
 """
 
 import gi
@@ -22,21 +17,7 @@ import sys
 
 
 def build_pipeline(host, port, camera_id):
-    # Try hardware encoder first (Jetson), fall back to software
-    pipeline_str = (
-        f"zedxonesrc camera-id={camera_id} "
-        f"! queue "
-        f"! videoconvert "
-        f"! nvv4l2h264enc iframeinterval=30 bitrate=4000000 "  # Jetson HW encoder
-        f"! rtph264pay config-interval=1 pt=96 "
-        f"! udpsink host={host} port={port} sync=false"
-    )
-    return pipeline_str
-
-
-def build_pipeline_software(host, port, camera_id):
-    # Fallback: software encoding (slower, works on any machine)
-    pipeline_str = (
+    return (
         f"zedxonesrc camera-id={camera_id} "
         f"! queue "
         f"! videoconvert "
@@ -44,7 +25,6 @@ def build_pipeline_software(host, port, camera_id):
         f"! rtph264pay config-interval=1 pt=96 "
         f"! udpsink host={host} port={port} sync=false"
     )
-    return pipeline_str
 
 
 def main():
@@ -52,18 +32,11 @@ def main():
     parser.add_argument("--host", required=True, help="IP of the receiver machine")
     parser.add_argument("--port", type=int, default=5000, help="UDP port (default: 5000)")
     parser.add_argument("--camera-id", type=int, default=0, help="ZED camera ID (default: 0)")
-    parser.add_argument("--software", action="store_true", help="Force software encoding (x264)")
     args = parser.parse_args()
 
     Gst.init(None)
 
-    if args.software:
-        pipeline_str = build_pipeline_software(args.host, args.port, args.camera_id)
-        print("Using software encoding (x264)")
-    else:
-        pipeline_str = build_pipeline(args.host, args.port, args.camera_id)
-        print("Using hardware encoding (nvv4l2h264enc)")
-
+    pipeline_str = build_pipeline(args.host, args.port, args.camera_id)
     print(f"Pipeline: {pipeline_str}")
     print(f"Streaming to {args.host}:{args.port}")
 
@@ -77,18 +50,13 @@ def main():
     loop = GLib.MainLoop()
 
     def on_message(bus, message):
-        mtype = message.type
-        if mtype == Gst.MessageType.EOS:
+        if message.type == Gst.MessageType.EOS:
             print("End of stream")
             loop.quit()
-        elif mtype == Gst.MessageType.ERROR:
+        elif message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
             print(f"Error: {err}", file=sys.stderr)
             print(f"Debug: {debug}", file=sys.stderr)
-
-            if "nvv4l2h264enc" in str(debug) or "nvv4l2h264enc" in str(err):
-                print("\nHardware encoder failed. Try running with --software flag.", file=sys.stderr)
-
             loop.quit()
 
     bus.connect("message", on_message)
@@ -100,11 +68,7 @@ def main():
 
     print("Streaming... Press Ctrl+C to stop.")
 
-    def shutdown(sig, frame):
-        print("\nStopping...")
-        loop.quit()
-
-    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGINT, lambda s, f: loop.quit())
 
     try:
         loop.run()
