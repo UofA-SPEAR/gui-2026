@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = 'spear_gui'
 
@@ -11,6 +13,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('lib/' + package_name, ['spear_gui/Oxanium-Regular.ttf', 'spear_gui/Oxanium-SemiBold.ttf']),
+        (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*.py'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -26,7 +29,8 @@ setup(
     entry_points={
         'console_scripts': [
             'main_gui = spear_gui.main_gui:main',
-            'camera_node = spear_gui.camera_node:main'
+            'camera_node = spear_gui.camera_node:main',
+            'rover_camera_manager = spear_gui.rover_camera_manager:main'
         ],
     },
 )

@@ -1,121 +1,141 @@
 #!/usr/bin/env python3
+"""
+Jetson Camera Sender - ROS2 Node
+---------------------------------
+Streams multiple ZED cameras over multicast UDP.
+
+Usage:
+    python3 jetson_camera_sender.py
+    ros2 run <package> jetson_camera_sender
+"""
+
+import gi
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst, GLib
+import threading
+import signal
 import sys
-from PySide6.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
-from PySide6.QtCore import QTimer
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
 
+# ──────────────────────── Config ────────────────────────
 
-class ListenerNode(Node):
-    def __init__(self):
-        super().__init__('gui_listener')
+CAMERA_IDS      = [0, 1]       # ZED camera IDs to stream
+BASE_PORT       = 5000          # Camera 0 -> 5000, Camera 1 -> 5001, etc.
+MULTICAST_GROUP = "224.1.1.1"
+BITRATE         = 4000          # kbps
 
-        self.key_pub = self.create_publisher(String, "key", 10)
+# ──────────────────────── Pipeline ────────────────────────
 
-class GStreamerThread(QThread):
-    finished = Signal()
-    error_occured = Signal(str)
-    video_loaded = Signal()
+def build_pipeline(camera_id, port):
+    return (
+        f"zedxonesrc camera-id={camera_id} "
+        f"! queue "
+        f"! videoconvert "
+        f"! x264enc tune=zerolatency speed-preset=ultrafast bitrate={BITRATE} "
+        f"! rtph264pay config-interval=1 pt=96 "
+        f"! udpsink host={MULTICAST_GROUP} port={port} auto-multicast=true sync=false"
+    )
 
-    def __init__(self, pipeline_str, window_id=None, parent=None):
-        super().__init__(parent)
-        self.pipeline_str = pipeline_str
-        self.window_id = window_id
+# ──────────────────────── Camera Stream ────────────────────────
+
+class CameraStream:
+    def __init__(self, camera_id, port, logger):
+        self.camera_id = camera_id
+        self.port = port
+        self.logger = logger
         self.pipeline = None
-        self.bus = None
-        self.loop = GLib.MainLoop()
-        self._loaded = False
+        self.loop = None
+        self.thread = None
 
-        try:
-            Gst.init(None)
-            self.pipeline = Gst.parse_launch(self.pipeline_str)
+    def start(self):
+        pipeline_str = build_pipeline(self.camera_id, self.port)
+        self.logger.info(f"Camera {self.camera_id} pipeline: {pipeline_str}")
 
-            if not self.pipeline:
-                raise RuntimeError(f"Failed to create pipeline: {self.pipeline_str}")
-
-            self.bus = self.pipeline.get_bus()
-            self.bus.add_signal_watch()
-            self.bus.connect("message", self.on_message)
-            
-            if self.window_id is not None:
-                self.bus.enable_sync_message_emission()
-                self.bus.connect("sync-message::element", self.on_sync_message)
-        except Exception as e:
-            error_msg = f"Pipeline creation failed: {e}"
-            print(error_msg, file=sys.stderr)
-            self.error_occured.emit(error_msg)
-            self.pipeline = None
-
-    def on_sync_message(self, bus, message):
-        if message.get_structure() and message.get_structure().get_name() == 'prepare-window-handle':
-            if self.window_id is not None:
-                try:
-                    print(f"Setting window handle in sync: {self.window_id}")
-                    message.src.set_window_handle(self.window_id)
-                except Exception as e:
-                    print(f"Failed to set window handle: {e}", file=sys.stderr)
-
-    def run(self):
+        self.pipeline = Gst.parse_launch(pipeline_str)
         if not self.pipeline:
-            print("Pipeline not initialized, cannot run", file=sys.stderr)
+            self.logger.error(f"Camera {self.camera_id}: failed to create pipeline")
             return
-            
+
+        bus = self.pipeline.get_bus()
+        bus.add_signal_watch()
+        self.loop = GLib.MainLoop()
+        bus.connect("message", self._on_message)
+
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
-            print("Unable to set the pipeline to playing state", file=sys.stderr)
-            self.error_occured.emit("Failed to set pipeline to PLAYING state")
+            self.logger.error(f"Camera {self.camera_id}: failed to set pipeline to PLAYING")
             return
 
-        print("Pipeline is running.")
-        self.loop.run()
+        self.logger.info(f"Camera {self.camera_id} streaming on {MULTICAST_GROUP}:{self.port}")
+        self.thread = threading.Thread(target=self.loop.run, daemon=True)
+        self.thread.start()
 
     def stop(self):
         if self.pipeline:
             self.pipeline.set_state(Gst.State.NULL)
-        self.loop.quit()
-
-    def on_message(self, bus, message):
-        mtype = message.type
-
-        if mtype == Gst.MessageType.EOS:
-            print("End of stream")
+        if self.loop:
             self.loop.quit()
-        elif mtype == Gst.MessageType.ERROR:
+        if self.thread:
+            self.thread.join(timeout=2)
+        self.logger.info(f"Camera {self.camera_id} stopped")
+
+    def _on_message(self, bus, message):
+        if message.type == Gst.MessageType.EOS:
+            self.logger.info(f"Camera {self.camera_id}: end of stream")
+            self.loop.quit()
+        elif message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            print(f"Error: {err}", file=sys.stderr)
-            print(f"Debug info: {debug}", file=sys.stderr)
-            self.error_occured.emit(f"GStreamer error: {err}")
+            self.logger.error(f"Camera {self.camera_id} error: {err}")
+            self.logger.error(f"Camera {self.camera_id} debug: {debug}")
             self.loop.quit()
-        elif mtype == Gst.MessageType.ASYNC_DONE and not self._loaded:
-            self._loaded = True
-            self.video_loaded.emit()
 
-        return True
+# ──────────────────────── ROS2 Node ────────────────────────
 
+class CameraSenderNode(Node):
+    def __init__(self):
+        super().__init__('camera_sender_node')
+        Gst.init(None)
 
+        self.streams = []
+        for camera_id in CAMERA_IDS:
+            port = BASE_PORT + camera_id
+            stream = CameraStream(camera_id, port, self.get_logger())
+            self.streams.append(stream)
+
+        self.get_logger().info(f"Starting {len(self.streams)} camera stream(s)...")
+        self.get_logger().info(f"Multicast group: {MULTICAST_GROUP}")
+        self.get_logger().info(f"Ports: {[BASE_PORT + cid for cid in CAMERA_IDS]}")
+
+        for stream in self.streams:
+            stream.start()
+
+    def shutdown(self):
+        self.get_logger().info("Shutting down streams...")
+        for stream in self.streams:
+            stream.stop()
+
+# ──────────────────────── Main ────────────────────────
 
 def main():
     rclpy.init()
-    node = ListenerNode()
+    node = CameraSenderNode()
 
+    def on_sigint(sig, frame):
+        node.shutdown()
+        rclpy.shutdown()
+        sys.exit(0)
 
-    self.thread = GStreamerThread(
-        self.pipeline_str,
-        self.video_surface.winId(),
-        parent=self
-    )
+    signal.signal(signal.SIGINT, on_sigint)
 
-    # Timer to spin ROS2 node periodically
-    ros_timer = QTimer()
-    ros_timer.timeout.connect(lambda: rclpy.spin_once(node, timeout_sec=0))
-    ros_timer.start(30)
-
-    app.exec()
-
-    node.destroy_node()
-    rclpy.shutdown()
-
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == "__main__":
     main()

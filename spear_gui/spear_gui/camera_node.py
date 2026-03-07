@@ -12,7 +12,7 @@ from PySide6.QtCore import QPointF
 from std_msgs.msg import String
 from collections import deque
 from PySide6.QtCore import qInstallMessageHandler
-from gui_vars import Tween, RectDef, RECT_DEFS, CAMERA_LAYOUT
+from spear_gui.gui_vars import Tween, RectDef, RECT_DEFS, CAMERA_LAYOUT
 
 def _qt_message_handler(mode, context, message):
     if 'Painter not active' in message or 'painter' in message.lower() and 'not active' in message.lower():
