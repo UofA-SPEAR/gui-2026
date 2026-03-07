@@ -2,7 +2,7 @@
 """
 Jetson Camera Sender - ROS2 Node
 ---------------------------------
-Streams multiple ZED cameras over multicast UDP.
+Streams multiple ZED cameras over UDP to a receiver machine.
 
 Usage:
     python3 jetson_camera_sender.py
@@ -13,17 +13,16 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 import threading
-import signal
 import sys
 import rclpy
 from rclpy.node import Node
 
 # ──────────────────────── Config ────────────────────────
 
-CAMERA_IDS      = [0, 1]       # ZED camera IDs to stream
-BASE_PORT       = 5000          # Camera 0 -> 5000, Camera 1 -> 5001, etc.
-MULTICAST_GROUP = "224.1.1.1"
-BITRATE         = 4000          # kbps
+CAMERA_IDS  = [0, 1]           # ZED camera IDs to stream
+BASE_PORT   = 5000              # Camera 0 -> 5000, Camera 1 -> 5001, etc.
+RECEIVER_IP = "192.168.8.224"  # IP of the machine receiving the stream
+BITRATE     = 4000              # kbps
 
 # ──────────────────────── Pipeline ────────────────────────
 
@@ -34,7 +33,7 @@ def build_pipeline(camera_id, port):
         f"! videoconvert "
         f"! x264enc tune=zerolatency speed-preset=ultrafast bitrate={BITRATE} "
         f"! rtph264pay config-interval=1 pt=96 "
-        f"! udpsink host={MULTICAST_GROUP} port={port} auto-multicast=true sync=false"
+        f"! udpsink host={RECEIVER_IP} port={port} sync=false"
     )
 
 # ──────────────────────── Camera Stream ────────────────────────
@@ -67,7 +66,7 @@ class CameraStream:
             self.logger.error(f"Camera {self.camera_id}: failed to set pipeline to PLAYING")
             return
 
-        self.logger.info(f"Camera {self.camera_id} streaming on {MULTICAST_GROUP}:{self.port}")
+        self.logger.info(f"Camera {self.camera_id} streaming to {RECEIVER_IP}:{self.port}")
         self.thread = threading.Thread(target=self.loop.run, daemon=True)
         self.thread.start()
 
@@ -104,7 +103,7 @@ class CameraSenderNode(Node):
             self.streams.append(stream)
 
         self.get_logger().info(f"Starting {len(self.streams)} camera stream(s)...")
-        self.get_logger().info(f"Multicast group: {MULTICAST_GROUP}")
+        self.get_logger().info(f"Receiver: {RECEIVER_IP}")
         self.get_logger().info(f"Ports: {[BASE_PORT + cid for cid in CAMERA_IDS]}")
 
         for stream in self.streams:
@@ -120,13 +119,6 @@ class CameraSenderNode(Node):
 def main():
     rclpy.init()
     node = CameraSenderNode()
-
-    def on_sigint(sig, frame):
-        node.shutdown()
-        rclpy.shutdown()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, on_sigint)
 
     try:
         rclpy.spin(node)
