@@ -19,16 +19,20 @@ from rclpy.node import Node
 
 # ──────────────────────── Config ────────────────────────
 
-CAMERA_IDS  = [0, 1]           # ZED camera IDs to stream
-BASE_PORT   = 5000              # Camera 0 -> 5000, Camera 1 -> 5001, etc.
 RECEIVER_IP = "192.168.8.224"  # IP of the machine receiving the stream
 BITRATE     = 4000              # kbps
 
+CAMERAS = [
+    {"camera_id": 0, "source": "zedxonesrc", "port": 5000},
+    {"camera_id": 1, "source": "zedxonesrc", "port": 5001},
+    {"camera_id": 0, "source": "zedsrc",     "port": 5002},  # ZED X Mini
+]
+
 # ──────────────────────── Pipeline ────────────────────────
 
-def build_pipeline(camera_id, port):
+def build_pipeline(source, camera_id, port):
     return (
-        f"zedxonesrc camera-id={camera_id} "
+        f"{source} camera-id={camera_id} "
         f"! queue "
         f"! videoconvert "
         f"! x264enc tune=zerolatency speed-preset=ultrafast bitrate={BITRATE} "
@@ -39,7 +43,8 @@ def build_pipeline(camera_id, port):
 # ──────────────────────── Camera Stream ────────────────────────
 
 class CameraStream:
-    def __init__(self, camera_id, port, logger):
+    def __init__(self, source, camera_id, port, logger):
+        self.source = source
         self.camera_id = camera_id
         self.port = port
         self.logger = logger
@@ -48,12 +53,12 @@ class CameraStream:
         self.thread = None
 
     def start(self):
-        pipeline_str = build_pipeline(self.camera_id, self.port)
-        self.logger.info(f"Camera {self.camera_id} pipeline: {pipeline_str}")
+        pipeline_str = build_pipeline(self.source, self.camera_id, self.port)
+        self.logger.info(f"[{self.source} cam {self.camera_id}] pipeline: {pipeline_str}")
 
         self.pipeline = Gst.parse_launch(pipeline_str)
         if not self.pipeline:
-            self.logger.error(f"Camera {self.camera_id}: failed to create pipeline")
+            self.logger.error(f"[{self.source} cam {self.camera_id}] failed to create pipeline")
             return
 
         bus = self.pipeline.get_bus()
@@ -63,10 +68,10 @@ class CameraStream:
 
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
-            self.logger.error(f"Camera {self.camera_id}: failed to set pipeline to PLAYING")
+            self.logger.error(f"[{self.source} cam {self.camera_id}] failed to set pipeline to PLAYING")
             return
 
-        self.logger.info(f"Camera {self.camera_id} streaming to {RECEIVER_IP}:{self.port}")
+        self.logger.info(f"[{self.source} cam {self.camera_id}] streaming to {RECEIVER_IP}:{self.port}")
         self.thread = threading.Thread(target=self.loop.run, daemon=True)
         self.thread.start()
 
@@ -77,16 +82,16 @@ class CameraStream:
             self.loop.quit()
         if self.thread:
             self.thread.join(timeout=2)
-        self.logger.info(f"Camera {self.camera_id} stopped")
+        self.logger.info(f"[{self.source} cam {self.camera_id}] stopped")
 
     def _on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
-            self.logger.info(f"Camera {self.camera_id}: end of stream")
+            self.logger.info(f"[{self.source} cam {self.camera_id}] end of stream")
             self.loop.quit()
         elif message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            self.logger.error(f"Camera {self.camera_id} error: {err}")
-            self.logger.error(f"Camera {self.camera_id} debug: {debug}")
+            self.logger.error(f"[{self.source} cam {self.camera_id}] error: {err}")
+            self.logger.error(f"[{self.source} cam {self.camera_id}] debug: {debug}")
             self.loop.quit()
 
 # ──────────────────────── ROS2 Node ────────────────────────
@@ -97,14 +102,14 @@ class CameraSenderNode(Node):
         Gst.init(None)
 
         self.streams = []
-        for camera_id in CAMERA_IDS:
-            port = BASE_PORT + camera_id
-            stream = CameraStream(camera_id, port, self.get_logger())
+        for cam in CAMERAS:
+            stream = CameraStream(cam["source"], cam["camera_id"], cam["port"], self.get_logger())
             self.streams.append(stream)
 
         self.get_logger().info(f"Starting {len(self.streams)} camera stream(s)...")
         self.get_logger().info(f"Receiver: {RECEIVER_IP}")
-        self.get_logger().info(f"Ports: {[BASE_PORT + cid for cid in CAMERA_IDS]}")
+        for cam in CAMERAS:
+            self.get_logger().info(f"  {cam['source']} camera-id={cam['camera_id']} -> port {cam['port']}")
 
         for stream in self.streams:
             stream.start()
