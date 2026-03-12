@@ -10,9 +10,8 @@ Usage:
     ros2 run <package> jetson_camera_sender
 
 Publishing settings:
-    ros2 topic pub /camera_settings std_msgs/msg/String "data: '0,exposure,10000'"
-    ros2 topic pub /camera_settings std_msgs/msg/String "data: '0,gain,30000'"
-    # Format: "<port>,<setting>,<value>"
+    ros2 topic pub --once /camera_settings std_msgs/msg/String "data: '5000,exposure=10000,gain=30000'"
+    # Format: "<port>,<setting>=<value>,<setting>=<value>,..."
 """
 
 import gi
@@ -27,7 +26,7 @@ from std_msgs.msg import String
 # ──────────────────────── Config ────────────────────────
 
 RECEIVER_IP = "192.168.8.224"  # IP of the machine receiving the stream
-BITRATE     = 4000              # kbps
+BITRATE     = 10000              # kbps
 
 CAMERAS = [
     {"camera_id": 0, "source": "zedxonesrc", "port": 5000, "exposure": 10000, "gain": 30000},
@@ -58,7 +57,7 @@ def build_pipeline(source, camera_id, port, exposure, gain):
         f"{source} {src_props}"
         f"! queue "
         f"! videoconvert "
-        f"! x264enc tune=zerolatency speed-preset=ultrafast bitrate={BITRATE} "
+        f"! x264enc tune=zerolatency speed-preset=fast bitrate={BITRATE} "
         f"! rtph264pay config-interval=1 pt=96 "
         f"! udpsink host={RECEIVER_IP} port={port} sync=false"
     )
@@ -105,11 +104,12 @@ class CameraStream:
         self.thread = threading.Thread(target=self.loop.run, daemon=True)
         self.thread.start()
 
-    def restart(self, exposure=None, gain=None):
-        if exposure is not None:
-            self.exposure = exposure
-        if gain is not None:
-            self.gain = gain
+    def restart(self, **kwargs):
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                self.logger.warn(f"[{self.source} cam {self.camera_id}] unknown setting '{key}', ignoring")
 
         self.logger.info(f"[{self.source} cam {self.camera_id}] restarting with exposure={self.exposure} gain={self.gain}")
 
@@ -150,7 +150,6 @@ class CameraSenderNode(Node):
         super().__init__('camera_sender_node')
         Gst.init(None)
 
-        # Build a port -> stream map for easy lookup
         self.streams = {}
         for cam in CAMERAS:
             stream = CameraStream(cam, self.get_logger())
@@ -164,37 +163,38 @@ class CameraSenderNode(Node):
         for stream in self.streams.values():
             stream.start()
 
-        # Subscribe to camera settings topic
-        # Message format: "<port>,<setting>,<value>"
-        # Example: "5000,exposure,10000"
         self.create_subscription(String, 'camera_settings', self._on_settings, 10)
         self.get_logger().info("Listening for settings on /camera_settings")
-        self.get_logger().info("  Format: '<port>,<setting>,<value>'")
+        self.get_logger().info("  Format: '<port>,<setting>=<value>,<setting>=<value>,...'")
         self.get_logger().info("  Settings: exposure, gain")
 
     def _on_settings(self, msg):
         try:
             parts = msg.data.strip().split(',')
-            if len(parts) != 3:
-                self.get_logger().error(f"Invalid format: '{msg.data}' — expected '<port>,<setting>,<value>'")
+            if len(parts) < 2:
+                self.get_logger().error(f"Invalid format: '{msg.data}' — expected '<port>,<setting>=<value>,...'")
                 return
 
-            port    = int(parts[0])
-            setting = parts[1].strip().lower()
-            value   = int(parts[2])
+            port = int(parts[0])
 
             if port not in self.streams:
                 self.get_logger().error(f"No stream on port {port}. Available: {list(self.streams.keys())}")
                 return
 
-            stream = self.streams[port]
+            supported = {"exposure", "gain"}
+            kwargs = {}
+            for part in parts[1:]:
+                if '=' not in part:
+                    self.get_logger().error(f"Invalid setting '{part}' — expected '<setting>=<value>'")
+                    return
+                key, val = part.split('=', 1)
+                key = key.strip().lower()
+                if key not in supported:
+                    self.get_logger().error(f"Unknown setting '{key}'. Supported: {supported}")
+                    return
+                kwargs[key] = int(val)
 
-            if setting == "exposure":
-                stream.restart(exposure=value)
-            elif setting == "gain":
-                stream.restart(gain=value)
-            else:
-                self.get_logger().error(f"Unknown setting '{setting}'. Supported: exposure, gain")
+            self.streams[port].restart(**kwargs)
 
         except Exception as e:
             self.get_logger().error(f"Failed to parse settings message '{msg.data}': {e}")
