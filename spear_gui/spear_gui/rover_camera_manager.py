@@ -3,10 +3,16 @@
 Jetson Camera Sender - ROS2 Node
 ---------------------------------
 Streams multiple ZED cameras over UDP to a receiver machine.
+Listens on /camera_settings to update exposure/gain and restart streams.
 
 Usage:
     python3 jetson_camera_sender.py
     ros2 run <package> jetson_camera_sender
+
+Publishing settings:
+    ros2 topic pub /camera_settings std_msgs/msg/String "data: '0,exposure,10000'"
+    ros2 topic pub /camera_settings std_msgs/msg/String "data: '0,gain,30000'"
+    # Format: "<port>,<setting>,<value>"
 """
 
 import gi
@@ -16,6 +22,7 @@ import threading
 import sys
 import rclpy
 from rclpy.node import Node
+from std_msgs.msg import String
 
 # ──────────────────────── Config ────────────────────────
 
@@ -23,16 +30,32 @@ RECEIVER_IP = "192.168.8.224"  # IP of the machine receiving the stream
 BITRATE     = 4000              # kbps
 
 CAMERAS = [
-    {"camera_id": 0, "source": "zedxonesrc", "port": 5000},
-    {"camera_id": 1, "source": "zedxonesrc", "port": 5001},
-    {"camera_id": 0, "source": "zedsrc",     "port": 5002},  # ZED X Mini
+    {"camera_id": 0, "source": "zedxonesrc", "port": 5000, "exposure": 10000, "gain": 30000},
+    {"camera_id": 1, "source": "zedxonesrc", "port": 5001, "exposure": 10000, "gain": 30000},
+    {"camera_id": 0, "source": "zedsrc",     "port": 5002, "exposure": 50,    "gain": 50},  # ZED X Mini
 ]
 
 # ──────────────────────── Pipeline ────────────────────────
 
-def build_pipeline(source, camera_id, port):
+def build_pipeline(source, camera_id, port, exposure, gain):
+    if source == "zedxonesrc":
+        src_props = (
+            f"camera-id={camera_id} "
+            f"ctrl-auto-exposure=false "
+            f"ctrl-auto-exposure-range-min={exposure} "
+            f"ctrl-auto-exposure-range-max={exposure} "
+            f"ctrl-exposure-time={exposure} "
+            f"ctrl-analog-gain={gain} "
+        )
+    elif source == "zedsrc":
+        src_props = (
+            f"camera-id={camera_id} "
+        )
+    else:
+        src_props = f"camera-id={camera_id} "
+
     return (
-        f"{source} camera-id={camera_id} "
+        f"{source} {src_props}"
         f"! queue "
         f"! videoconvert "
         f"! x264enc tune=zerolatency speed-preset=ultrafast bitrate={BITRATE} "
@@ -43,17 +66,24 @@ def build_pipeline(source, camera_id, port):
 # ──────────────────────── Camera Stream ────────────────────────
 
 class CameraStream:
-    def __init__(self, source, camera_id, port, logger):
-        self.source = source
-        self.camera_id = camera_id
-        self.port = port
-        self.logger = logger
-        self.pipeline = None
-        self.loop = None
-        self.thread = None
+    def __init__(self, config, logger):
+        self.source    = config["source"]
+        self.camera_id = config["camera_id"]
+        self.port      = config["port"]
+        self.exposure  = config["exposure"]
+        self.gain      = config["gain"]
+        self.logger    = logger
+        self.pipeline  = None
+        self.loop      = None
+        self.thread    = None
+        self._lock     = threading.Lock()
 
     def start(self):
-        pipeline_str = build_pipeline(self.source, self.camera_id, self.port)
+        with self._lock:
+            self._start_pipeline()
+
+    def _start_pipeline(self):
+        pipeline_str = build_pipeline(self.source, self.camera_id, self.port, self.exposure, self.gain)
         self.logger.info(f"[{self.source} cam {self.camera_id}] pipeline: {pipeline_str}")
 
         self.pipeline = Gst.parse_launch(pipeline_str)
@@ -75,13 +105,32 @@ class CameraStream:
         self.thread = threading.Thread(target=self.loop.run, daemon=True)
         self.thread.start()
 
+    def restart(self, exposure=None, gain=None):
+        if exposure is not None:
+            self.exposure = exposure
+        if gain is not None:
+            self.gain = gain
+
+        self.logger.info(f"[{self.source} cam {self.camera_id}] restarting with exposure={self.exposure} gain={self.gain}")
+
+        with self._lock:
+            self._stop_pipeline()
+            self._start_pipeline()
+
     def stop(self):
+        with self._lock:
+            self._stop_pipeline()
+
+    def _stop_pipeline(self):
         if self.pipeline:
             self.pipeline.set_state(Gst.State.NULL)
+            self.pipeline = None
         if self.loop:
             self.loop.quit()
+            self.loop = None
         if self.thread:
             self.thread.join(timeout=2)
+            self.thread = None
         self.logger.info(f"[{self.source} cam {self.camera_id}] stopped")
 
     def _on_message(self, bus, message):
@@ -101,22 +150,58 @@ class CameraSenderNode(Node):
         super().__init__('camera_sender_node')
         Gst.init(None)
 
-        self.streams = []
+        # Build a port -> stream map for easy lookup
+        self.streams = {}
         for cam in CAMERAS:
-            stream = CameraStream(cam["source"], cam["camera_id"], cam["port"], self.get_logger())
-            self.streams.append(stream)
+            stream = CameraStream(cam, self.get_logger())
+            self.streams[cam["port"]] = stream
 
         self.get_logger().info(f"Starting {len(self.streams)} camera stream(s)...")
         self.get_logger().info(f"Receiver: {RECEIVER_IP}")
-        for cam in CAMERAS:
-            self.get_logger().info(f"  {cam['source']} camera-id={cam['camera_id']} -> port {cam['port']}")
+        for port, stream in self.streams.items():
+            self.get_logger().info(f"  {stream.source} camera-id={stream.camera_id} -> port {port}")
 
-        for stream in self.streams:
+        for stream in self.streams.values():
             stream.start()
+
+        # Subscribe to camera settings topic
+        # Message format: "<port>,<setting>,<value>"
+        # Example: "5000,exposure,10000"
+        self.create_subscription(String, 'camera_settings', self._on_settings, 10)
+        self.get_logger().info("Listening for settings on /camera_settings")
+        self.get_logger().info("  Format: '<port>,<setting>,<value>'")
+        self.get_logger().info("  Settings: exposure, gain")
+
+    def _on_settings(self, msg):
+        try:
+            parts = msg.data.strip().split(',')
+            if len(parts) != 3:
+                self.get_logger().error(f"Invalid format: '{msg.data}' — expected '<port>,<setting>,<value>'")
+                return
+
+            port    = int(parts[0])
+            setting = parts[1].strip().lower()
+            value   = int(parts[2])
+
+            if port not in self.streams:
+                self.get_logger().error(f"No stream on port {port}. Available: {list(self.streams.keys())}")
+                return
+
+            stream = self.streams[port]
+
+            if setting == "exposure":
+                stream.restart(exposure=value)
+            elif setting == "gain":
+                stream.restart(gain=value)
+            else:
+                self.get_logger().error(f"Unknown setting '{setting}'. Supported: exposure, gain")
+
+        except Exception as e:
+            self.get_logger().error(f"Failed to parse settings message '{msg.data}': {e}")
 
     def shutdown(self):
         self.get_logger().info("Shutting down streams...")
-        for stream in self.streams:
+        for stream in self.streams.values():
             stream.stop()
 
 # ──────────────────────── Main ────────────────────────
