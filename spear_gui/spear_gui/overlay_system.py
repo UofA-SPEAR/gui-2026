@@ -1,6 +1,3 @@
-"""overlay_system.py — Overlay engine, settings panel, camera select: all classes.
-Def tables live in overlay_defs.py.
-"""
 from __future__ import annotations
 from typing import Optional, Dict, List, Tuple, Callable, Any, Union
 from dataclasses import dataclass, field
@@ -1300,7 +1297,7 @@ class SettingsOverlay(QWidget):
 # +/- buttons        → change active camera count (clamped, no wrap)
 # Side boxes         → show adjacent display_styles (-1 and +1)
 
-from spear_gui.gui_vars import CAMERA_LAYOUT
+from spear_gui.gui_vars import CAMERA_LAYOUT, CAMERA_LAYOUT_NAMES
 
 NUM_CAM_SLOTS     = len(CAMERA_LAYOUT)       # 8 camera slots
 NUM_DISPLAY_MODES = len(CAMERA_LAYOUT[0])    # 3 display styles (0, 1, 2)
@@ -1479,6 +1476,19 @@ class PreviewBox:
     def draw(self, painter: QPainter, sw: int, sh: int, label_font: QFont):
         bx, by, bw, bh = self._box_screen(sw, sh)
         is_centre = abs(self._scx - 0.5) < 0.08
+
+        # Layout name above the box
+        name = CAMERA_LAYOUT_NAMES[self.display_mode % len(CAMERA_LAYOUT_NAMES)]
+        name_size  = 13.0 if is_centre else 9.0
+        name_alpha = 255  if is_centre else SIDE_ALPHA
+        name_font  = _make_font('Oxanium SemiBold', name_size)
+        name_fm    = QFontMetrics(name_font)
+        name_x     = int(bx + (bw - name_fm.horizontalAdvance(name)) / 2)
+        name_y     = int(by - 8)   # 8px gap above the box
+        painter.setFont(name_font)
+        painter.setPen(QColor(255, 255, 255, name_alpha))
+        painter.drawText(name_x, name_y, name)
+        painter.setPen(Qt.NoPen)
 
         # Outer box border — fixed 2px regardless of box size
         pen = QPen(QColor(255, 255, 255, 255 if is_centre else SIDE_ALPHA))
@@ -1671,10 +1681,10 @@ class ScrollSystem:
         for box in self._boxes: box.update()
 
     def draw(self, painter: QPainter, sw: int, sh: int, label_font: QFont):
-        # Draw in reverse slot-distance order so centre paints on top;
-        # skip ±2 pre-load boxes (invisible, off-screen)
+        # Draw in reverse slot-distance order so centre paints on top.
+        # Skip ±2 boxes only when fully settled (not while sliding through).
         for box in sorted(self._boxes, key=lambda b: abs(b.slot), reverse=True):
-            if abs(box.slot) == 2: continue
+            if abs(box.slot) == 2 and not box._scx_active: continue
             box.draw(painter, sw, sh, label_font)
 
     def all_done(self) -> bool:

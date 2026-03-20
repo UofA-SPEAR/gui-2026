@@ -511,14 +511,14 @@ CS_BUTTON_DEFS = [
     ButtonDef(
         rect=Rect(0.50,0.80,0.00,0.00), px=Rect(-182,0,120,40),
         label='◀', action='scroll_left',
-        style=ButtonStyle(color=QColor(255,255,255,0), text_color=QColor(255,255,255,0)),
+        style=ButtonStyle(color=QColor(255,255,255,0), text_color=QColor(255,255,255)),
         phases=_btn_phases(QColor(255,255,255,30), QColor(255,255,255,60), QColor(255,255,255,100),
                            _PT_LEFT, open_start=0.10, open_dur=0.30, close_dur=0.20),
     ),
     ButtonDef(
         rect=Rect(0.50,0.80,0.00,0.00), px=Rect(62,0,120,40),
         label='▶', action='scroll_right',
-        style=ButtonStyle(color=QColor(255,255,255,0), text_color=QColor(255,255,255,0)),
+        style=ButtonStyle(color=QColor(255,255,255,0), text_color=QColor(255,255,255)),
         phases=_btn_phases(QColor(255,255,255,30), QColor(255,255,255,60), QColor(255,255,255,100),
                            _PT_RIGHT, open_start=0.10, open_dur=0.30, close_dur=0.20),
     ),

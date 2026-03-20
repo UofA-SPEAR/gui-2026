@@ -1,14 +1,20 @@
+CAMERA_INFO = {
+    309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
+                "name": "ZED X ONE #1", "exposure": 10000, "gain": 30000, "gamma": 2},
+    305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
+                "name": "ZED X ONE #2", "exposure": 10000, "gain": 30000, "gamma": 2},
+    58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
+                "name": "ZED X MINI #1", "exposure": 50,   "gain": 50, "gamma": 2},
+}
+
 XYWidthHeight = tuple[float, float, float, float]
 CameraPositionStyle = list[XYWidthHeight] # list of xywidthheights, indexed by number of cameras
 CameraPositionStylePerLayout = list[CameraPositionStyle] # list of camera position styles, indexed by layout number (customization)
 
+CAMERA_LAYOUT_NAMES = ['ANCHOR', 'WEIGHT', 'TRIAD', 'BALANCE']
 CAMERA_LAYOUT:list[CameraPositionStylePerLayout] = [
 # Column | 0 Cameras       1 Camera          2 Cameras         3 Cameras         4 Cameras         5 Cameras         6 Cameras         7 Cameras         8 Cameras
 # Display Type is indicated by the row for each Camera.
-# 0 = Anchor
-# 1 = Weighted
-# 2 = Triad
-# 3 = Equal
 # Row   | 1st Camera
         [[(0,1,1,1),      (0,0,1,1),        (1/6,0,5/6,1),    (1/6,0,5/6,1),    (1/6,0,5/6,1),    (1/6,0,5/6,1),    (1/6,0,4/6,1)],
         [ (0,1,1,1),      (0,0,1,1),        (0,0,1,1/2)],

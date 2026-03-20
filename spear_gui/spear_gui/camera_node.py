@@ -526,14 +526,18 @@ class CameraNode(Node):
             screen.top()  + (screen.height() - _PH) // 2,
         )
 
+        # ── on_apply: MUST take exactly 2 args, no type annotations ──
         def on_apply(display_mode, num_cams):
+            # 1. Apply chosen display mode immediately
             self.display_mode = display_mode
 
+            # 2. Add cameras to reach num_cams (no border updates mid-loop)
             active = [c for c in self.cameras if c.active]
             while len(active) < num_cams:
                 self.activate_camera()
                 active = [c for c in self.cameras if c.active]
 
+            # 3. Remove cameras down to num_cams
             while len(active) > num_cams:
                 active = [c for c in self.cameras if c.active]
                 if active:
@@ -541,11 +545,15 @@ class CameraNode(Node):
                 self.deactivate_camera()
                 active = [c for c in self.cameras if c.active]
 
+            # 4. Point current_index at the last active camera, then update
+            #    all borders in one pass — last camera gets 'selected',
+            #    every other active camera gets 'unselected'.
             active = [c for c in self.cameras if c.active]
             if active:
                 self.current_index = active[-1].position
             self.update_camera_borders()
 
+            # 5. Re-layout with new display mode
             self.set_camera_positions()
             self._cam_select_panel = None
 
@@ -554,6 +562,17 @@ class CameraNode(Node):
 
         panel.open(on_apply=on_apply, on_cancel=on_cancel)
         self._cam_select_panel = panel
+
+        # Raise the panel above all camera loading/selection overlays
+        panel.raise_()
+        for cam in self.cameras:
+            for attr in ('loading_overlay', 'selection_overlay'):
+                ov = getattr(cam.widget, attr, None) if cam.widget else None
+                if ov:
+                    try:
+                        ov.stackUnder(panel)
+                    except Exception:
+                        pass
 
     # ──────────────────────── Activation / Deactivation ────────────────────────
 
@@ -850,6 +869,8 @@ class CameraNode(Node):
             def on_widget_clicked(pos=cam.position, c=cam):
                 if self._settings_panel is not None:
                     return
+                if self._cam_select_panel is not None:
+                    return
                 if self.current_index == pos and c.active:
                     self.show_settings_panel(c)
                 else:
@@ -930,6 +951,9 @@ class CameraNode(Node):
 
             is_selected = (cam.position == self.current_index and cam.active)
             existing = getattr(cam.widget, 'selection_overlay', None)
+
+            # Ensure every border-ready active camera has an overlay,
+            # whether selected or not — so notify_deselected can always fire.
             if cam.active and cam.border_ready and existing is None:
                 try:
                     cam_w = cam.widget.camera_width
