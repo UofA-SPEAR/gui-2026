@@ -3,7 +3,7 @@
 Jetson Camera Sender - ROS2 Node
 ---------------------------------
 Streams multiple ZED cameras over UDP to a receiver machine.
-Uses NVIDIA GPU-accelerated AV1 encoding (nvv4l2av1enc, Jetson AGX Orin only).
+Uses NVIDIA GPU-accelerated H.265 encoding (nvv4l2h265enc).
 Listens on /camera_settings to update exposure/gain and restart streams.
 
 Usage:
@@ -59,10 +59,9 @@ def build_pipeline(source, camera_id, port, exposure, gain):
         f"! video/x-raw,format=BGRx "
         f"! nvvidconv "
         f"! video/x-raw(memory:NVMM),format=NV12 "
-        f"! nvv4l2av1enc bitrate={BITRATE} preset-level=1 "
-        f"! av1parse "
-        f"! video/x-av1,alignment=tu "
-        f"! rtpav1pay pt=96 "
+        f"! nvv4l2h265enc bitrate={BITRATE} preset-level=1 iframeinterval=30 "
+        f"! h265parse "
+        f"! rtph265pay config-interval=1 pt=96 "
         f"! udpsink host={RECEIVER_IP} port={port} sync=false"
     )
 
