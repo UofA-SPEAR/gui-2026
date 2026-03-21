@@ -6,14 +6,15 @@ import sys
 import rclpy
 from rclpy.node import Node
 from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtCore import QThread, Signal, QTimer, QVariantAnimation, QEasingCurve, Qt, QObject, QEvent, QElapsedTimer
-from PySide6.QtGui import QColor, QPainter, QFontDatabase, QFont
+from PySide6.QtCore import QThread, Signal, QTimer, QEasingCurve, Qt, QObject, QEvent, QElapsedTimer
+from PySide6.QtGui import QColor, QPainter, QFontDatabase, QFont, QPen, QFontMetrics
+from PySide6.QtCore import QPointF, QRectF
 from std_msgs.msg import String
 from collections import deque
 from PySide6.QtCore import qInstallMessageHandler
 from typing import Optional
 from spear_gui.gui_vars import CAMERA_LAYOUT
-from spear_gui.overlay_system import LoadingOverlay, SelectionOverlay, SettingsOverlay, CameraSelectOverlay
+from spear_gui.overlay_system import LoadingOverlay, SelectionOverlay, SettingsOverlay, CameraSelectOverlay, OverlayCanvas, InlineLoadingOverlay, InlineSelectionOverlay
 from spear_gui.overlay_defs import (
     SETTING_RECT_DEFS, SETTING_TEXT_DEFS,
     SETTING_SLIDER_DEFS, SETTING_BUTTON_DEFS,
@@ -142,9 +143,6 @@ class GStreamerVideoWidget(QWidget):
         self.video_resize_enabled = True
         self.camera_width = camera_width
         self.camera_height = camera_height
-        self.selection_overlay = None
-        self.loading_overlay = None
-
         self.setStyleSheet("background-color: black;")
         self.setAttribute(Qt.WA_NativeWindow)
 
@@ -229,8 +227,7 @@ class GStreamerVideoWidget(QWidget):
         super().mousePressEvent(event)
 
     def _on_video_loaded(self):
-        if self.loading_overlay:
-            self.loading_overlay.notify_loaded()
+        pass  # notify_loaded is handled via on_video_loaded callback in CameraNode
 
     def on_error(self, error_msg):
         print("GStreamer error:", error_msg)
@@ -238,6 +235,88 @@ class GStreamerVideoWidget(QWidget):
     def on_finished(self):
         print("Pipeline finished.")
 
+
+
+
+class PlaceholderCameraWidget(QWidget):
+    """Camera slot widget used when no video source is available.
+    No WA_NativeWindow — avoids the native-window/tab bug.
+    Draws its own placeholder visual so no separate LoadingOverlay is needed."""
+    clicked = Signal()
+
+    def __init__(self, camera_width=1920, camera_height=1080, parent=None):
+        super().__init__(parent)
+        self.camera_width  = camera_width
+        self.camera_height = camera_height
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background-color: #0d0d0d;")
+
+    def stop(self): pass
+
+    def _rebuild_cache(self, w, h):
+        from PySide6.QtGui import QPixmap
+        px = QPixmap(w, h)
+        px.fill(QColor(13, 13, 13))
+        p = QPainter(px)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        # Dim grid lines
+        pen = QPen(QColor(255, 255, 255, 18))
+        pen.setWidthF(1.0)
+        p.setPen(pen)
+        step = max(40, min(w, h) // 8)
+        for gx in range(0, w, step):
+            p.drawLine(gx, 0, gx, h)
+        for gy in range(0, h, step):
+            p.drawLine(0, gy, w, gy)
+
+        # Centre icon
+        cx, cy = w / 2, h / 2
+        icon_w, icon_h = min(w * 0.18, 80), min(h * 0.14, 54)
+        body = QRectF(cx - icon_w/2, cy - icon_h/2, icon_w, icon_h)
+        p.setBrush(Qt.NoBrush)
+        pen2 = QPen(QColor(255, 255, 255, 50))
+        pen2.setWidthF(2.0)
+        p.setPen(pen2)
+        p.drawRoundedRect(body, 4, 4)
+        lens_r = min(icon_w, icon_h) * 0.26
+        p.drawEllipse(QPointF(cx, cy), lens_r, lens_r)
+        notch_w = icon_w * 0.22
+        notch_h = icon_h * 0.25
+        notch = QRectF(cx - notch_w/2, body.top() - notch_h, notch_w, notch_h)
+        p.drawRoundedRect(notch, 2, 2)
+
+        # "NO SIGNAL" label
+        f = QFont()
+        f.setFamily("Oxanium SemiBold")
+        f.setPointSizeF(max(6.0, min(h * 0.03, 11.0)))
+        p.setFont(f)
+        p.setPen(QColor(255, 255, 255, 55))
+        fm = QFontMetrics(f)
+        label = "NO SIGNAL"
+        p.drawText(int(cx - fm.horizontalAdvance(label) / 2),
+                   int(cy + icon_h / 2 + fm.ascent() + 6), label)
+        p.end()
+        self._cache = px
+        self._cache_w = w
+        self._cache_h = h
+
+    def paintEvent(self, event):
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            return
+        if (not hasattr(self, '_cache') or
+                self._cache_w != w or self._cache_h != h):
+            self._rebuild_cache(w, h)
+        painter = QPainter(self)
+        if painter.isActive():
+            painter.drawPixmap(0, 0, self._cache)
+            painter.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 class ResizableContainer(QWidget):
     resized = Signal()
@@ -316,10 +395,16 @@ class CameraNode(Node):
         self.display_mode = 2
 
         self.always_remove_inactive_cams = True
-        self.animations = {}
+        # Single shared tween timer replaces per-widget QVariantAnimation.
+        # Each entry: {widget, start_geom, end_x, end_y, end_w, end_h, elapsed, duration, ease}
+        self._tweens: dict = {}
+        # One master timer drives tweens + overlay canvas in a single event slot
+        # so Qt can batch all resulting repaints together.
+        self._master_timer = QTimer()
+        self._master_timer.setInterval(16)
+        self._master_timer.timeout.connect(self._master_tick)
         self._settings_panel = None
         self._cam_select_panel = None
-        self._selection_overlay: Optional[SelectionOverlay] = None
 
         self.key_pub = self.create_publisher(String, "key", 10)
         self.key_subscription = self.create_subscription(
@@ -391,25 +476,16 @@ class CameraNode(Node):
         self.container.resize(800, 400)
         self.container.setStyleSheet("background-color: #2b2b2b;")
         self.container.resized.connect(self.on_container_resized)
+        self._overlay_canvas = OverlayCanvas(self.container, external_tick=True)
+        self._overlay_canvas.show()
+        # Start master timer which drives both tweens and overlay canvas
+        self._master_timer.start()
         print("GUI setup complete.")
 
     def on_container_resized(self):
         self.set_camera_positions()
-        try:
-            gp = self.container.mapToGlobal(self.container.rect().topLeft())
-        except RuntimeError:
-            return
-        for cam in self.cameras:
-            if not cam.widget:
-                continue
-            geom = cam.widget.geometry()
-            for attr in ('loading_overlay', 'selection_overlay'):
-                ov = getattr(cam.widget, attr, None)
-                if ov:
-                    try:
-                        ov.setGeometry(gp.x() + geom.x(), gp.y() + geom.y(), geom.width(), geom.height())
-                    except RuntimeError:
-                        setattr(cam.widget, attr, None)
+        if self._overlay_canvas:
+            self._overlay_canvas.resizeToParent()
 
     # ──────────────────────── Key Listener ────────────────────────
 
@@ -563,16 +639,10 @@ class CameraNode(Node):
         panel.open(on_apply=on_apply, on_cancel=on_cancel)
         self._cam_select_panel = panel
 
-        # Raise the panel above all camera loading/selection overlays
+        # Canvas draws overlays — raise panel above it
         panel.raise_()
-        for cam in self.cameras:
-            for attr in ('loading_overlay', 'selection_overlay'):
-                ov = getattr(cam.widget, attr, None) if cam.widget else None
-                if ov:
-                    try:
-                        ov.stackUnder(panel)
-                    except Exception:
-                        pass
+        if self._overlay_canvas:
+            self._overlay_canvas.stackUnder(panel)
 
     # ──────────────────────── Activation / Deactivation ────────────────────────
 
@@ -725,7 +795,7 @@ class CameraNode(Node):
             for c in self.cameras:
                 if c.position == self.focused_camera:
                     continue
-                ov = getattr(c.widget, 'selection_overlay', None) if c.widget else None
+                ov = self._overlay_canvas.get_selection(c.widget) if c.widget else None
                 if ov:
                     ov.notify_unfocused()
 
@@ -740,7 +810,7 @@ class CameraNode(Node):
             for c in self.cameras:
                 if c.position == prev_focused:
                     continue
-                ov = getattr(c.widget, 'selection_overlay', None) if c.widget else None
+                ov = self._overlay_canvas.get_selection(c.widget) if c.widget else None
                 if ov:
                     if c.position == self.current_index and c.active:
                         ov.notify_reselected()
@@ -856,13 +926,21 @@ class CameraNode(Node):
             pipeline = None
 
         try:
-            camera_feed_widget = GStreamerVideoWidget(
-                pipeline if pipeline else "",
-                use_overlay=use_camera,
-                camera_width=cam_w,
-                camera_height=cam_h,
-                parent=self.container
-            )
+            if use_camera:
+                camera_feed_widget = GStreamerVideoWidget(
+                    pipeline,
+                    use_overlay=True,
+                    camera_width=cam_w,
+                    camera_height=cam_h,
+                    parent=self.container
+                )
+            else:
+                camera_feed_widget = PlaceholderCameraWidget(
+                    camera_width=cam_w,
+                    camera_height=cam_h,
+                    parent=self.container
+                )
+
             camera_feed_widget.setGeometry(x, y, w, h)
             camera_feed_widget.show()
 
@@ -890,23 +968,28 @@ class CameraNode(Node):
                     QTimer.singleShot(1000, _reveal_border)
                 camera_feed_widget.thread.video_loaded.connect(on_video_loaded)
 
-                overlay = LoadingOverlay(cam_w=cam_w, cam_h=cam_h)
-                gp = self.container.mapToGlobal(self.container.rect().topLeft())
-                overlay.setGeometry(gp.x() + x, gp.y() + y, w, h)
-                overlay._click_target = camera_feed_widget
-                camera_feed_widget.loading_overlay = overlay
-                overlay.start()
-            else:
-                cam.border_ready = True
+            overlay = InlineLoadingOverlay(cam_w=cam_w, cam_h=cam_h)
+            overlay._click_target = camera_feed_widget
+            self._overlay_canvas.register(camera_feed_widget, loading_ov=overlay)
+            overlay.start()
+
+            if not use_camera:
+                QTimer.singleShot(300, lambda ov=overlay, c=cam: (
+                    ov.notify_loaded(),
+                    setattr(c, 'border_ready', True),
+                    self.update_camera_borders()
+                ))
 
             cam.widget = camera_feed_widget
         except Exception as e:
             self.get_logger().error(f"Failed to create camera widget: {e}")
-            placeholder = QWidget(self.container)
-            placeholder.setGeometry(x, y, w, h)
-            placeholder.setStyleSheet("background-color: #1a1a1a; border: 3px solid red;")
-            placeholder.show()
-            cam.widget = placeholder
+            fallback = PlaceholderCameraWidget(
+                camera_width=cam_w, camera_height=cam_h,
+                parent=self.container
+            )
+            fallback.setGeometry(x, y, w, h)
+            fallback.show()
+            cam.widget = fallback
 
     def set_camera_positions(self):
         active_positions = [c.position for c in self.cameras if c.active]
@@ -935,6 +1018,7 @@ class CameraNode(Node):
         if not self.container:
             return
         valid_widgets = {id(cam.widget) for cam in self.cameras if cam.widget}
+        valid_widgets.add(id(self._overlay_canvas))
         for child in self.container.children():
             if not isinstance(child, QWidget):
                 continue
@@ -950,27 +1034,18 @@ class CameraNode(Node):
                 continue
 
             is_selected = (cam.position == self.current_index and cam.active)
-            existing = getattr(cam.widget, 'selection_overlay', None)
+            existing = self._overlay_canvas.get_selection(cam.widget)
 
-            # Ensure every border-ready active camera has an overlay,
-            # whether selected or not — so notify_deselected can always fire.
             if cam.active and cam.border_ready and existing is None:
                 try:
                     cam_w = cam.widget.camera_width
                     cam_h = cam.widget.camera_height
                 except AttributeError:
                     cam_w, cam_h = 1920, 1080
-
-                overlay = SelectionOverlay(cam_w=cam_w, cam_h=cam_h)
-                geom = cam.widget.geometry()
-                if cam.widget.parent():
-                    gp = cam.widget.parent().mapToGlobal(cam.widget.parent().rect().topLeft())
-                    overlay.setGeometry(gp.x() + geom.x(), gp.y() + geom.y(), geom.width(), geom.height())
-                else:
-                    overlay.setGeometry(geom)
+                overlay = InlineSelectionOverlay(cam_w=cam_w, cam_h=cam_h)
                 overlay._click_target = cam.widget
                 overlay.set_context(cam)
-                cam.widget.selection_overlay = overlay
+                self._overlay_canvas.register(cam.widget, selection_ov=overlay)
                 overlay.start()
                 existing = overlay
 
@@ -987,86 +1062,80 @@ class CameraNode(Node):
 
     # ──────────────────────── Tween Animation ────────────────────────
 
-    def stop_animation_for_widget(self, widget):
-        if not widget:
-            return
-        wid = id(widget)
-        if wid in self.animations:
-            anim = self.animations.pop(wid)
-            if anim:
-                anim.stop()
-                anim.deleteLater()
+    # stop_animation_for_widget moved into tween system above
 
     def remove_widget(self, cam):
         if cam.widget:
-            for attr in ('loading_overlay', 'selection_overlay'):
-                ov = getattr(cam.widget, attr, None)
-                if ov:
-                    try:
-                        ov.hide()
-                        ov.deleteLater()
-                    except RuntimeError:
-                        pass
-                    setattr(cam.widget, attr, None)
-
+            self._overlay_canvas.unregister(cam.widget)
             if hasattr(cam.widget, 'stop'):
                 cam.widget.stop()
             cam.widget.hide()
             cam.widget.deleteLater()
             cam.widget = None
 
+    def _master_tick(self):
+        """Single 16ms tick: advances all camera tweens then ticks the overlay
+        canvas. All setGeometry calls happen in one event-loop slot so Qt
+        batches the resulting repaints into a single backing-store update."""
+        # ── Camera widget tweens ──
+        done = []
+        for wid, tw in self._tweens.items():
+            widget = tw['widget']
+            if not widget or widget.parent() is None:
+                done.append(wid); continue
+            tw['elapsed'] += 16
+            elapsed = tw['elapsed']
+            duration = tw['duration']
+            t = elapsed / duration if elapsed < duration else 1.0
+            v = 1.0 - (1.0 - t) ** 5          # OutQuint — fast in Python
+            sg = tw['start_geom']
+            sx = sg.x();  sy = sg.y()
+            sw = sg.width(); sh = sg.height()
+            nx = int(sx + (tw['end_x'] - sx) * v)
+            ny = int(sy + (tw['end_y'] - sy) * v)
+            nw = int(sw + (tw['end_w'] - sw) * v)
+            nh = int(sh + (tw['end_h'] - sh) * v)
+            if nx != sx or ny != sy or nw != sw or nh != sh or t < 1.0:
+                widget.setGeometry(nx, ny, nw, nh)
+            if t >= 1.0:
+                done.append(wid)
+                if hasattr(widget, 'video_resize_enabled'):
+                    widget.video_resize_enabled = True
+                    widget.apply_video_resize()
+        for wid in done:
+            self._tweens.pop(wid, None)
+
+        # ── Overlay canvas ──
+        if self._overlay_canvas:
+            self._overlay_canvas.external_tick()
+
+        # Stop master timer only when both tweens and canvas are idle
+        if not self._tweens and (not self._overlay_canvas or
+                                  not self._overlay_canvas.has_active()):
+            self._master_timer.stop()
+    def stop_animation_for_widget(self, widget):
+        if not widget: return
+        wid = id(widget)
+        if wid in self._tweens:
+            self._tweens.pop(wid)
+            if hasattr(widget, 'video_resize_enabled'):
+                widget.video_resize_enabled = True
     def tween_position_and_size(self, widget, end_x, end_y, end_w, end_h, ease_style=QEasingCurve.OutQuint, duration=500):
         if not widget or not widget.parent():
             return
-
-        cam = next((cam for cam in self.cameras if cam.widget == widget), None)
-        if not cam:
-            return
-
         self.stop_animation_for_widget(widget)
-        start_geom = widget.geometry()
-
-        animation = QVariantAnimation()
-        animation.setDuration(duration)
-        animation.setStartValue(0.0)
-        animation.setEndValue(1.0)
-        animation.setEasingCurve(ease_style)
-
-        def update_geometry(value):
-            if not widget or widget.parent() is None or not cam.active:
-                animation.stop()
-                return
-            new_x = int(start_geom.x() + (end_x - start_geom.x()) * value)
-            new_y = int(start_geom.y() + (end_y - start_geom.y()) * value)
-            new_w = int(start_geom.width()  + (end_w - start_geom.width())  * value)
-            new_h = int(start_geom.height() + (end_h - start_geom.height()) * value)
-            widget.setGeometry(new_x, new_y, new_w, new_h)
-            try:
-                if widget.parent():
-                    gp = widget.parent().mapToGlobal(widget.parent().rect().topLeft())
-                    for attr in ('loading_overlay', 'selection_overlay'):
-                        ov = getattr(widget, attr, None)
-                        if ov:
-                            try:
-                                ov.setGeometry(gp.x() + new_x, gp.y() + new_y, new_w, new_h)
-                            except RuntimeError:
-                                setattr(widget, attr, None)
-            except RuntimeError:
-                pass
-
-        animation.valueChanged.connect(update_geometry)
-        animation.start()
-        self.animations[id(widget)] = animation
-
-        if hasattr(widget, "video_resize_enabled"):
+        if hasattr(widget, 'video_resize_enabled'):
             widget.video_resize_enabled = False
-
-        def finish_animation():
-            if hasattr(widget, "video_resize_enabled"):
-                widget.video_resize_enabled = True
-                widget.apply_video_resize()
-
-        animation.finished.connect(finish_animation)
+        self._tweens[id(widget)] = {
+            'widget':     widget,
+            'start_geom': widget.geometry(),
+            'end_x': end_x, 'end_y': end_y,
+            'end_w': end_w, 'end_h': end_h,
+            'elapsed':  0,
+            'duration': max(1, duration),
+        }
+        if not self._master_timer.isActive():
+            self._master_timer.start()
 
     # ──────────────────────── Print Information ────────────────────────
 
@@ -1106,7 +1175,7 @@ def main():
         for cam in node.cameras:
             if not cam.widget:
                 continue
-            existing = getattr(cam.widget, 'selection_overlay', None)
+            existing = node._overlay_canvas.get_selection(cam.widget)
             if existing is None:
                 continue
             if state == Qt.ApplicationActive:
