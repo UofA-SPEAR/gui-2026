@@ -344,6 +344,16 @@ class CameraNode(Node):
                         "name": "ZED X ONE #2", "port": 5001},
             58896881:  {"type": "ZED X Mini", "camera_id": 0,
                         "name": "ZED X MINI #1", "port": 5002},
+            307142683:  {"type": "ZED X One", "camera_id": 2,
+                        "name": "ZED X ONE #3", "port": 5003},
+            308873104:  {"type": "ZED X One", "camera_id": 3,
+                        "name": "ZED X ONE #4", "port": 5004},
+            302801647:  {"type": "ZED X One", "camera_id": 4,
+                        "name": "ZED X ONE #5", "port": 5005},
+            303928833:  {"type": "ZED X One", "camera_id": 5,
+                        "name": "ZED X ONE #6", "port": 5006},
+            44249482:  {"type": "ZED X Mini", "camera_id": 1,
+                        "name": "ZED X MINI #2", "port": 5007},
         }
 
         print(f"\nConfigured cameras (stream receiver):")
