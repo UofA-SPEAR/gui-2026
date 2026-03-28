@@ -26,7 +26,7 @@ from std_msgs.msg import String
 
 # ──────────────────────── Config ────────────────────────
 
-RECEIVER_IP = "192.168.8.224"  # IP of the machine receiving the stream
+RECEIVER_IP = "192.168.8.188"  # IP of the machine receiving the stream
 BITRATE     = 4000000           # bits per second
 
 CAMERAS = [
