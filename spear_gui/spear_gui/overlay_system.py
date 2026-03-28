@@ -10,147 +10,39 @@ from PySide6.QtCore    import Qt, QTimer, QElapsedTimer, QEasingCurve, QPointF, 
 from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QRegion
 
 
+# ──────────────────────── Slant ──────────────────────────────────
+
+class SlantCorner(Enum):
+    TOP_LEFT = 'TL'; TOP_RIGHT = 'TR'; BOTTOM_LEFT = 'BL'; BOTTOM_RIGHT = 'BR'
+
+class SlantAngle(Enum):
+    DEG_45 = 45; DEG_22 = 22
+
+class SlantPair(Enum):
+    NONE = 'none'; PARALLELOGRAM = 'para'; TRAPEZOID = 'trap'
+
+class SlantType(Enum):
+    STANDARD    = 'standard'
+    POINT       = 'point'
+    POINT_LEFT  = 'point_left'
+    POINT_RIGHT = 'point_right'
+
+@dataclass(frozen=True)
+class Slant:
+    corner: SlantCorner
+    angle:  SlantAngle = SlantAngle.DEG_45
+    pair:   SlantPair  = SlantPair.NONE
+    type:   SlantType  = SlantType.STANDARD
+
 
 # ──────────────────────── Rect ───────────────────────────────────
 
 @dataclass(frozen=True)
-class P:
-    x: float = 0.0
-    y: float = 0.0
+class Rect:
+    x: float = 0.0; y: float = 0.0; w: float = 0.0; h: float = 0.0
 
+_ZERO_RECT = Rect()
 
-
-@dataclass(frozen=True)
-class CornerOffset:
-    """Each corner of a Rect can be nudged by a relative + pixel offset.
-    rel: P(dx, dy) in normalised screen coords (same scale as p1/p2).
-    px:  P(dx, dy) in pixels.
-    """
-    rel: P = field(default_factory=P)
-    px:  P = field(default_factory=P)
-
-
-# ──────────────────────── Rect → PolygonDef conversion ───────────
-
-def Rect(
-    p1: P, p2: P,
-    *,
-    # Per-corner offsets (both optional, default = no nudge)
-    tl: Optional[Tuple[P, P]] = None,
-    tr: Optional[Tuple[P, P]] = None,
-    br: Optional[Tuple[P, P]] = None,
-    bl: Optional[Tuple[P, P]] = None,
-    # Whole-rect pixel nudge (replaces old px: Rect)
-    px1: P = P(),
-    px2: P = P(),
-    # Visual
-    fill_color:    Optional[QColor] = None,
-    outline_color: Optional[QColor] = None,
-    line_width:    float = 0.0,
-    uniform_scale: bool  = False,
-    closed:        bool  = True,
-    phases: Optional[Dict[str, Phase]] = None,
-) -> 'PolygonDef':
-    """
-    Construct a PolygonDef from two corner points.
-    CW winding: TL → TR → BR → BL.
-
-    tl/tr/br/bl = (P(rel_dx, rel_dy), P(px_dx, px_dy))
-      rel part is added to the normalised coord;
-      px  part is added to the pixel offset.
-    """
-    def _split(offset):
-        if offset is None:
-            return P(), P()
-        return offset[0], offset[1]
-
-    tl_r, tl_p = _split(tl)
-    tr_r, tr_p = _split(tr)
-    br_r, br_p = _split(br)
-    bl_r, bl_p = _split(bl)
-
-    # Base corners in normalised coords
-    points = [
-        P(p1.x + tl_r.x, p1.y + tl_r.y),   # TL
-        P(p2.x + tr_r.x, p1.y + tr_r.y),   # TR
-        P(p2.x + br_r.x, p2.y + br_r.y),   # BR
-        P(p1.x + bl_r.x, p2.y + bl_r.y),   # BL
-    ]
-
-    # Pixel offsets per corner (global px1/px2 + per-corner nudge)
-    px = [
-        P(px1.x + tl_p.x, px1.y + tl_p.y),  # TL
-        P(px2.x + tr_p.x, px1.y + tr_p.y),  # TR
-        P(px2.x + br_p.x, px2.y + br_p.y),  # BR
-        P(px1.x + bl_p.x, px2.y + bl_p.y),  # BL
-    ]
-
-    return PolygonDef(
-        points        = points,
-        px            = px,
-        fill_color    = fill_color    or QColor(0, 0, 0, 0),
-        outline_color = outline_color or QColor(0, 0, 0, 0),
-        line_width    = line_width,
-        uniform_scale = uniform_scale,
-        closed        = closed,
-        phases        = phases or {},
-    )
-
-def RectTween(
-    p1: P, p2: P,
-    *,
-    tl: Optional[Tuple[P, P]] = None,
-    tr: Optional[Tuple[P, P]] = None,
-    br: Optional[Tuple[P, P]] = None,
-    bl: Optional[Tuple[P, P]] = None,
-    px1: P = P(),
-    px2: P = P(),
-    fill_color:    Optional[QColor] = None,
-    outline_color: Optional[QColor] = None,
-    line_width:    Optional[float]  = None,
-    draw_progress: Optional[float]  = None,
-    start:         float            = 0.0,
-    dur:           float            = 0.5,
-    ease:          QEasingCurve.Type = QEasingCurve.OutQuint,
-    blend:         bool             = False,
-    prev_phase:    Optional[str]    = None,
-) -> PolygonTween:
-    def _split(offset):
-        if offset is None:
-            return P(), P()
-        return offset[0], offset[1]
-
-    tl_r, tl_p = _split(tl)
-    tr_r, tr_p = _split(tr)
-    br_r, br_p = _split(br)
-    bl_r, bl_p = _split(bl)
-
-    points = [
-        P(p1.x + tl_r.x, p1.y + tl_r.y),  # TL
-        P(p2.x + tr_r.x, p1.y + tr_r.y),  # TR
-        P(p2.x + br_r.x, p2.y + br_r.y),  # BR
-        P(p1.x + bl_r.x, p2.y + bl_r.y),  # BL
-    ]
-    px = [
-        P(px1.x + tl_p.x, px1.y + tl_p.y),
-        P(px2.x + tr_p.x, px1.y + tr_p.y),
-        P(px2.x + br_p.x, px2.y + br_p.y),
-        P(px1.x + bl_p.x, px2.y + bl_p.y),
-    ]
-
-    return PolygonTween(
-        points        = points,
-        px            = px,
-        fill_color    = fill_color,
-        outline_color = outline_color,
-        line_width    = line_width,
-        draw_progress = draw_progress,
-        start         = start,
-        dur           = dur,
-        ease          = ease,
-        blend         = blend,
-        prev_phase    = prev_phase,
-    )
 
 # ──────────────────────── Easing cache ───────────────────────────
 
@@ -188,12 +80,108 @@ def _ease(t: float, curve) -> float:
 
 # ──────────────────────── Geometry helpers ───────────────────────
 
+_PARA_OPPOSITE = {
+    SlantCorner.TOP_LEFT: SlantCorner.BOTTOM_RIGHT, SlantCorner.TOP_RIGHT: SlantCorner.BOTTOM_LEFT,
+    SlantCorner.BOTTOM_RIGHT: SlantCorner.TOP_LEFT, SlantCorner.BOTTOM_LEFT: SlantCorner.TOP_RIGHT,
+}
+_TRAP_OPPOSITE = {
+    SlantCorner.TOP_LEFT: SlantCorner.TOP_RIGHT,    SlantCorner.TOP_RIGHT: SlantCorner.TOP_LEFT,
+    SlantCorner.BOTTOM_LEFT: SlantCorner.BOTTOM_RIGHT, SlantCorner.BOTTOM_RIGHT: SlantCorner.BOTTOM_LEFT,
+}
+_SLANT_ORDER = {
+    SlantCorner.TOP_LEFT:     lambda hp, vp: [vp, hp],
+    SlantCorner.TOP_RIGHT:    lambda hp, vp: [hp, vp],
+    SlantCorner.BOTTOM_RIGHT: lambda hp, vp: [vp, hp],
+    SlantCorner.BOTTOM_LEFT:  lambda hp, vp: [hp, vp],
+}
+_CORNER_IDX = {
+    SlantCorner.TOP_LEFT: 0, SlantCorner.TOP_RIGHT: 1,
+    SlantCorner.BOTTOM_RIGHT: 2, SlantCorner.BOTTOM_LEFT: 3,
+}
+_CW_CORNERS = [SlantCorner.TOP_LEFT, SlantCorner.TOP_RIGHT,
+               SlantCorner.BOTTOM_RIGHT, SlantCorner.BOTTOM_LEFT]
+_CW_BASE    = lambda x,y,w,h: [QPointF(x,y), QPointF(x+w,y), QPointF(x+w,y+h), QPointF(x,y+h)]
+
+
+def compute_slant_pts(x, y, w, h, slant):
+    d = min(w, h); eps = 1e-4
+    hd = min(d if slant.angle == SlantAngle.DEG_45 else d/2, w-eps)
+    vd = min(d, h-eps)
+    def cut(c):
+        if c == SlantCorner.TOP_LEFT:     return QPointF(x+hd,y),   QPointF(x,y+vd)
+        if c == SlantCorner.TOP_RIGHT:    return QPointF(x+w-hd,y), QPointF(x+w,y+vd)
+        if c == SlantCorner.BOTTOM_RIGHT: return QPointF(x+w-hd,y+h), QPointF(x+w,y+h-vd)
+        return                                   QPointF(x+hd,y+h),   QPointF(x,y+h-vd)
+    cuts = {slant.corner: cut(slant.corner)}
+    if slant.pair == SlantPair.PARALLELOGRAM: cuts[_PARA_OPPOSITE[slant.corner]] = cut(_PARA_OPPOSITE[slant.corner])
+    elif slant.pair == SlantPair.TRAPEZOID:   cuts[_TRAP_OPPOSITE[slant.corner]] = cut(_TRAP_OPPOSITE[slant.corner])
+    pts = []
+    for c, base in zip(_CW_CORNERS, _CW_BASE(x,y,w,h)):
+        if c in cuts: hp,vp = cuts[c]; pts.extend(_SLANT_ORDER[c](hp,vp))
+        else:         pts.append(base)
+    return pts
+
+
+def compute_point_pts(x, y, w, h, slant):
+    d = min(w,h); off_pt = d/2 if slant.angle==SlantAngle.DEG_45 else d/4
+    off_sl = d if slant.angle==SlantAngle.DEG_45 else d/2
+    def spike(c):
+        if c in (SlantCorner.TOP_LEFT, SlantCorner.BOTTOM_LEFT):
+            return QPointF(x+off_pt,y), QPointF(x,y+d/2), QPointF(x+off_pt,y+h)
+        return QPointF(x+w-off_pt,y), QPointF(x+w,y+d/2), QPointF(x+w-off_pt,y+h)
+    def cut(c):
+        if c==SlantCorner.TOP_LEFT:     return QPointF(x,y+off_sl),     QPointF(x+off_sl,y)
+        if c==SlantCorner.TOP_RIGHT:    return QPointF(x+w-off_sl,y),   QPointF(x+w,y+off_sl)
+        if c==SlantCorner.BOTTOM_RIGHT: return QPointF(x+w-off_sl,y+h), QPointF(x+w,y+h-off_sl)
+        return                                 QPointF(x+off_sl,y+h),   QPointF(x,y+h-off_sl)
+    spike_set = {slant.corner: spike(slant.corner)}
+    cut_set   = {}
+    if slant.pair==SlantPair.PARALLELOGRAM: cut_set[_PARA_OPPOSITE[slant.corner]] = cut(_PARA_OPPOSITE[slant.corner])
+    elif slant.pair==SlantPair.TRAPEZOID:   cut_set[_TRAP_OPPOSITE[slant.corner]] = cut(_TRAP_OPPOSITE[slant.corner])
+    n = 4; pts = []
+    for i,(c,base) in enumerate(zip(_CW_CORNERS, _CW_BASE(x,y,w,h))):
+        next_c = _CW_CORNERS[(i+1)%n]
+        if c in spike_set:   pts.extend(spike_set[c])
+        elif c in cut_set:   pts.extend(cut_set[c])
+        elif next_c in spike_set or next_c in cut_set: pass
+        else: pts.append(base)
+    return pts
+
+
+def compute_point_left_pts(x, y, w, h, slant):
+    off = h/2 if slant.angle==SlantAngle.DEG_45 else h/4
+    return [QPointF(x,y), QPointF(x+w,y), QPointF(x+w,y+h-off), QPointF(x+w-off,y+h), QPointF(x-off,y+h/2)]
+
+def compute_point_right_pts(x, y, w, h, slant):
+    off = h/2 if slant.angle==SlantAngle.DEG_45 else h/4
+    return [QPointF(x+off,y), QPointF(x+w+off,y+h/2), QPointF(x+w,y+h), QPointF(x,y+h), QPointF(x,y+off)]
+
+def rect_pts(x, y, w, h): return [QPointF(x,y), QPointF(x+w,y), QPointF(x+w,y+h), QPointF(x,y+h)]
+
+def make_pts(x, y, w, h, slant):
+    if slant is None:                       return rect_pts(x,y,w,h)
+    if slant.type==SlantType.POINT:         return compute_point_pts(x,y,w,h,slant)
+    if slant.type==SlantType.POINT_LEFT:    return compute_point_left_pts(x,y,w,h,slant)
+    if slant.type==SlantType.POINT_RIGHT:   return compute_point_right_pts(x,y,w,h,slant)
+    return compute_slant_pts(x,y,w,h,slant)
+
+
+def lerp_pts(a, b, v, insert_idx=0):
+    if   len(a) < len(b): a = a[:insert_idx] + [a[insert_idx]] + a[insert_idx:]
+    elif len(b) < len(a): b = b[:insert_idx] + [b[insert_idx]] + b[insert_idx:]
+    return [QPointF(pa.x()+(pb.x()-pa.x())*v, pa.y()+(pb.y()-pa.y())*v) for pa,pb in zip(a,b)]
+
 def lerp_color(src, dst, v):
     sr=src.red();   dr=dst.red()
     sg=src.green(); dg=dst.green()
     sb=src.blue();  db=dst.blue()
     sa=src.alpha(); da=dst.alpha()
-    return QColor(int(sr+(dr-sr)*v), int(sg+(dg-sg)*v), int(sb+(db-sb)*v), int(sa+(da-sa)*v))
+    return QColor(int(sr+(dr-sr)*v), int(sg+(dg-sg)*v),
+                  int(sb+(db-sb)*v), int(sa+(da-sa)*v))
+
+def _lerp_rect(a, b, v):
+    return Rect(a.x+(b.x-a.x)*v, a.y+(b.y-a.y)*v, a.w+(b.w-a.w)*v, a.h+(b.h-a.h)*v)
+
 
 # ──────────────────────── Tween dataclasses ──────────────────────
 
@@ -201,7 +189,7 @@ def lerp_color(src, dst, v):
 class Tween:
     rect: Rect; start: float; dur: float; ease: QEasingCurve.Type
     color: Optional[QColor] = None; px: Rect = field(default_factory=Rect)
-    prev_phase: Optional[str] = None
+    slant: Optional[Slant] = None;  prev_phase: Optional[str] = None
 
 @dataclass
 class TextTween:
@@ -251,80 +239,31 @@ class _TweenDriver:
 
     def _is_done(self): return self._idx >= len(self._tweens)
     def phase_done(self): return self._is_done()
-    def _drive(self, hide_when_done=False):
-        if self.hidden:
-            return
 
+    def _drive(self, hide_when_done=False):
+        if self.hidden: return
         elapsed = self._timer.elapsed() / 1000.0
         tweens = self._tweens
-        n = len(tweens)
-
-        i = self._idx
-        applied_this_frame = False
-        while i < n:
-            tw = tweens[i]
+        idx    = self._idx
+        n      = len(tweens)
+        while True:
+            if idx >= n:
+                self._idx = idx
+                if hide_when_done: self.hidden = True
+                return
+            tw    = tweens[idx]
+            local = elapsed - tw.start
+            if local < 0: self._idx = idx; return
             if isinstance(tw, Reset):
-                self._reset_to_def()
-                i += 1
-                continue
-
-            group = [tw]
-            if getattr(tw, "blend", False):
-                j = i + 1
-                while j < n:
-                    group.append(tweens[j])
-                    if not getattr(tweens[j], "blend", False):
-                        j += 1
-                        break
-                    j += 1
-            else:
-                j = i + 1
-
-            group_start = min(t.start for t in group)
-            group_end = max(t.start + t.dur for t in group)
-
-            # Case A: not started
-            if elapsed < group_start:
-                return
-
-            # Case B: active
-            if elapsed <= group_end:
-                base = group[0]
-                local = elapsed - base.start
-                t = min(1.0, local / base.dur) if base.dur > 0 else 1.0
-                v = _ease(t, base.ease)
-                self._apply(base, v)
-                if not applied_this_frame:
-                    applied_this_frame = True
-                    for btw in group[1:]:
-                        local_b = elapsed - btw.start
-                        if local_b < 0:
-                            continue
-                        tb = min(1.0, local_b / btw.dur) if btw.dur > 0 else 1.0
-                        vb = _ease(tb, btw.ease)
-                        self._apply_blend(btw, vb)
-                self._idx = i
-                return
-
-            # Case C: finished
-            else:
-                self._snap_to(group[0])
-                for btw in group[1:]:
-                    local_b = group_end - btw.start
-                    if local_b <= 0:
-                        continue
-                    tb = min(1.0, local_b / btw.dur) if btw.dur > 0 else 1.0
-                    vb = _ease(tb, btw.ease)
-                    self._apply_blend(btw, vb)
-                self._save_start()
-                if j <= i:
-                    j = i + 1
-                self._idx = j
-                i = j
-                continue
-        self._idx = n
-        if hide_when_done:
-            self.hidden = True
+                self._reset_to_def(); idx += 1; continue
+            dur = tw.dur
+            t   = (local / dur) if dur > 0 else 1.0
+            if t > 1.0: t = 1.0
+            v   = _ease(t, tw.ease)
+            self._apply(tw, v)
+            if t < 1.0: self._idx = idx; return
+            self._snap_to(tw); self._save_start(); idx += 1
+        self._idx = idx
 
     def _save_start(self): pass
     def _snap_to(self, tw): pass
@@ -334,6 +273,10 @@ class _TweenDriver:
 
 # ──────────────────────── Def dataclasses ────────────────────────
 
+@dataclass
+class RectDef:
+    rect: Rect; color: QColor; uniform_scale: bool; phases: Dict[str, Phase]
+    px: Rect = field(default_factory=Rect); slant: Optional[Slant] = None
 
 @dataclass
 class TextDef:
@@ -342,6 +285,103 @@ class TextDef:
     h_align: float; v_align: float; uniform_scale: bool
     px: float = 0.0; py: float = 0.0
     text_fn: Optional[Callable[[Any], str]] = None; always_visible: bool = False
+
+
+# ──────────────────────── AnimatedRect ───────────────────────────
+
+class AnimatedRect(_TweenDriver):
+    def __init__(self, defn: RectDef):
+        super().__init__()
+        self.defn      = defn
+        self.cur_rect  = defn.rect;  self.cur_px    = defn.px
+        self.cur_color = QColor(defn.color); self.cur_slant = defn.slant
+        self._sr = defn.rect; self._sp = defn.px
+        self._sc = QColor(defn.color); self._ss = defn.slant
+        # Cached polygon — recomputed only when tween advances (_dirty=True)
+        self._dirty         = True
+        self._cached_brush  = None
+        self._cached_w      = 0
+        self._cached_h      = 0
+        self._cached_poly   = QPolygonF()
+        self._cached_is_rect = True
+
+    def _save_start(self):
+        self._sr = self.cur_rect; self._sp = self.cur_px
+        self._sc = QColor(self.cur_color); self._ss = self.cur_slant
+
+    def _apply(self, tw, v):
+        self.cur_rect  = _lerp_rect(self._sr, tw.rect, v)
+        self.cur_px    = _lerp_rect(self._sp, tw.px,   v)
+        if tw.color is not None: self.cur_color = lerp_color(self._sc, tw.color, v)
+        self.cur_slant = tw.slant if v >= 1.0 else self._ss
+        self._dirty = True; self._cached_brush = None
+
+    def _snap_to(self, tw):
+        self.cur_rect = tw.rect; self.cur_px = tw.px; self.cur_slant = tw.slant
+        if tw.color is not None: self.cur_color = QColor(tw.color)
+        self._dirty = True; self._cached_brush = None
+
+    def _reset_to_def(self):
+        d = self.defn
+        self.cur_rect = d.rect; self.cur_px = d.px
+        self.cur_color = QColor(d.color); self.cur_slant = d.slant
+        self._dirty = True; self._cached_brush = None
+
+    def set_phase(self, phase):
+        super().set_phase(phase, self.defn.phases)
+        self._dirty = True; self._cached_brush = None
+
+    def update(self): self._drive(hide_when_done=False)
+
+    def _scale(self, uniform_scale, widget_w, widget_h, cam_w, cam_h):
+        if uniform_scale:
+            s = min(widget_w/cam_w, widget_h/cam_h)
+            return s/(widget_w/cam_w), s/(widget_h/cam_h)
+        return 1.0, 1.0
+
+    def _to_screen(self, r, p, cx, cy, ww, wh, us):
+        if us:
+            sx,sy,sw,sh = (0.5+(r.x-0.5)*cx)*ww, (0.5+(r.y-0.5)*cy)*wh, r.w*cx*ww, r.h*cy*wh
+        else:
+            sx,sy,sw,sh = r.x*ww, r.y*wh, r.w*ww, r.h*wh
+        return sx+p.x, sy+p.y, sw+p.w, sh+p.h
+
+    def get_polygon(self, widget_w, widget_h, uniform_scale, cam_w, cam_h):
+        if (not self._dirty and self._cached_w == widget_w
+                and self._cached_h == widget_h):
+            return self._cached_poly, self._cached_is_rect
+
+        # Compute screen rect for current state
+        if uniform_scale:
+            s  = min(widget_w / cam_w, widget_h / cam_h)
+            cx = s / (widget_w / cam_w); cy = s / (widget_h / cam_h)
+            r  = self.cur_rect; p = self.cur_px
+            sx = (0.5 + (r.x - 0.5) * cx) * widget_w + p.x
+            sy = (0.5 + (r.y - 0.5) * cy) * widget_h + p.y
+            sw = r.w * cx * widget_w + p.w
+            sh = r.h * cy * widget_h + p.h
+        else:
+            r  = self.cur_rect; p = self.cur_px
+            sx = r.x * widget_w + p.x
+            sy = r.y * widget_h + p.y
+            sw = r.w * widget_w + p.w
+            sh = r.h * widget_h + p.h
+
+        pts      = make_pts(sx, sy, sw, sh, self.cur_slant)
+        is_rect  = (self.cur_slant is None or
+                    (len(pts) == 4
+                     and pts[0].x() == pts[3].x() and pts[1].x() == pts[2].x()
+                     and pts[0].y() == pts[1].y() and pts[2].y() == pts[3].y()))
+        self._cached_poly    = QPolygonF(pts)
+        self._cached_is_rect = is_rect
+        self._cached_w       = widget_w
+        self._cached_h       = widget_h
+        self._dirty          = False
+        return self._cached_poly, self._cached_is_rect
+
+    def to_rect(self, w, h):
+        r = self.cur_rect; p = self.cur_px
+        return int(r.x*w+p.x), int(r.y*h+p.y), int(r.w*w+p.w), int(r.h*h+p.h)
 
 
 # ──────────────────────── AnimatedText ───────────────────────────
@@ -439,41 +479,189 @@ class AnimatedText(_TweenDriver):
 
 # ──────────────────────── Line ───────────────────────────────────
 
-def _resolve_pt(P, w, h): return QPointF(P.x*w+P.px, P.y*h+P.py)
+@dataclass(frozen=True)
+class LinePt:
+    x: float=0.0; y: float=0.0; px: float=0.0; py: float=0.0
 
-def _draw_partial_polyline(painter: QPainter, pts: List[QPointF], t: float) -> None:
-    if len(pts) < 2 or t <= 0:
-        return
-    if t >= 1.0:
-        for i in range(len(pts) - 1):
-            painter.drawLine(pts[i], pts[i + 1])
-        return
-    lengths = [
-        _math.sqrt((pts[i+1].x()-pts[i].x())**2 + (pts[i+1].y()-pts[i].y())**2)
-        for i in range(len(pts) - 1)
-    ]
+@dataclass
+class LineTween:
+    target:       Union[str,int,List[int]] = 'create'
+    collapse_pts: List[int]                = field(default_factory=list)
+    collapse_to:  int                      = 0
+    color:        Optional[QColor]         = None
+    line_width:   Optional[float]          = None
+    start:        float                    = 0.0
+    dur:          float                    = 0.5
+    ease:         QEasingCurve.Type        = QEasingCurve.Linear
+    prev_phase:   Optional[str]            = None
+
+@dataclass
+class LineDef:
+    color: QColor; points: List[LinePt]
+    closed: bool=False; phases: Dict[str,Phase]=field(default_factory=dict); line_width: float=1.0
+
+
+def _resolve_pt(pt, w, h): return QPointF(pt.x*w+pt.px, pt.y*h+pt.py)
+
+def _draw_partial_polyline(painter, pts, t):
+    if len(pts) < 2 or t <= 0: return
+    lengths = [((pts[i+1].x()-pts[i].x())**2+(pts[i+1].y()-pts[i].y())**2)**0.5 for i in range(len(pts)-1)]
     total = sum(lengths)
-    if total == 0:
-        return
-    target = total * t
-    acc = 0.0
-    for i, seg_len in enumerate(lengths):
-        if acc >= target:
-            break
+    if total == 0: return
+    target = total * min(t, 1.0); acc = 0.0
+    for i, sl in enumerate(lengths):
+        if acc >= target: break
         rem = target - acc
-        if rem >= seg_len:
-            painter.drawLine(pts[i], pts[i + 1])
-            acc += seg_len
+        if rem >= sl:
+            painter.drawLine(pts[i], pts[i+1]); acc += sl
         else:
-            frac = rem / seg_len if seg_len > 0 else 1.0
-            painter.drawLine(
-                pts[i],
-                QPointF(
-                    pts[i].x() + (pts[i+1].x() - pts[i].x()) * frac,
-                    pts[i].y() + (pts[i+1].y() - pts[i].y()) * frac,
-                ),
-            )
-            break
+            frac = rem/sl if sl > 0 else 1.0
+            painter.drawLine(pts[i], QPointF(pts[i].x()+(pts[i+1].x()-pts[i].x())*frac,
+                                             pts[i].y()+(pts[i+1].y()-pts[i].y())*frac)); break
+
+
+class _LineSegment:
+    __slots__ = ('pt_indices','t','_s_t','_tgt_t','_start','_dur','_ease','_elapsed','_active')
+    def __init__(self, pt_indices):
+        self.pt_indices=pt_indices; self.t=0.0; self._s_t=0.0; self._tgt_t=1.0
+        self._start=0.0; self._dur=0.5; self._ease=QEasingCurve.Linear
+        self._elapsed=QElapsedTimer(); self._active=False
+
+    def start_tween(self, from_t, to_t, start, dur, ease):
+        self.t=from_t; self._s_t=from_t; self._tgt_t=to_t
+        self._start=start; self._dur=dur; self._ease=ease
+        self._elapsed.restart(); self._active=True
+
+    def update(self):
+        if not self._active: return True
+        el = self._elapsed.elapsed()/1000.0; loc = el - self._start
+        if loc < 0: return False
+        raw = min(1.0, loc/self._dur) if self._dur > 0 else 1.0
+        self.t = self._s_t + (self._tgt_t-self._s_t)*_ease(raw, self._ease)
+        if raw >= 1.0: self.t=self._tgt_t; self._active=False; return True
+        return False
+
+    def done(self): return not self._active
+
+
+class AnimatedLine:
+    def __init__(self, defn: LineDef):
+        self.defn=defn; self.cur_color=QColor(defn.color); self.cur_width=defn.line_width
+        self._s_color=QColor(defn.color); self._s_width=defn.line_width
+        self._phase=''; self._prev=''; self._idx=0
+        self._tweens: List[LineTween]=[]; self._timer=QElapsedTimer(); self._started=False
+        self._segments: List[_LineSegment]=[]
+        self._rebuild_segments(list(range(len(defn.points)))); self.hidden=True
+
+    def _rebuild_segments(self, visible):
+        n=len(self.defn.points)
+        if not visible: self._segments=[]; return
+        if not self.defn.closed or len(visible)==n:
+            segs=[visible[:]]
+        else:
+            all_set=set(visible); segs=[]; cur=[]
+            start_i=next((i for i,idx in enumerate(visible) if (idx-1)%n not in all_set), 0)
+            for idx in visible[start_i:]+visible[:start_i]:
+                if cur and (idx-cur[-1])%n!=1: segs.append(cur); cur=[]
+                cur.append(idx)
+            if cur:
+                if segs and self.defn.closed and (segs[0][0]-cur[-1])%n==1: segs[0]=cur+segs[0]
+                else: segs.append(cur)
+        self._segments=[_LineSegment(s) for s in segs]
+        for s in self._segments: s.t=0.0
+
+    def set_phase(self, phase):
+        self._prev=self._phase; self._phase=phase; self._idx=0; self._started=False; self.hidden=False
+        p=self.defn.phases.get(phase)
+        self._tweens=[tw for tw in (p.tweens if p else []) if tw.prev_phase is None or tw.prev_phase==self._prev]
+        self._timer.restart()
+
+    def update(self):
+        if self.hidden: return
+        for seg in self._segments: seg.update()
+        elapsed=self._timer.elapsed()/1000.0
+        while self._idx < len(self._tweens):
+            tw=self._tweens[self._idx]; local=elapsed-tw.start
+            if local < 0: break
+            raw=min(1.0, local/tw.dur) if tw.dur > 0 else 1.0
+            v=_ease(raw, tw.ease)
+            if not self._started:
+                self._started=True
+                if tw.target=='create':
+                    for s in self._segments: s.start_tween(0.0,1.0,0.0,tw.dur,tw.ease)
+                elif tw.target=='collapse': self._apply_collapse(tw, elapsed)
+            if tw.color is not None:     self.cur_color=lerp_color(self._s_color, tw.color, v)
+            if tw.line_width is not None: self.cur_width=self._s_width+(tw.line_width-self._s_width)*v
+            if raw>=1.0 and all(s.done() for s in self._segments):
+                self._s_color=QColor(self.cur_color); self._s_width=self.cur_width
+                self._started=False; self._idx+=1
+            else: break
+
+    def _apply_collapse(self, tw, elapsed):
+        n=len(self.defn.points); remove=set(tw.collapse_pts)
+        if not remove: return
+        self._rebuild_segments([i for i in range(n) if i not in remove])
+        for s in self._segments: s.t=1.0; s._active=False
+        for run in self._contiguous_runs(sorted(remove), n):
+            cs=_LineSegment([(run[0]-1)%n]+run+[(run[-1]+1)%n])
+            cs.start_tween(1.0, 0.0, tw.start, tw.dur, tw.ease)
+            self._segments.append(cs)
+
+    @staticmethod
+    def _contiguous_runs(indices, n):
+        if not indices: return []
+        runs=[]; cur=[indices[0]]
+        for idx in indices[1:]:
+            if (idx-cur[-1])%n==1: cur.append(idx)
+            else: runs.append(cur); cur=[idx]
+        runs.append(cur); return runs
+
+    def phase_done(self):
+        return self._idx>=len(self._tweens) and all(s.done() for s in self._segments)
+
+    def draw(self, painter, w, h):
+        if self.hidden: return
+        pts=[_resolve_pt(p,w,h) for p in self.defn.points]
+        pen=QPen(self.cur_color); pen.setWidthF(self.cur_width)
+        pen.setCapStyle(Qt.RoundCap); pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen); painter.setBrush(Qt.NoBrush)
+        for seg in self._segments:
+            if seg.t<=0: continue
+            sp=[pts[i] for i in seg.pt_indices]
+            if self.defn.closed and len(seg.pt_indices)==len(self.defn.points): sp=sp+[sp[0]]
+            _draw_partial_polyline(painter, sp, seg.t)
+        painter.setPen(Qt.NoPen)
+
+
+# ──────────────────────── lerp_button_slant_pts ──────────────────
+
+def lerp_button_slant_pts(sx, sy, sw, sh, slant_a, slant_b, v):
+    if v <= 0.0: return make_pts(sx,sy,sw,sh,slant_a)
+    if v >= 1.0: return make_pts(sx,sy,sw,sh,slant_b)
+    ta = slant_a.type if slant_a else None
+    tb = slant_b.type if slant_b else None
+    def _lp(a,b,t): return [QPointF(pa.x()+(pb.x()-pa.x())*t, pa.y()+(pb.y()-pa.y())*t) for pa,pb in zip(a,b)]
+    if ta==tb: return _lp(make_pts(sx,sy,sw,sh,slant_a), make_pts(sx,sy,sw,sh,slant_b), v)
+    cx=sx+sw/2.0
+    def _point_to_none(s,t):
+        a=make_pts(sx,sy,sw,sh,s); return _lp(a, [QPointF(cx,p.y()) for p in a], t)
+    def _pl_to_none(sa,t):
+        return _lp(make_pts(sx,sy,sw,sh,sa),
+                   [QPointF(sx,sy),QPointF(sx+sw,sy),QPointF(sx+sw,sy+sh),QPointF(sx+sw,sy+sh),QPointF(sx,sy+sh/2)], t)
+    def _pr_to_none(sa,t):
+        return _lp(make_pts(sx,sy,sw,sh,sa),
+                   [QPointF(sx,sy),QPointF(sx+sw,sy+sh/2),QPointF(sx+sw,sy+sh),QPointF(sx,sy+sh),QPointF(sx,sy)], t)
+    if ta==SlantType.POINT      and tb is None: return _point_to_none(slant_a, v)
+    if ta is None and tb==SlantType.POINT:      return _point_to_none(slant_b, 1-v)
+    if ta==SlantType.POINT_LEFT and tb is None: return _pl_to_none(slant_a, v)
+    if ta is None and tb==SlantType.POINT_LEFT: return _pl_to_none(slant_b, 1-v)
+    if ta==SlantType.POINT_RIGHT and tb is None: return _pr_to_none(slant_a, v)
+    if ta is None and tb==SlantType.POINT_RIGHT: return _pr_to_none(slant_b, 1-v)
+    if ta in (SlantType.POINT,SlantType.STANDARD) and tb in (SlantType.POINT,SlantType.STANDARD) \
+            and slant_a and slant_b and slant_a.corner==slant_b.corner:
+        return lerp_pts(make_pts(sx,sy,sw,sh,slant_a), make_pts(sx,sy,sw,sh,slant_b), v,
+                        insert_idx=_CORNER_IDX.get(slant_b.corner,0))
+    return make_pts(sx,sy,sw,sh, slant_b if v>=0.5 else slant_a)
 
 
 # ──────────────────────── AnimatedOverlay ────────────────────────
@@ -481,8 +669,8 @@ def _draw_partial_polyline(painter: QPainter, pts: List[QPointF], t: float) -> N
 class AnimatedOverlay(QWidget):
     TICK_MS = 16
 
-    def __init__(self, polygon_defs, parent=None, cam_w=1920, cam_h=1080,
-                 text_defs=None):
+    def __init__(self, rect_defs, parent=None, cam_w=1920, cam_h=1080,
+                 text_defs=None, line_defs=None):
         super().__init__(parent)
         if parent is None:
             self.setWindowFlags(Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint|Qt.Window)
@@ -495,32 +683,44 @@ class AnimatedOverlay(QWidget):
             self.setAttribute(Qt.WA_OpaquePaintEvent, False)
             self.setAutoFillBackground(False)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.cam_w = cam_w; self.cam_h = cam_h
-        self._polygons = [AnimatedPolygon(d) for d in polygon_defs]
-        self._texts    = [AnimatedText(d)    for d in (text_defs or [])]
-        self._context  = None; self._click_target = None
-        self._closing  = False; self._inline = False; self._cleaned_up = False
-        self._tick_timer = QTimer(self)
-        self._tick_timer.setInterval(self.TICK_MS)
+        self.cam_w=cam_w; self.cam_h=cam_h
+        self._rects=[AnimatedRect(d) for d in rect_defs]
+        self._texts=[AnimatedText(d) for d in (text_defs or [])]
+        self._lines=[AnimatedLine(d) for d in (line_defs or [])]
+        self._context=None; self._click_target=None; self._closing=False; self._inline=False
+        self._cleaned_up=False
+        self._tick_timer=QTimer(self); self._tick_timer.setInterval(self.TICK_MS)
         self._tick_timer.timeout.connect(self._tick)
 
     def set_context(self, ctx): self._context=ctx
     def set_inline(self): self._inline=True
 
     def _broadcast(self, phase):
-        for p in self._polygons: p.set_phase(phase)
-        for t in self._texts:    t.set_phase(phase)
+        for r in self._rects: r.set_phase(phase)
+        for t in self._texts: t.set_phase(phase)
+        for l in self._lines: l.set_phase(phase)
 
-
-    def _tick(self, external=False):
-        any_visible, _ = self._tick_elements()
+    def _tick(self):
+        any_active = False
+        for r in self._rects:
+            r.update()
+            if not r.hidden: any_active = True
+        for t in self._texts:
+            t.update()
+            if not t.hidden or t.defn.always_visible: any_active = True
+        for l in self._lines:
+            l.update()
+            if not l.hidden: any_active = True
         if self._closing:
-            if self._all_done(): self._cleanup(); return
+            if (all(r.phase_done() for r in self._rects) and
+                    all(t.phase_done() for t in self._texts) and
+                    all(l.phase_done() for l in self._lines)):
+                self._cleanup(); return
         else:
-            if not any_visible: self._cleanup(); return
-        if not external: self.update()
+            if not any_active:
+                self._cleanup(); return
+        if not self._inline: self.update()
 
-    def _tick_externally(self): self._tick(external=True)
     def close(self):
         if not self._closing:
             self._closing=True; self._broadcast('close')
@@ -539,6 +739,28 @@ class AnimatedOverlay(QWidget):
         except Exception: pass
         self.deleteLater()
 
+    def _tick_externally(self):
+        """Called by CameraNode._tick_overlays instead of the internal timer.
+        Runs the same logic as _tick but does NOT call self.update()."""
+        any_active = False
+        for r in self._rects:
+            r.update()
+            if not r.hidden: any_active = True
+        for t in self._texts:
+            t.update()
+            if not t.hidden or t.defn.always_visible: any_active = True
+        for l in self._lines:
+            l.update()
+            if not l.hidden: any_active = True
+        if self._closing:
+            if (all(r.phase_done() for r in self._rects) and
+                    all(t.phase_done() for t in self._texts) and
+                    all(l.phase_done() for l in self._lines)):
+                self._cleanup()
+        else:
+            if not any_active:
+                self._cleanup()
+
     def mousePressEvent(self, event):
         if event.button()==Qt.LeftButton and self._click_target is not None:
             try: self._click_target.clicked.emit()
@@ -546,26 +768,38 @@ class AnimatedOverlay(QWidget):
         super().mousePressEvent(event)
 
     def draw_into(self, painter, x, y, w, h):
+        """Draw this overlay at (x,y,w,h) using an existing painter.
+        Called from the container's paintEvent — no child widget repaint needed."""
         painter.save()
         painter.translate(x, y)
         painter.setClipRect(QRectF(0, 0, w, h))
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        for poly in self._polygons:
-            poly.draw(painter, w, h, self.cam_w, self.cam_h)
+        for rect in self._rects:
+            if rect.hidden: continue
+            painter.setBrush(rect.cur_color)
+            poly, is_r = rect.get_polygon(w, h, rect.defn.uniform_scale, self.cam_w, self.cam_h)
+            if is_r: painter.fillRect(poly.boundingRect(), rect.cur_color)
+            else:    painter.drawPolygon(poly)
+        painter.setPen(Qt.NoPen)
         for text in self._texts:
             if text.hidden: continue
             label = text.resolve_text(self._context)
             if not label: continue
             font = text.build_font()
-            painter.setFont(font); painter.setPen(text.cur_color)
+            painter.setFont(font)
+            painter.setPen(text.cur_color)
             dx, dy = text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font)
             painter.drawText(dx, dy, label)
             painter.setPen(Qt.NoPen)
+        for line in self._lines:
+            line.draw(painter, w, h)
         painter.restore()
 
     def paintEvent(self, event):
-        painter = QPainter(self)
+        # Only used when overlay is a top-level window (SettingsOverlay path).
+        # When parented to the container, draw_into() is called instead.
+        painter=QPainter(self)
         if not painter.isActive(): return
         if self.parent() is None:
             painter.setCompositionMode(QPainter.CompositionMode_Source)
@@ -576,6 +810,59 @@ class AnimatedOverlay(QWidget):
         self.draw_into(painter, 0, 0, self.width(), self.height())
         painter.end()
 
+
+# ──────────────────────── Loading / Selection Overlays ───────────
+
+class LoadingOverlay(AnimatedOverlay):
+    def __init__(self, parent=None, cam_w=1920, cam_h=1080):
+        from spear_gui.overlay_defs import LOADING_RECT_DEFS, LOADING_TEXT_DEFS, LOADING_LINE_DEFS
+        super().__init__(LOADING_RECT_DEFS, parent=parent, cam_w=cam_w, cam_h=cam_h,
+                         text_defs=LOADING_TEXT_DEFS, line_defs=LOADING_LINE_DEFS)
+
+    def start(self):
+        self._broadcast('create'); self.show(); self._tick_timer.start()
+
+    def notify_loaded(self):
+        if any(r._phase=='loaded' for r in self._rects): return
+        QTimer.singleShot(50, lambda: self._broadcast('loaded'))
+
+
+class SelectionOverlay(AnimatedOverlay):
+    def __init__(self, parent=None, cam_w=1920, cam_h=1080):
+        from spear_gui.overlay_defs import SELECTION_RECT_DEFS, SELECTION_TEXT_DEFS, SELECTION_LINE_DEFS
+        super().__init__(SELECTION_RECT_DEFS, parent=parent, cam_w=cam_w, cam_h=cam_h,
+                         text_defs=SELECTION_TEXT_DEFS, line_defs=SELECTION_LINE_DEFS)
+        self._pending_unfocus: Optional[QTimer]=None
+        self._last_selection_phase='selected'
+
+    def start(self):
+        self._last_selection_phase='selected'
+        self._broadcast('selected'); self.show(); self._tick_timer.start()
+
+    def notify_reselected(self):
+        if self._pending_unfocus is not None:
+            self._pending_unfocus.stop(); self._pending_unfocus=None
+        self._last_selection_phase='selected'; self._broadcast('selected')
+
+    def notify_deselected(self):
+        if self._last_selection_phase=='unselected': return
+        self._last_selection_phase='unselected'; self._broadcast('unselected')
+
+    def notify_focused(self):
+        if self._pending_unfocus is not None:
+            self._pending_unfocus.stop(); self._pending_unfocus=None; return
+        self._broadcast(self._last_selection_phase)
+
+    def notify_unfocused(self):
+        if self._pending_unfocus is not None: return
+        t=QTimer(); t.setSingleShot(True); t.setInterval(0)
+        t.timeout.connect(self._do_notify_unfocused); t.start(); self._pending_unfocus=t
+
+    def _do_notify_unfocused(self):
+        self._pending_unfocus=None; self._broadcast('unfocused')
+
+
+
 # ──────────────────────── InlineOverlay ──────────────────────────
 
 class InlineOverlay(QObject):
@@ -583,22 +870,30 @@ class InlineOverlay(QObject):
     No QWidget, no native window, no compositing overhead.
     The OverlayCanvas ticks it and calls _draw() directly.
     """
-    def __init__(self, polygon_defs, cam_w=1920, cam_h=1080, text_defs=None):
+    def __init__(self, rect_defs, cam_w=1920, cam_h=1080,
+                 text_defs=None, line_defs=None):
         super().__init__()
         self.cam_w = cam_w; self.cam_h = cam_h
-        self._polygons      = [AnimatedPolygon(d) for d in polygon_defs]
-        self._texts         = [AnimatedText(d)    for d in (text_defs or [])]
-        self._context       = None; self._click_target = None
-        self._closing       = False; self._done = False
-        self._static_pixmap = None; self._needs_bake = False
-        self._baked_w = 0; self._baked_h = 0
+        self._rects  = [AnimatedRect(d)  for d in rect_defs]
+        self._texts  = [AnimatedText(d)  for d in (text_defs  or [])]
+        self._lines  = [AnimatedLine(d)  for d in (line_defs  or [])]
+        self._context      = None
+        self._click_target = None
+        self._closing      = False
+        self._done         = False
+        self._static_pixmap = None
+        self._needs_bake    = False
+        self._baked_w       = 0
+        self._baked_h       = 0
 
     def set_context(self, ctx): self._context = ctx
 
     def _broadcast(self, phase):
-        self._static_pixmap = None; self._needs_bake = False
-        for p in self._polygons: p.set_phase(phase)
-        for t in self._texts:    t.set_phase(phase)
+        self._static_pixmap = None
+        self._needs_bake    = False
+        for r in self._rects: r.set_phase(phase)
+        for t in self._texts: t.set_phase(phase)
+        for l in self._lines: l.set_phase(phase)
 
     def close(self):
         if not self._closing:
@@ -606,29 +901,54 @@ class InlineOverlay(QObject):
             self._broadcast('close')
 
     def tick(self):
-        if self._done: return False
-        if self._static_pixmap is not None: return False
-        any_visible = False; any_animating = False
-        for p in self._polygons:
-            p.update()
-            if not p.hidden:
+        """Advance tweens. Returns True if still animating, False when static/done."""
+        if self._done:
+            return False
+        if self._static_pixmap is not None:
+            return False
+        any_visible = False
+        any_animating = False
+        for r in self._rects:
+            r.update()
+            if not r.hidden:
                 any_visible = True
-                if not p.phase_done(): any_animating = True
+                if not r.phase_done(): any_animating = True
         for t in self._texts:
             t.update()
             if not t.hidden or t.defn.always_visible:
                 any_visible = True
                 if not t.phase_done(): any_animating = True
+        for l in self._lines:
+            l.update()
+            if not l.hidden:
+                any_visible = True
+                if not l.phase_done(): any_animating = True
         if self._closing:
-            if not any_animating: self._done = True; return False
+            if not any_animating:
+                self._done = True
+                return False
             return True
-        if not any_visible: self._done = True; return False
-        if not any_animating: self._needs_bake = True; return True
+        if not any_visible:
+            self._done = True
+            return False
+        if not any_animating:
+            self._needs_bake = True
+            return True
         return True
 
     def _paint_elements(self, painter, w, h):
-        for poly in self._polygons:
-            poly.draw(painter, w, h, self.cam_w, self.cam_h)
+        from PySide6.QtGui import QBrush
+        painter.setPen(Qt.NoPen)
+        for rect in self._rects:
+            if rect.hidden: continue
+            if rect._cached_brush is None:
+                rect._cached_brush = QBrush(rect.cur_color)
+            painter.setBrush(rect._cached_brush)
+            poly, is_r = rect.get_polygon(w, h, rect.defn.uniform_scale,
+                                           self.cam_w, self.cam_h)
+            if is_r: painter.fillRect(poly.boundingRect(), rect._cached_brush.color())
+            else:    painter.drawPolygon(poly)
+        painter.setPen(Qt.NoPen)
         for text in self._texts:
             if text.hidden: continue
             label = text.resolve_text(self._context)
@@ -638,6 +958,8 @@ class InlineOverlay(QObject):
             dx, dy = text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font)
             painter.drawText(dx, dy, label)
             painter.setPen(Qt.NoPen)
+        for line in self._lines:
+            line.draw(painter, w, h)
 
     def _draw(self, painter, w, h):
         """Draw at widget size (w, h) into an already-translated painter."""
@@ -665,68 +987,27 @@ class InlineOverlay(QObject):
         self._draw(painter, w, h)
         painter.restore()
 
-# ──────────────────────── OVERLAY ──────────────────────────
 
+class InlineLoadingOverlay(InlineOverlay):
+    def __init__(self, cam_w=1920, cam_h=1080):
+        from spear_gui.overlay_defs import LOADING_RECT_DEFS, LOADING_TEXT_DEFS, LOADING_LINE_DEFS
+        super().__init__(LOADING_RECT_DEFS, cam_w=cam_w, cam_h=cam_h,
+                         text_defs=LOADING_TEXT_DEFS, line_defs=LOADING_LINE_DEFS)
 
-
-class _OverlayBase:
-    def _base_init(self, polygon_defs, cam_w, cam_h, text_defs):
-        self.cam_w      = cam_w
-        self.cam_h      = cam_h
-        self._polygons  = [AnimatedPolygon(d) for d in polygon_defs]
-        self._texts     = [AnimatedText(d)    for d in (text_defs or [])]
-        self._context   = None
-        self._closing   = False
-
-    def _broadcast(self, phase):
-        for p in self._polygons: p.set_phase(phase)
-        for t in self._texts:    t.set_phase(phase)
-
-    def _tick_elements(self):
-        """Advance all elements. Returns (any_visible, any_animating)."""
-        any_visible = any_animating = False
-        for p in self._polygons:
-            p.update()
-            if not p.hidden:
-                any_visible = True
-                if not p.phase_done(): any_animating = True
-        for t in self._texts:
-            t.update()
-            if not t.hidden or t.defn.always_visible:
-                any_visible = True
-                if not t.phase_done(): any_animating = True
-        return any_visible, any_animating
-
-    def _all_done(self):
-        return (all(p.phase_done() for p in self._polygons) and
-                all(t.phase_done() for t in self._texts))
-
-    def _paint_elements(self, painter, w, h):
-        for poly in self._polygons:
-            poly.draw(painter, w, h, self.cam_w, self.cam_h)
-        for text in self._texts:
-            if text.hidden: continue
-            label = text.resolve_text(self._context)
-            if not label: continue
-            font = text.build_font()
-            painter.setFont(font)
-            painter.setPen(text.cur_color)
-            dx, dy = text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font)
-            painter.drawText(dx, dy, label)
-            painter.setPen(Qt.NoPen)
-
-class _LoadingMixin:
     def start(self):
         self._broadcast('create')
 
     def notify_loaded(self):
-        if any(p._phase == 'loaded' for p in self._polygons): return
+        if any(r._phase == 'loaded' for r in self._rects): return
         QTimer.singleShot(50, lambda: self._broadcast('loaded'))
 
 
-class _SelectionMixin:
-    def _sel_init(self):
-        self._pending_unfocus      = None
+class InlineSelectionOverlay(InlineOverlay):
+    def __init__(self, cam_w=1920, cam_h=1080):
+        from spear_gui.overlay_defs import SELECTION_RECT_DEFS, SELECTION_TEXT_DEFS, SELECTION_LINE_DEFS
+        super().__init__(SELECTION_RECT_DEFS, cam_w=cam_w, cam_h=cam_h,
+                         text_defs=SELECTION_TEXT_DEFS, line_defs=SELECTION_LINE_DEFS)
+        self._pending_unfocus = None
         self._last_selection_phase = 'selected'
 
     def start(self):
@@ -759,47 +1040,36 @@ class _SelectionMixin:
         self._pending_unfocus = None
         self._broadcast('unfocused')
 
-class LoadingOverlay(_LoadingMixin, AnimatedOverlay):
-    def __init__(self, parent=None, cam_w=1920, cam_h=1080):
-        from spear_gui.overlay_defs import LOADING_DEFS
-        super().__init__(LOADING_DEFS, parent=parent, cam_w=cam_w, cam_h=cam_h)
-    def start(self):
-        super().start(); self.show(); self._tick_timer.start()
-
-class InlineLoadingOverlay(_LoadingMixin, InlineOverlay):
-    def __init__(self, cam_w=1920, cam_h=1080):
-        from spear_gui.overlay_defs import LOADING_DEFS
-        super().__init__(LOADING_DEFS, cam_w=cam_w, cam_h=cam_h)
-
-class SelectionOverlay(_SelectionMixin, AnimatedOverlay):
-    def __init__(self, parent=None, cam_w=1920, cam_h=1080):
-        from spear_gui.overlay_defs import SELECTION_DEFS
-        super().__init__(SELECTION_DEFS, parent=parent, cam_w=cam_w, cam_h=cam_h)
-        self._sel_init()
-    def start(self):
-        super().start(); self.show(); self._tick_timer.start()
-
-class InlineSelectionOverlay(_SelectionMixin, InlineOverlay):
-    def __init__(self, cam_w=1920, cam_h=1080):
-        from spear_gui.overlay_defs import SELECTION_DEFS
-        super().__init__(SELECTION_DEFS, cam_w=cam_w, cam_h=cam_h)
-        self._sel_init()
-
 # ──────────────────────── OverlayCanvas ─────────────────────────
 
 class OverlayCanvas(QWidget):
-    """Single widget covering the container. Ticks and draws all
-    InlineLoadingOverlay / InlineSelectionOverlay in one paintEvent pass.
-    No child overlay widgets — zero extra compositing surfaces.
+    """Single top-level Tool window covering the container.
+    Draws all loading/selection overlays in one paintEvent pass.
+    Being a top-level window (not a child) means it paints OVER native
+    X11 windows (GStreamer video surfaces) without being composited into
+    the backing store — so the video feed shows through correctly.
     """
     TICK_MS = 16
 
     def __init__(self, parent, external_tick=False):
-        super().__init__(parent)
+        # Top-level Tool window — not a child widget
+        super().__init__(None)
+        self._container = parent
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.setAttribute(Qt.WA_NoSystemBackground)
-        self.setAutoFillBackground(False)
-        self.setGeometry(parent.rect())
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        # Position over the container
+        g = parent.geometry()
+        try:
+            gp = parent.mapToGlobal(parent.rect().topLeft())
+            self.setGeometry(gp.x(), gp.y(), g.width(), g.height())
+        except Exception:
+            self.setGeometry(g)
         self._entries: dict = {}
         self._external_tick = external_tick
         if not external_tick:
@@ -808,9 +1078,14 @@ class OverlayCanvas(QWidget):
             self._tick_timer.timeout.connect(self._tick)
 
     def resizeToParent(self):
-        if self.parent():
-            self.setGeometry(self.parent().rect())
-            self.raise_()
+        if self._container:
+            try:
+                gp = self._container.mapToGlobal(self._container.rect().topLeft())
+                self.setGeometry(gp.x(), gp.y(),
+                                 self._container.width(), self._container.height())
+                self.raise_()
+            except RuntimeError:
+                pass
 
     def register(self, cam_widget, loading_ov=None, selection_ov=None):
         entry = self._entries.setdefault(cam_widget, [None, None])
@@ -848,13 +1123,20 @@ class OverlayCanvas(QWidget):
         for cw in dead:
             self.unregister(cw)
         if not dirty_region.isEmpty():
-            self.raise_()
-            self.update(dirty_region)
+            self.update()
         elif not self._external_tick:
             self._tick_timer.stop()
 
     def external_tick(self):
         """Called by CameraNode master timer instead of internal QTimer."""
+        if self._container:
+            try:
+                gp = self._container.mapToGlobal(self._container.rect().topLeft())
+                cw = self._container.width(); ch = self._container.height()
+                if (self.x() != gp.x() or self.y() != gp.y()
+                        or self.width() != cw or self.height() != ch):
+                    self.setGeometry(gp.x(), gp.y(), cw, ch)
+            except RuntimeError: pass
         self._tick()
 
     def has_active(self) -> bool:
@@ -865,14 +1147,19 @@ class OverlayCanvas(QWidget):
         return False
 
     def paintEvent(self, event):
-        if not self._entries:
-            return
         painter = QPainter(self)
         if not painter.isActive():
             return
+        # Clear to transparent — as a top-level Tool window with
+        # WA_TranslucentBackground this correctly shows through to whatever
+        # is below (including native X11 GStreamer video windows).
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.transparent)
+        if not self._entries:
+            painter.end()
+            return
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         painter.setRenderHint(QPainter.Antialiasing)
-        # Clip to only the regions Qt asked us to repaint
         clip = event.region()
         for cw, (lo, so) in self._entries.items():
             if lo is None and so is None:
@@ -881,7 +1168,6 @@ class OverlayCanvas(QWidget):
                 g = cw.geometry()
             except RuntimeError:
                 continue
-            # Skip this camera entirely if its rect isn't in the dirty region
             if not clip.intersects(g):
                 continue
             x, y, w, h = g.x(), g.y(), g.width(), g.height()
@@ -952,17 +1238,10 @@ class MarkStyle:
 
 @dataclass(frozen=True)
 class ButtonStyle:
-    fill_color:    QColor = field(default_factory=lambda: QColor(255, 255, 255))
-    text_color:    QColor = field(default_factory=lambda: QColor(0, 0, 0))
-    outline_color: QColor = field(default_factory=lambda: QColor(0, 0, 0, 0))
-    line_width:    float  = 0.0
-    font_family:   str    = 'Oxanium SemiBold'
-    font_size:     float  = 10.0
-    # Corner offsets: (P(rel_dx, rel_dy), P(px_dx, px_dy)) or None
-    tl: Optional[Tuple[P, P]] = None
-    tr: Optional[Tuple[P, P]] = None
-    br: Optional[Tuple[P, P]] = None
-    bl: Optional[Tuple[P, P]] = None
+    color:      QColor=field(default_factory=lambda:QColor(255,255,255))
+    text_color: QColor=field(default_factory=lambda:QColor(0,0,0))
+    font_family: str='Oxanium SemiBold'; font_size: float=10.0
+    slant: Optional[Slant]=None
 
 @dataclass
 class SliderTween:
@@ -986,18 +1265,11 @@ class MarkTween:
 
 @dataclass
 class ButtonTween:
-    # points is now Optional — if None, derived from the button's own Rect
-    # pass an explicit List[P] (4 points, CW) to override shape entirely,
-    # or leave None and use w_scale / h_scale as before
-    points:        Optional[List[P]] = None
-    fill_color:    Optional[QColor]  = None
-    outline_color: Optional[QColor]  = None
-    w_scale:       float             = 1.0
-    h_scale:       float             = 1.0
-    start:         float             = 0.0
-    dur:           float             = 0.3
-    ease:          QEasingCurve.Type = QEasingCurve.Linear
-    prev_phase:    Optional[str]     = None
+    color: QColor=field(default_factory=lambda:QColor(255,255,255))
+    w_scale: float=1.0; h_scale: float=1.0
+    slant: Any=field(default_factory=lambda:_KEEP_SLANT)
+    start: float=0.0; dur: float=0.3; ease: QEasingCurve.Type=QEasingCurve.Linear
+    prev_phase: Optional[str]=None
 
 
 # ──────────────────────── Def dataclasses ────────────────────────
@@ -1021,13 +1293,10 @@ class SliderDef:
 
 @dataclass
 class ButtonDef:
-    p1:     P;  p2: P          # normalised corners (same as Rect)
-    label:  str
-    action: str
-    style:  ButtonStyle             = field(default_factory=ButtonStyle)
-    phases: Dict[str, Phase]        = field(default_factory=dict)
-    px1:    P                       = field(default_factory=P)
-    px2:    P                       = field(default_factory=P)
+    rect: Rect; label: str; action: str
+    style:  ButtonStyle=field(default_factory=ButtonStyle)
+    phases: Dict[str,Phase]=field(default_factory=dict)
+    px:     Rect=field(default_factory=Rect)
 
 
 # ──────────────────────── _TweenRunner / _Channel ────────────────
@@ -1037,9 +1306,6 @@ class _TweenRunner:
         self._tweens=[]; self._idx=0; self._elapsed=QElapsedTimer()
 
     def set_phase(self, phase, phases, prev):
-        for tw in self._tweens:
-            if hasattr(tw, "_blend_anchor"):
-                tw._blend_anchor = None
         self._idx=0
         p=phases.get(phase)
         self._tweens=[tw for tw in (p.tweens if p else [])
@@ -1243,156 +1509,107 @@ class AnimatedSlider:
 
 
 # ──────────────────────── AnimatedButton ─────────────────────────
+
 class AnimatedButton:
-    """
-    Internally owns an AnimatedPolygon built from its ButtonDef geometry.
-    The polygon's phases mirror the button's phases but are driven by
-    _set_phase() rather than broadcast — buttons are individually controlled.
-    """
+    def __init__(self,defn:ButtonDef,cam_w=1920,cam_h=1080):
+        self.defn=defn; self.cam_w=cam_w; self.cam_h=cam_h
+        self._hovered=self._pressed=False; self._prev=''
+        self.cur_color=QColor(defn.style.color); self._s_color=QColor(defn.style.color)
+        self.cur_w_scale=1.0; self._s_w_scale=1.0
+        self.cur_h_scale=1.0; self._s_h_scale=1.0
+        self.cur_slant=defn.style.slant; self._start_slant=defn.style.slant
+        self._slant_v=1.0; self._runner=_TweenRunner()
 
-    def __init__(self, defn: ButtonDef, cam_w: int = 1920, cam_h: int = 1080):
-        self.defn    = defn
-        self.cam_w   = cam_w
-        self.cam_h   = cam_h
-        self._hovered = False
-        self._pressed = False
-        self._prev    = ''
-        self._runner  = _TweenRunner()
+    def _set_phase(self,phase):
+        self._s_color=QColor(self.cur_color); self._s_w_scale=self.cur_w_scale
+        self._s_h_scale=self.cur_h_scale; self._start_slant=self.cur_slant; self._slant_v=0.0
+        self._runner.set_phase(phase,self.defn.phases,self._prev); self._prev=phase
 
-        # Build the internal polygon from ButtonDef geometry
-        self._poly_defn = self._make_poly_defn()
-        self._polygon   = AnimatedPolygon(self._poly_defn)
+    def _screen_rect(self,w,h):
+        r=self.defn.rect; px=self.defn.px; bw=r.w*w+px.w; bh=r.h*h+px.h
+        sw=bw*self.cur_w_scale; sh=bh*self.cur_h_scale
+        return (r.x*w+px.x)+(bw-sw)/2, (r.y*h+px.y)+(bh-sh)/2, sw, sh
 
-    def _make_poly_defn(self) -> PolygonDef:
-        """Convert ButtonDef p1/p2 + style corners → PolygonDef."""
-        d  = self.defn
-        s  = d.style
+    def hit_test(self,mx,my,w,h):
+        sx,sy,sw,sh=self._screen_rect(w,h); return sx<=mx<=sx+sw and sy<=my<=sy+sh
 
-        def _split(offset):
-            if offset is None:
-                return P(), P()
-            return offset[0], offset[1]
-
-        tl_r, tl_p = _split(s.tl)
-        tr_r, tr_p = _split(s.tr)
-        br_r, br_p = _split(s.br)
-        bl_r, bl_p = _split(s.bl)
-
-        points = [
-            P(d.p1.x + tl_r.x, d.p1.y + tl_r.y),
-            P(d.p2.x + tr_r.x, d.p1.y + tr_r.y),
-            P(d.p2.x + br_r.x, d.p2.y + br_r.y),
-            P(d.p1.x + bl_r.x, d.p2.y + bl_r.y),
-        ]
-        px = [
-            P(d.px1.x + tl_p.x, d.px1.y + tl_p.y),
-            P(d.px2.x + tr_p.x, d.px1.y + tr_p.y),
-            P(d.px2.x + br_p.x, d.px2.y + br_p.y),
-            P(d.px1.x + bl_p.x, d.px2.y + bl_p.y),
-        ]
-
-        # Translate button phases → PolygonTween phases
-        poly_phases: Dict[str, Phase] = {}
-        for phase_name, phase in d.phases.items():
-            poly_tweens = []
-            for tw in phase.tweens:
-                if not isinstance(tw, ButtonTween):
-                    poly_tweens.append(tw)
-                    continue
-                # Derive tween points from w_scale / h_scale around the
-                # button's centre, applying the same corner offsets
-                bw   = d.p2.x - d.p1.x
-                bh   = d.p2.y - d.p1.y
-                bcx  = d.p1.x + bw / 2
-                bcy  = d.p1.y + bh / 2
-                sw   = bw * tw.w_scale
-                sh   = bh * tw.h_scale
-                bx1  = bcx - sw / 2;  bx2 = bcx + sw / 2
-                by1  = bcy - sh / 2;  by2 = bcy + sh / 2
-
-                if tw.points is not None:
-                    tgt_points = tw.points
-                    tgt_px     = None
-                else:
-                    tgt_points = [
-                        P(bx1 + tl_r.x, by1 + tl_r.y),
-                        P(bx2 + tr_r.x, by1 + tr_r.y),
-                        P(bx2 + br_r.x, by2 + br_r.y),
-                        P(bx1 + bl_r.x, by2 + bl_r.y),
-                    ]
-                    tgt_px = [
-                        P(d.px1.x + tl_p.x, d.px1.y + tl_p.y),
-                        P(d.px2.x + tr_p.x, d.px1.y + tr_p.y),
-                        P(d.px2.x + br_p.x, d.px2.y + br_p.y),
-                        P(d.px1.x + bl_p.x, d.px2.y + bl_p.y),
-                    ]
-
-                poly_tweens.append(PolygonTween(
-                    points        = tgt_points,
-                    px            = tgt_px,
-                    fill_color    = tw.fill_color,
-                    outline_color = tw.outline_color,
-                    start         = tw.start,
-                    dur           = tw.dur,
-                    ease          = tw.ease,
-                    prev_phase    = tw.prev_phase,
-                ))
-            poly_phases[phase_name] = Phase(poly_tweens)
-
-        return PolygonDef(
-            points        = points,
-            px            = px,
-            fill_color    = d.style.fill_color,
-            outline_color = d.style.outline_color,
-            line_width    = d.style.line_width,
-            closed        = True,
-            phases        = poly_phases,
-        )
-
-    def _set_phase(self, phase: str):
-        self._prev = phase
-        self._polygon.set_phase(phase)
-        self._runner.set_phase(phase, self.defn.phases, self._prev)
-
-    def _screen_rect(self, w: int, h: int) -> Tuple[float, float, float, float]:
-        """AABB of current polygon — used for hit testing."""
-        poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
-        r    = poly.boundingRect()
-        return r.x(), r.y(), r.width(), r.height()
-
-    def hit_test(self, mx: float, my: float, w: int, h: int) -> bool:
-        poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
-        return poly.containsPoint(QPointF(mx, my), Qt.OddEvenFill)
-
-    def hit_test_global(self, gx: float, gy: float, panel) -> bool:
-        return self.hit_test(gx - panel.x(), gy - panel.y(),
-                             panel.width(), panel.height())
+    def hit_test_global(self,gx,gy,panel):
+        return self.hit_test(gx-panel.x(),gy-panel.y(),panel.width(),panel.height())
 
     def update(self):
-        self._polygon.update()
+        def _rst():
+            self.cur_color=self._s_color=QColor(self.defn.style.color)
+            self.cur_w_scale=self._s_w_scale=1.0; self.cur_h_scale=self._s_h_scale=1.0
+            self._slant_v=1.0
+        tw,v=self._runner.progress(_rst)
+        if tw is not None:
+            self.cur_color=lerp_color(self._s_color,tw.color,v)
+            self.cur_w_scale=self._s_w_scale+(tw.w_scale-self._s_w_scale)*v
+            self.cur_h_scale=self._s_h_scale+(tw.h_scale-self._s_h_scale)*v
+            self.cur_slant=tw.slant if tw.slant is not _KEEP_SLANT else self._start_slant
+            self._slant_v=v
+        else: self._slant_v=1.0
 
-    def phase_done(self) -> bool:
-        return self._polygon.phase_done()
-
-    def draw(self, painter: QPainter, w: int, h: int):
-        # Draw the polygon (fill + optional outline)
-        self._polygon.draw(painter, w, h, self.cam_w, self.cam_h)
-
-        # Draw label centred in the polygon AABB
-        st = self.defn.style
-        f  = _make_font(st.font_family, st.font_size)
-        fm = QFontMetrics(f)
-        sx, sy, sw, sh = self._screen_rect(w, h)
-        painter.setFont(f)
-        painter.setPen(st.text_color)
-        painter.drawText(
-            int(sx + (sw - fm.horizontalAdvance(self.defn.label)) / 2),
-            int(sy + (sh + fm.ascent()) / 2 - fm.descent()),
-            self.defn.label,
-        )
+    def draw(self,painter,w,h):
+        sx,sy,sw,sh=self._screen_rect(w,h)
+        painter.setPen(Qt.NoPen); painter.setBrush(self.cur_color)
+        pts=lerp_button_slant_pts(sx,sy,sw,sh,self._start_slant,self.cur_slant,self._slant_v)
+        if len(pts)==4: painter.drawRect(QRectF(pts[0].x(),pts[0].y(),pts[2].x()-pts[0].x(),pts[2].y()-pts[0].y()))
+        else: painter.drawPolygon(QPolygonF(pts))
+        st=self.defn.style; f=_make_font(st.font_family,st.font_size); fm=QFontMetrics(f)
+        painter.setFont(f); painter.setPen(st.text_color)
+        painter.drawText(int(sx+(sw-fm.horizontalAdvance(self.defn.label))/2),
+                         int(sy+(sh+fm.ascent())/2-fm.descent()),self.defn.label)
         painter.setPen(Qt.NoPen)
 
+
 # ──────────────────────── SettingsMouseFilter ────────────────────
+
+class SettingsMouseFilter(QObject):
+    def __init__(self,parent=None): super().__init__(parent); self._panel=None
+    def set_panel(self,panel): self._panel=panel
+    def clear_panel(self): self._panel=None
+
+    def eventFilter(self,obj,event):
+        panel=self._panel
+        if panel is None or panel._closing: return False
+        t=event.type()
+        if t not in (QEvent.MouseButtonPress,QEvent.MouseButtonRelease,QEvent.MouseMove): return False
+        gpos=event.globalPosition() if hasattr(event,'globalPosition') else event.globalPos()
+        gx,gy=gpos.x(),gpos.y()
+        g=panel.mapToGlobal(panel.rect().topLeft())
+        lx,ly=gx-g.x(),gy-g.y(); pw,ph=float(panel.width()),float(panel.height())
+
+        if t==QEvent.MouseButtonPress:
+            if event.button()!=Qt.LeftButton: return False
+            for sl in panel._sliders:
+                if sl.hit_test_knob(lx,ly,pw,ph):
+                    panel._dragging_slider=sl; sl._pressed=True; sl._set_phase('knob','pressed'); return True
+            for btn in panel._buttons:
+                if btn.hit_test(lx,ly,pw,ph): btn._pressed=True; btn._set_phase('pressed'); return True
+            return False
+        elif t==QEvent.MouseButtonRelease:
+            if event.button()!=Qt.LeftButton: return False
+            if panel._dragging_slider is not None:
+                sl=panel._dragging_slider; sl._pressed=sl._dragging=False
+                sl._set_phase('knob','hovered' if sl._hovered else 'unhovered')
+                panel._dragging_slider=None; return True
+            for btn in panel._buttons:
+                if btn._pressed:
+                    btn._pressed=False; btn._set_phase('released')
+                    if btn.hit_test(lx,ly,pw,ph): panel._handle_button(btn)
+                    return True
+            return False
+        else:
+            if panel._dragging_slider is not None:
+                panel._dragging_slider.drag_to(lx,ly,pw,ph); return True
+            for sl in panel._sliders:
+                now=sl.hit_test_knob(lx,ly,pw,ph)
+                if now!=sl._hovered: sl._hovered=now; sl._set_phase('knob','hovered' if now else 'unhovered')
+            for btn in panel._buttons:
+                now=btn.hit_test(lx,ly,pw,ph)
+                if now!=btn._hovered: btn._hovered=now; btn._set_phase('hovered' if now else 'unhovered')
+            return False
 
 
 # ──────────────────────── SettingsOverlay ────────────────────────
@@ -1400,21 +1617,21 @@ class AnimatedButton:
 class SettingsOverlay(QWidget):
     TICK_MS=16
 
-    def __init__(self, polygon_defs, text_defs, slider_defs, button_defs,
-                 cam_w=1920, cam_h=1080):
+    def __init__(self,rect_defs,text_defs,slider_defs,button_defs,
+                 cam_w=1920,cam_h=1080,line_defs=None):
         super().__init__(None)
         self.setWindowFlags(Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint|Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True); self.setFocusPolicy(Qt.StrongFocus)
-        self.cam_w = cam_w; self.cam_h = cam_h
-        self._polygons = [AnimatedPolygon(d) for d in polygon_defs]
-        self._texts    = [AnimatedText(d)    for d in text_defs]
-        self._sliders  = [AnimatedSlider(d, cam_w, cam_h) for d in slider_defs]
-        self._buttons  = [AnimatedButton(d, cam_w, cam_h) for d in button_defs]
-        self._context  = self._on_apply = self._on_cancel = None
-        self._dragging_slider = None; self._closing = False; self._mouse_filter = None
-        self._tick_timer = QTimer(self)
-        self._tick_timer.setInterval(self.TICK_MS)
+        self.cam_w=cam_w; self.cam_h=cam_h
+        self._rects=[AnimatedRect(d)            for d in rect_defs]
+        self._texts=[AnimatedText(d)            for d in text_defs]
+        self._sliders=[AnimatedSlider(d,cam_w,cam_h) for d in slider_defs]
+        self._buttons=[AnimatedButton(d,cam_w,cam_h) for d in button_defs]
+        self._line_defs_override=line_defs; self._lines=[]
+        self._context=self._on_apply=self._on_cancel=self._dragging_slider=None
+        self._closing=False; self._mouse_filter=None
+        self._tick_timer=QTimer(self); self._tick_timer.setInterval(self.TICK_MS)
         self._tick_timer.timeout.connect(self._tick)
 
     def open(self,context,on_apply=None,on_cancel=None):
@@ -1423,7 +1640,7 @@ class SettingsOverlay(QWidget):
             if self._line_defs_override is not None: defs=self._line_defs_override
             else:
                 from spear_gui.overlay_defs import SETTING_LINE_DEFS; defs=SETTING_LINE_DEFS
-            # self._lines=[AnimatedLine(d) for d in defs]
+            self._lines=[AnimatedLine(d) for d in defs]
         for sl in self._sliders:
             sl.init_value(context); sl._set_phase('track','open'); sl._set_phase('knob','open'); sl._set_phase('mark','hidden')
         for btn in self._buttons: btn._set_phase('open')
@@ -1440,26 +1657,27 @@ class SettingsOverlay(QWidget):
             for sl in self._sliders: sl._set_phase('track','close'); sl._set_phase('knob','close'); sl._set_phase('mark','close')
             for btn in self._buttons: btn._set_phase('close')
 
-    def _broadcast(self, phase):
-        for p in self._polygons: p.set_phase(phase)
-        for t in self._texts:    t.set_phase(phase)
+    def _broadcast(self,phase):
+        for r in self._rects: r.set_phase(phase)
+        for t in self._texts: t.set_phase(phase)
+        for l in self._lines: l.set_phase(phase)
 
     def _tick(self):
-        for p   in self._polygons: p.update()
-        for t   in self._texts:    t.update()
-        for sl  in self._sliders:  sl.update()
-        for btn in self._buttons:  btn.update()
+        for r in self._rects: r.update()
+        for t in self._texts: t.update()
+        for sl in self._sliders: sl.update()
+        for btn in self._buttons: btn.update()
+        for l in self._lines: l.update()
         if self._closing:
-            sl_done = all(sl._track_ch.done() and sl._knob_ch.done()
-                          and sl._mark_ch.done() for sl in self._sliders)
-            if (all(p.phase_done() for p in self._polygons) and
-                    all(t.phase_done() for t in self._texts) and
-                    sl_done and all(b.phase_done() for b in self._buttons)):
+            sl_done=all(sl._track_ch.done() and sl._knob_ch.done() and sl._mark_ch.done() for sl in self._sliders)
+            if (all(r.phase_done() for r in self._rects) and all(t.phase_done() for t in self._texts)
+                    and sl_done and all(b._runner.done() for b in self._buttons)
+                    and all(l.phase_done() for l in self._lines)):
                 self._tick_timer.stop(); self.hide()
                 if self._mouse_filter:
-                    app = QApplication.instance()
+                    app=QApplication.instance()
                     if app: app.removeEventFilter(self._mouse_filter)
-                    self._mouse_filter = None
+                    self._mouse_filter=None
                 self.deleteLater(); return
         self.update()
 
@@ -1510,26 +1728,31 @@ class SettingsOverlay(QWidget):
             if self._on_cancel: self._on_cancel()
         self.close_panel()
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
+    def paintEvent(self,event):
+        painter=QPainter(self)
         if not painter.isActive(): return
         painter.setCompositionMode(QPainter.CompositionMode_Source)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        painter.fillRect(self.rect(),QColor(0,0,0,1))
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing); painter.setPen(Qt.NoPen)
+        w,h=self.width(),self.height()
+        for rect in self._rects:
+            if rect.hidden: continue
+            painter.setBrush(rect.cur_color)
+            poly,is_r=rect.get_polygon(w,h,rect.defn.uniform_scale,self.cam_w,self.cam_h)
+            if is_r: painter.fillRect(poly.boundingRect(),rect.cur_color)
+            else:    painter.drawPolygon(poly)
         painter.setPen(Qt.NoPen)
-        w, h = self.width(), self.height()
-        for poly in self._polygons:
-            poly.draw(painter, w, h, self.cam_w, self.cam_h)
         for text in self._texts:
             if text.hidden: continue
-            label = text.resolve_text(self._context)
+            label=text.resolve_text(self._context)
             if not label: continue
-            font = text.build_font(); painter.setFont(font); painter.setPen(text.cur_color)
-            dx, dy = text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font)
-            painter.drawText(dx, dy, label); painter.setPen(Qt.NoPen)
-        for sl  in self._sliders: sl.draw(painter, w, h)
-        for btn in self._buttons: btn.draw(painter, w, h)
+            font=text.build_font(); painter.setFont(font); painter.setPen(text.cur_color)
+            dx,dy=text.resolve_pos(w,h,self.cam_w,self.cam_h,label,font)
+            painter.drawText(dx,dy,label); painter.setPen(Qt.NoPen)
+        for sl in self._sliders: sl.draw(painter,w,h)
+        for btn in self._buttons: btn.draw(painter,w,h)
+        for l in self._lines: l.draw(painter,w,h)
         painter.end()
 
 
@@ -1958,17 +2181,22 @@ class CameraSelectOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True); self.setFocusPolicy(Qt.StrongFocus)
         self.cam_w = cam_w; self.cam_h = cam_h
+
         self._initial_display_mode = initial_display_mode % NUM_DISPLAY_MODES
         self._initial_cams         = max(1, min(initial_cams, MAX_ACTIVE_CAMS))
-        self._closing = False
+        self._closing  = False
         self._on_apply = self._on_cancel = None
+
         self._scroll = ScrollSystem(self._initial_display_mode, self._initial_cams)
         self._filter = None
-        from spear_gui.overlay_defs import CS_DEFS, CS_TEXT_DEFS, CS_BUTTON_DEFS
-        self._polygons  = [AnimatedPolygon(d)               for d in CS_DEFS]
-        self._texts     = [AnimatedText(d)                  for d in CS_TEXT_DEFS]
-        self._buttons   = [AnimatedButton(d, cam_w, cam_h)  for d in CS_BUTTON_DEFS]
+
+        from spear_gui.overlay_defs import CS_RECT_DEFS, CS_TEXT_DEFS, CS_BUTTON_DEFS
+        self._rects   = [AnimatedRect(d)               for d in CS_RECT_DEFS]
+        self._texts   = [AnimatedText(d)               for d in CS_TEXT_DEFS]
+        self._buttons = [AnimatedButton(d, cam_w, cam_h) for d in CS_BUTTON_DEFS]
+
         self._tile_font = _make_font('Oxanium SemiBold', 14.0)
+
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(self.TICK_MS)
         self._tick_timer.timeout.connect(self._tick)
@@ -2000,8 +2228,8 @@ class CameraSelectOverlay(QWidget):
         self._scroll.close_anim()
 
     def _broadcast(self, phase: str):
-        for p in self._polygons: p.set_phase(phase)
-        for t in self._texts:    t.set_phase(phase)
+        for r in self._rects: r.set_phase(phase)
+        for t in self._texts: t.set_phase(phase)
 
     # ── Controls ─────────────────────────────────────────────────
 
@@ -2040,14 +2268,15 @@ class CameraSelectOverlay(QWidget):
     # ── Tick ─────────────────────────────────────────────────────
 
     def _tick(self):
-        for p   in self._polygons: p.update()
-        for t   in self._texts:    t.update()
-        for btn in self._buttons:  btn.update()
+        for r   in self._rects:   r.update()
+        for t   in self._texts:   t.update()
+        for btn in self._buttons: btn.update()
         self._scroll.update()
+
         if self._closing:
-            if (all(p.phase_done() for p in self._polygons) and
+            if (all(r.phase_done() for r in self._rects) and
                     all(t.phase_done() for t in self._texts) and
-                    all(b.phase_done() for b in self._buttons) and
+                    all(b._runner.done() for b in self._buttons) and
                     self._scroll.all_done()):
                 self._tick_timer.stop(); self.hide()
                 if self._filter:
@@ -2114,9 +2343,17 @@ class CameraSelectOverlay(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
         w, h = self.width(), self.height()
-        for poly in self._polygons:
-            poly.draw(painter, w, h, self.cam_w, self.cam_h)
+
+        for rect in self._rects:
+            if rect.hidden: continue
+            painter.setBrush(rect.cur_color)
+            poly, is_r = rect.get_polygon(w, h, rect.defn.uniform_scale, self.cam_w, self.cam_h)
+            if is_r: painter.fillRect(poly.boundingRect(), rect.cur_color)
+            else:    painter.drawPolygon(poly)
+        painter.setPen(Qt.NoPen)
+
         self._scroll.draw(painter, w, h, self._tile_font)
+
         ctx = {
             'display_mode': self._scroll.display_mode,
             'num_cams':     self._scroll.num_cams,
@@ -2130,465 +2367,46 @@ class CameraSelectOverlay(QWidget):
             font = text.build_font(); painter.setFont(font); painter.setPen(text.cur_color)
             dx, dy = text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font)
             painter.drawText(dx, dy, label); painter.setPen(Qt.NoPen)
+
         for btn in self._buttons: btn.draw(painter, w, h)
         painter.end()
 
 
 # ──────────────────────── _CSFilter ──────────────────────────────
-def _filter_buttons(panel, event) -> bool:
-    t = event.type()
-    if t not in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseMove):
-        return False
-    gpos = event.globalPosition() if hasattr(event, 'globalPosition') else event.globalPos()
-    g  = panel.mapToGlobal(panel.rect().topLeft())
-    lx = gpos.x() - g.x(); ly = gpos.y() - g.y()
-    pw = float(panel.width()); ph = float(panel.height())
-
-    if t == QEvent.MouseButtonPress:
-        if event.button() != Qt.LeftButton: return False
-        for btn in panel._buttons:
-            if btn.hit_test(lx, ly, pw, ph):
-                btn._pressed = True; btn._set_phase('pressed'); return True
-        # SettingsOverlay also checks sliders on press
-        if hasattr(panel, '_sliders'):
-            for sl in panel._sliders:
-                if sl.hit_test_knob(lx, ly, pw, ph):
-                    panel._dragging_slider = sl
-                    sl._pressed = True; sl._set_phase('knob', 'pressed'); return True
-        return False
-
-    elif t == QEvent.MouseButtonRelease:
-        if event.button() != Qt.LeftButton: return False
-        if hasattr(panel, '_dragging_slider') and panel._dragging_slider is not None:
-            sl = panel._dragging_slider; sl._pressed = sl._dragging = False
-            sl._set_phase('knob', 'hovered' if sl._hovered else 'unhovered')
-            panel._dragging_slider = None; return True
-        for btn in panel._buttons:
-            if btn._pressed:
-                btn._pressed = False; btn._set_phase('released')
-                if btn.hit_test(lx, ly, pw, ph): panel._handle_button(btn)
-                return True
-        return False
-
-    else:  # MouseMove
-        if hasattr(panel, '_dragging_slider') and panel._dragging_slider is not None:
-            panel._dragging_slider.drag_to(lx, ly, pw, ph); return True
-        if hasattr(panel, '_sliders'):
-            for sl in panel._sliders:
-                now = sl.hit_test_knob(lx, ly, pw, ph)
-                if now != sl._hovered:
-                    sl._hovered = now; sl._set_phase('knob', 'hovered' if now else 'unhovered')
-        for btn in panel._buttons:
-            now = btn.hit_test(lx, ly, pw, ph)
-            if now != btn._hovered:
-                btn._hovered = now; btn._set_phase('hovered' if now else 'unhovered')
-        return False
-
-
-class SettingsMouseFilter(QObject):
-    def __init__(self, panel): super().__init__(panel); self._panel = panel
-    def eventFilter(self, obj, event):
-        if self._panel is None or self._panel._closing: return False
-        return _filter_buttons(self._panel, event)
 
 class _CSFilter(QObject):
-    def __init__(self, panel): super().__init__(panel); self._panel = panel
-    def eventFilter(self, obj, event):
-        if self._panel is None or self._panel._closing: return False
-        return _filter_buttons(self._panel, event) 
-        
-# ──────────────────────── Polygon ────────────────────────────────
+    def __init__(self, panel: CameraSelectOverlay):
+        super().__init__(panel); self._panel = panel
 
-@dataclass
-class PolygonTween:
-    points:        List[P]
-    start:         float                    = 0.0
-    dur:           float                    = 0.5
-    ease:          QEasingCurve.Type        = QEasingCurve.OutQuint
-    blend:         bool                     = False
-    px:            Optional[List[P]]        = None
-    fill_color:    Optional[QColor]         = None
-    outline_color: Optional[QColor]         = None
-    line_width:    Optional[float]          = None
-    draw_progress: Optional[float]          = None   # 0→1 for open-polyline draw-in
-    prev_phase:    Optional[str]            = None
-    _blend_anchor: Optional[float]          = None
+    def eventFilter(self, obj, event) -> bool:
+        panel = self._panel
+        if panel is None or panel._closing: return False
+        t = event.type()
+        if t not in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseMove):
+            return False
+        gpos = event.globalPosition() if hasattr(event, 'globalPosition') else event.globalPos()
+        gx, gy = gpos.x(), gpos.y()
+        g = panel.mapToGlobal(panel.rect().topLeft())
+        lx, ly = gx - g.x(), gy - g.y()
+        pw, ph = float(panel.width()), float(panel.height())
 
-@dataclass
-class PolygonDef:
-    points:        List[P]
-    phases:        Dict[str, Phase]
-    closed:        bool            = True
-    line_width:    float           = 0.0
-    uniform_scale: bool            = False
-    px:            Optional[List[P]] = None
-    fill_color:    Optional[QColor]  = None
-    outline_color: Optional[QColor]  = None
-    draw_progress: float             = 1.0   # initial draw progress (1=fully drawn)
-
-# ──────────────────────── AnimatedPolygon ────────────────────────
-class AnimatedPolygon(_TweenDriver):
-    def __init__(self, defn: PolygonDef):
-        super().__init__()
-        self.defn = defn
-        n = len(defn.points)
-        _zero_px = [P() for _ in range(n)]
-
-        self.cur_points       = [P(p.x, p.y) for p in defn.points]
-        self.cur_px           = [P(p.x, p.y) for p in (defn.px or _zero_px)]
-        self.cur_fill_color   = QColor(defn.fill_color)   if defn.fill_color   else QColor(0,0,0,0)
-        self.cur_outline_color= QColor(defn.outline_color)if defn.outline_color else QColor(0,0,0,0)
-        self.cur_line_width   = defn.line_width
-        self.cur_draw_progress= defn.draw_progress
-
-        # Tween start snapshots
-        self._sp  = [P(p.x, p.y) for p in self.cur_points]
-        self._spx = [P(p.x, p.y) for p in self.cur_px]
-        self._sf  = QColor(self.cur_fill_color)
-        self._so  = QColor(self.cur_outline_color)
-        self._slw = self.cur_line_width
-        self._sdp = self.cur_draw_progress
-
-        self._dirty      = True
-        self._cached_poly= QPolygonF()
-        self._cached_w   = 0
-        self._cached_h   = 0
-
-    # ── _TweenDriver hooks ───────────────────────────────────────
-
-    def _save_start(self):
-        self._sp  = [P(p.x, p.y) for p in self.cur_points]
-        self._spx = [P(p.x, p.y) for p in self.cur_px]
-        self._sf  = QColor(self.cur_fill_color)
-        self._so  = QColor(self.cur_outline_color)
-        self._slw = self.cur_line_width
-        self._sdp = self.cur_draw_progress
-
-    def _apply(self, tw: PolygonTween, v: float):
-        for i, (sp, tp) in enumerate(zip(self._sp, tw.points)):
-            self.cur_points[i] = P(sp.x + (tp.x - sp.x) * v,
-                                   sp.y + (tp.y - sp.y) * v)
-        if tw.px is not None:
-            for i, (spx, tpx) in enumerate(zip(self._spx, tw.px)):
-                self.cur_px[i] = P(spx.x + (tpx.x - spx.x) * v,
-                                   spx.y + (tpx.y - spx.y) * v)
-        if tw.fill_color    is not None: self.cur_fill_color    = lerp_color(self._sf, tw.fill_color,    v)
-        if tw.outline_color is not None: self.cur_outline_color = lerp_color(self._so, tw.outline_color, v)
-        if tw.line_width    is not None: self.cur_line_width    = self._slw + (tw.line_width - self._slw) * v
-        if tw.draw_progress is not None: self.cur_draw_progress = self._sdp + (tw.draw_progress - self._sdp) * v
-        self._dirty = True
-
-    def _apply_blend(self, tw: PolygonTween, v: float):
-        # Blend tweens use points as *offsets* from current
-        for i, tp in enumerate(tw.points):
-            cp = self.cur_points[i]
-            self.cur_points[i] = P(cp.x + tp.x * v, cp.y + tp.y * v)
-        if tw.px is not None:
-            for i, tpx in enumerate(tw.px):
-                cpx = self.cur_px[i]
-                self.cur_px[i] = P(cpx.x + tpx.x * v, cpx.y + tpx.y * v)
-        if tw.fill_color    is not None: self.cur_fill_color    = lerp_color(self.cur_fill_color,    tw.fill_color,    v)
-        if tw.outline_color is not None: self.cur_outline_color = lerp_color(self.cur_outline_color, tw.outline_color, v)
-        if tw.line_width    is not None: self.cur_line_width    = self.cur_line_width + (tw.line_width - self.cur_line_width) * v
-        if tw.draw_progress is not None: self.cur_draw_progress = self.cur_draw_progress + (tw.draw_progress - self.cur_draw_progress) * v
-        self._dirty = True
-
-    def _snap_to(self, tw: PolygonTween):
-        self.cur_points = [P(p.x, p.y) for p in tw.points]
-        if tw.px            is not None: self.cur_px            = [P(p.x, p.y) for p in tw.px]
-        if tw.fill_color    is not None: self.cur_fill_color    = QColor(tw.fill_color)
-        if tw.outline_color is not None: self.cur_outline_color = QColor(tw.outline_color)
-        if tw.line_width    is not None: self.cur_line_width    = tw.line_width
-        if tw.draw_progress is not None: self.cur_draw_progress = tw.draw_progress
-        self._dirty = True
-
-    def _reset_to_def(self):
-        d = self.defn
-        n = len(d.points)
-        self.cur_points        = [P(p.x, p.y) for p in d.points]
-        self.cur_px            = [P(p.x, p.y) for p in (d.px or [P()]*n)]
-        self.cur_fill_color    = QColor(d.fill_color)    if d.fill_color    else QColor(0,0,0,0)
-        self.cur_outline_color = QColor(d.outline_color) if d.outline_color else QColor(0,0,0,0)
-        self.cur_line_width    = d.line_width
-        self.cur_draw_progress = d.draw_progress
-        self._dirty = True
-
-    def set_phase(self, phase: str):
-        super().set_phase(phase, self.defn.phases)
-        self._dirty = True
-
-    def update(self):
-        self._drive(hide_when_done=False)
-
-    def phase_done(self) -> bool:
-        return self._is_done()
-
-    # ── Geometry ─────────────────────────────────────────────────
-
-    def _to_screen_pts(self, w: int, h: int, cam_w=1920, cam_h=1080) -> List[QPointF]:
-        pts = []
-        for p, px in zip(self.cur_points, self.cur_px):
-            if self.defn.uniform_scale:
-                s  = min(w / cam_w, h / cam_h)
-                cx = s / (w / cam_w)
-                cy = s / (h / cam_h)
-                sx = (0.5 + (p.x - 0.5) * cx) * w + px.x
-                sy = (0.5 + (p.y - 0.5) * cy) * h + px.y
-            else:
-                sx = p.x * w + px.x
-                sy = p.y * h + px.y
-            pts.append(QPointF(sx, sy))
-        return pts
-
-    def get_polygon(self, w: int, h: int,
-                    cam_w: int = 1920, cam_h: int = 1080) -> QPolygonF:
-        if not self._dirty and self._cached_w == w and self._cached_h == h:
-            return self._cached_poly
-        self._cached_poly = QPolygonF(self._to_screen_pts_ex(w, h, cam_w, cam_h))
-        self._cached_w = w
-        self._cached_h = h
-        self._dirty    = False
-        return self._cached_poly
-
-    # ── Draw ─────────────────────────────────────────────────────
-
-    def draw(self, painter: QPainter, w: int, h: int,
-             cam_w: int = 1920, cam_h: int = 1080):
-        if self.hidden:
-            return
-
-        pts = self._to_screen_pts_ex(w, h, cam_w, cam_h)
-
-        has_fill    = self.defn.closed and self.cur_fill_color.alpha() > 0
-        has_outline = self.cur_line_width > 0 and self.cur_outline_color.alpha() > 0
-        is_open     = not self.defn.closed
-
-        if is_open:
-            # Open polyline — honour draw_progress for draw-in animation
-            if not has_outline:
-                return
-            pen = QPen(self.cur_outline_color)
-            pen.setWidthF(self.cur_line_width)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            _draw_partial_polyline(painter, pts, self.cur_draw_progress)
-            painter.setPen(Qt.NoPen)
-            return
-
-        # Closed polygon
-        poly = QPolygonF(pts)
-
-        if has_fill and not has_outline:
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(self.cur_fill_color)
-            painter.drawPolygon(poly)
-
-        elif has_outline and not has_fill:
-            pen = QPen(self.cur_outline_color)
-            pen.setWidthF(self.cur_line_width)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPolygon(poly)
-            painter.setPen(Qt.NoPen)
-
-        elif has_fill and has_outline:
-            pen = QPen(self.cur_outline_color)
-            pen.setWidthF(self.cur_line_width)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(self.cur_fill_color)
-            painter.drawPolygon(poly)
-            painter.setPen(Qt.NoPen)
-    def __init__(self, defn: PolygonDef):
-        super().__init__()
-        self.defn = defn
-        n = len(defn.points)
-        
-        self.cur_points = [P(p.x, p.y) for p in defn.points]
-        self.cur_px = [P(p.x, p.y) for p in (defn.px or [P() for _ in range(n)])]
-        
-        self.cur_fill_color = QColor(defn.fill_color)
-        self.cur_outline_color = QColor(defn.outline_color)
-        
-        self._sp = [P(p.x, p.y) for p in self.cur_points]
-        self._spx = [P(p.x, p.y) for p in self.cur_px]
-        
-        self._sf = QColor(defn.fill_color)
-        self._so = QColor(defn.outline_color)
-        
-        self._dirty = True
-        self._cached_poly = QPolygonF()
-        self._cached_w = 0
-        self._cached_h = 0
-
-    def _save_start(self):
-        self._sp = [P(p.x, p.y) for p in self.cur_points]
-        self._spx = [P(p.x, p.y) for p in self.cur_px]
-        self._sf = QColor(self.cur_fill_color)
-        self._so = QColor(self.cur_outline_color)
-
-    def _apply(self, tw: PolygonTween, v: float):
-        for i, (sp, tp) in enumerate(zip(self._sp, tw.points)):
-            self.cur_points[i] = P(
-                sp.x + (tp.x - sp.x) * v,
-                sp.y + (tp.y - sp.y) * v
-            )
-        
-        if tw.px is not None:
-            for i, (spx, tpx) in enumerate(zip(self._spx, tw.px)):
-                self.cur_px[i] = P(
-                    spx.x + (tpx.x - spx.x) * v,
-                    spx.y + (tpx.y - spx.y) * v
-                )
-
-        self._base_points = [P(p.x, p.y) for p in self.cur_points]
-        self._base_px = [P(p.x, p.y) for p in self.cur_px]
-        
-        for i in range(len(self.cur_points)):
-            cp = self.cur_points[i]
-            bp = self._blend_points[i]
-            self.cur_points[i] = P(cp.x + bp.x, cp.y + bp.y)
-
-        for i in range(len(self.cur_px)):
-            cp = self.cur_px[i]
-            bp = self._blend_px[i]
-            self.cur_px[i] = P(cp.x + bp.x, cp.y + bp.y)
-        
-        if tw.fill_color is not None:
-            self.cur_fill_color = lerp_color(self._sf, tw.fill_color, v)
-        
-        if tw.outline_color is not None:
-            self.cur_outline_color = lerp_color(self._so, tw.outline_color, v)
-        
-        self._dirty = True
-
-    def _apply_blend(self, tw: PolygonTween, v: float):
-        for i, tp in enumerate(tw.points):
-            cp = self.cur_points[i]
-            self.cur_points[i] = P(
-                cp.x + tp.x * v,
-                cp.y + tp.y * v
-            )
-
-        if tw.px is not None:
-            for i, tpx in enumerate(tw.px):
-                cpx = self.cur_px[i]
-                self.cur_px[i] = P(
-                    cpx.x + tpx.x * v,
-                    cpx.y + tpx.y * v
-                )
-
-        self._dirty = True
-
-        # Colors (these are still absolute blends, not offsets)
-        if tw.fill_color is not None:
-            self.cur_fill_color = lerp_color(self.cur_fill_color, tw.fill_color, v)
-
-        if tw.outline_color is not None:
-            self.cur_outline_color = lerp_color(self.cur_outline_color, tw.outline_color, v)
-
-        self._dirty = True
-
-    def _snap_to(self, tw: PolygonTween):
-        self.cur_points = [P(p.x, p.y) for p in tw.points]
-        
-        if tw.px is not None:
-            self.cur_px = [P(p.x, p.y) for p in tw.px]
-        
-        if tw.fill_color is not None:
-            self.cur_fill_color = QColor(tw.fill_color)
-        
-        if tw.outline_color is not None:
-            self.cur_outline_color = QColor(tw.outline_color)
-        
-        self._dirty = True
-
-    def _reset_to_def(self):
-        d = self.defn
-        n = len(d.points)
-        
-        self.cur_points = [P(p.x, p.y) for p in d.points]
-        self.cur_px = [P(p.x, p.y) for p in (d.px or [P() for _ in range(n)])]
-        
-        self.cur_fill_color = QColor(d.fill_color)
-        self.cur_outline_color = QColor(d.outline_color)
-        
-        self._dirty = True
-
-    def set_phase(self, phase: str):
-        super().set_phase(phase, self.defn.phases)
-        self._dirty = True
-
-    def update(self):
-        # Initialize blend accumulators EVERY FRAME
-        self._blend_points = [P(0.0, 0.0) for _ in self.cur_points]
-        self._blend_px = [P(0.0, 0.0) for _ in self.cur_px]
-
-        self._drive(hide_when_done=False)
-
-        # Apply accumulated blend AFTER driving tweens
-        for i in range(len(self.cur_points)):
-            cp = self.cur_points[i]
-            bp = self._blend_points[i]
-            self.cur_points[i] = P(cp.x + bp.x, cp.y + bp.y)
-
-        for i in range(len(self.cur_px)):
-            cp = self.cur_px[i]
-            bp = self._blend_px[i]
-            self.cur_px[i] = P(cp.x + bp.x, cp.y + bp.y)
-
-    def get_polygon(self, widget_w: int, widget_h: int, cam_w: int = 1920, cam_h: int = 1080) -> QPolygonF:
-        if not self._dirty and self._cached_w == widget_w and self._cached_h == widget_h:
-            return self._cached_poly
-        
-        pts = []
-        for p, px in zip(self.cur_points, self.cur_px):
-            if self.defn.uniform_scale:
-                s = min(widget_w / cam_w, widget_h / cam_h)
-                cx = s / (widget_w / cam_w)
-                cy = s / (widget_h / cam_h)
-                sx = (0.5 + (p.x - 0.5) * cx) * widget_w + px.x
-                sy = (0.5 + (p.y - 0.5) * cy) * widget_h + px.y
-            else:
-                sx = p.x * widget_w + px.x
-                sy = p.y * widget_h + px.y
-            pts.append(QPointF(sx, sy))
-        
-        self._cached_poly = QPolygonF(pts)
-        self._cached_w = widget_w
-        self._cached_h = widget_h
-        self._dirty = False
-        return self._cached_poly
-
-    def draw(self, painter: QPainter, w: int, h: int, cam_w: int = 1920, cam_h: int = 1080):
-        if self.hidden:
-            return
-        
-        poly = self.get_polygon(w, h, cam_w, cam_h)
-        
-        if self.defn.line_width > 0:
-            # Outline + optional fill
-            pen = QPen(self.cur_outline_color)
-            pen.setWidthF(self.defn.line_width)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            
-            painter.setBrush(self.cur_fill_color if self.defn.closed else Qt.NoBrush)
-            
-            if self.defn.closed:
-                painter.drawPolygon(poly)
-            else:
-                painter.drawPolyline(poly)
+        if t == QEvent.MouseButtonPress:
+            if event.button() != Qt.LeftButton: return False
+            for btn in panel._buttons:
+                if btn.hit_test(lx, ly, pw, ph):
+                    btn._pressed = True; btn._set_phase('pressed'); return True
+            return False
+        elif t == QEvent.MouseButtonRelease:
+            if event.button() != Qt.LeftButton: return False
+            for btn in panel._buttons:
+                if btn._pressed:
+                    btn._pressed = False; btn._set_phase('released')
+                    if btn.hit_test(lx, ly, pw, ph): panel._handle_button(btn)
+                    return True
+            return False
         else:
-            # Fill only
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(self.cur_fill_color)
-            painter.drawPolygon(poly)
-        
-        painter.setPen(Qt.NoPen)
+            for btn in panel._buttons:
+                now = btn.hit_test(lx, ly, pw, ph)
+                if now != btn._hovered:
+                    btn._hovered = now; btn._set_phase('hovered' if now else 'unhovered')
+            return False
