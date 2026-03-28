@@ -259,6 +259,9 @@ class CameraConfig:
     ratios = [[1920, 1080]] * 8
     layout = CAMERA_LAYOUT
 
+    stream_ports = [5000, 5001, 5002, None, None, None, None, None]
+
+
 class Camera:
     def __init__(self, position, default_resolution):
         self.serial = None
@@ -277,6 +280,7 @@ class Camera:
         self.pending_exposure = None
         self.pending_gain = None
         self.pending_gamma = None
+        self.stream_port = None
 
     def has_pending_changes(self):
         return any(v is not None for v in [self.pending_exposure, self.pending_gain, self.pending_gamma])
@@ -326,26 +330,6 @@ class CameraNode(Node):
             String, 'key', self.key_listener, 10
         )
 
-        self.zed_sources = {
-            "zedxone": "zedxonesrc",
-            "zed": "zedsrc",
-        }
-
-        self.available_zed_sources = {
-            name: self.check_gstreamer_element(element)
-            for name, element in self.zed_sources.items()
-        }
-
-        print(f"Checking available ZED GStreamer elements:")
-        for name, element in self.zed_sources.items():
-            status = "✓ Available" if self.available_zed_sources[name] else "✗ Not found"
-            print(f"  {element}: {status}")
-
-        if not any(self.available_zed_sources.values()):
-            self.get_logger().warn(
-                "\033[93mWarning: No ZED SDK cameras detected. Camera display is disabled.\033[0m"
-            )
-
         self.video_sink = self.find_best_video_sink()
         print(f"Using video sink: {self.video_sink}")
 
@@ -354,17 +338,17 @@ class CameraNode(Node):
             self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
 
         self.camera_info = {
-            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
-                        "name": "ZED X ONE #1", "exposure": 10000, "gain": 30000, "gamma": 2},
-            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
-                        "name": "ZED X ONE #2", "exposure": 10000, "gain": 30000, "gamma": 2},
-            58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
-                        "name": "ZED X MINI #1", "exposure": 50,   "gain": 50, "gamma": 2},
+            309256978: {"type": "ZED X One", "camera_id": 0,
+                        "name": "ZED X ONE #1", "port": 5000},
+            305325257: {"type": "ZED X One", "camera_id": 1,
+                        "name": "ZED X ONE #2", "port": 5001},
+            58896881:  {"type": "ZED X Mini", "camera_id": 0,
+                        "name": "ZED X MINI #1", "port": 5002},
         }
 
-        print(f"\nConfigured cameras:")
+        print(f"\nConfigured cameras (stream receiver):")
         for serial, info in self.camera_info.items():
-            print(f"  Serial {serial}: {info['type']} using {info['source']} (camera-id={info['camera_id']})")
+            print(f"  Serial {serial}: {info['type']} receiving on UDP port {info['port']}")
 
     # ──────────────────────── Setup ────────────────────────
 
@@ -526,18 +510,14 @@ class CameraNode(Node):
             screen.top()  + (screen.height() - _PH) // 2,
         )
 
-        # ── on_apply: MUST take exactly 2 args, no type annotations ──
         def on_apply(display_mode, num_cams):
-            # 1. Apply chosen display mode immediately
             self.display_mode = display_mode
 
-            # 2. Add cameras to reach num_cams (no border updates mid-loop)
             active = [c for c in self.cameras if c.active]
             while len(active) < num_cams:
                 self.activate_camera()
                 active = [c for c in self.cameras if c.active]
 
-            # 3. Remove cameras down to num_cams
             while len(active) > num_cams:
                 active = [c for c in self.cameras if c.active]
                 if active:
@@ -545,15 +525,11 @@ class CameraNode(Node):
                 self.deactivate_camera()
                 active = [c for c in self.cameras if c.active]
 
-            # 4. Point current_index at the last active camera, then update
-            #    all borders in one pass — last camera gets 'selected',
-            #    every other active camera gets 'unselected'.
             active = [c for c in self.cameras if c.active]
             if active:
                 self.current_index = active[-1].position
             self.update_camera_borders()
 
-            # 5. Re-layout with new display mode
             self.set_camera_positions()
             self._cam_select_panel = None
 
@@ -563,7 +539,6 @@ class CameraNode(Node):
         panel.open(on_apply=on_apply, on_cancel=on_cancel)
         self._cam_select_panel = panel
 
-        # Raise the panel above all camera loading/selection overlays
         panel.raise_()
         for cam in self.cameras:
             for attr in ('loading_overlay', 'selection_overlay'):
@@ -594,32 +569,19 @@ class CameraNode(Node):
         if cam.serial in self.camera_info:
             info = self.camera_info[cam.serial]
             cam.name        = info["name"]
-            cam.source_type = info["source"]
             cam.camera_id   = info["camera_id"]
-            cam.exposure    = info.get("exposure")
-            cam.gain        = info.get("gain")
-            cam.gamma       = info.get("gamma")
-
-            source_available = False
-            for name, element in self.zed_sources.items():
-                if element == cam.source_type and self.available_zed_sources.get(name):
-                    source_available = True
-                    break
-
-            if source_available:
-                print(f"Activated {info['type']} (Serial: {cam.serial}, Source: {cam.source_type}, Camera ID: {cam.camera_id})")
-            else:
-                print(f"ERROR: {info['type']} requires {cam.source_type} which is not available!")
-                cam.source_type = None
-                cam.camera_id = 0
+            cam.stream_port = info["port"]
+            cam.source_type = "udp_stream"
+            print(f"Activated {info['type']} (Serial: {cam.serial}, UDP port: {cam.stream_port})")
         else:
-            cam.camera_id = self.config.camera_ids[cam.index]
-            if self.available_zed_sources.get("zedxone"):
-                cam.source_type = "zedxonesrc"
-                print(f"Warning: Using zedxonesrc for unknown camera serial {cam.serial}")
+            cam.camera_id   = self.config.camera_ids[cam.index]
+            cam.stream_port = self.config.stream_ports[cam.index]
+            if cam.stream_port is not None:
+                cam.source_type = "udp_stream"
+                print(f"Warning: Unknown serial {cam.serial}, using stream port {cam.stream_port}")
             else:
                 cam.source_type = None
-                print(f"Warning: No ZED source available for camera {cam.serial}")
+                print(f"Warning: No stream port configured for camera index {cam.index}")
 
         self.current_index = cam.position
         print(f'Current Camera: {self.current_index}')
@@ -804,10 +766,11 @@ class CameraNode(Node):
                 cam.serial = self.config.serials[cam.index]
                 if cam.serial in self.camera_info:
                     info = self.camera_info[cam.serial]
-                    cam.source_type = info["source"]
-                    cam.camera_id = info["camera_id"]
+                    cam.stream_port = info["port"]
+                    cam.camera_id   = info["camera_id"]
                 else:
-                    cam.camera_id = self.config.camera_ids[cam.index]
+                    cam.camera_id   = self.config.camera_ids[cam.index]
+                    cam.stream_port = self.config.stream_ports[cam.index]
                 break
 
     # ──────────────────────── Camera Widgets ────────────────────────
@@ -822,36 +785,25 @@ class CameraNode(Node):
         w = round(dims[2] * self.container.width())
         h = round(dims[3] * self.container.height())
 
-        use_camera = self.use_video_overlay and cam.source_type is not None
+        use_camera = self.use_video_overlay and cam.stream_port is not None
 
         cam_ratio = self.config.ratios[cam.index] if cam.index >= 0 else [1920, 1080]
         cam_w, cam_h = cam_ratio[0], cam_ratio[1]
 
         if use_camera:
-            src = cam.source_type
-            cid = cam.camera_id
-            exp = cam.exposure
-            gain = cam.gain
-            gamma = cam.gamma
-
-            if src == "zedxonesrc":
-                cam_props = (
-                    f"camera-id={cid} "
-                    f"ctrl-auto-exposure=false "
-                    f"ctrl-auto-exposure-range-min={exp} "
-                    f"ctrl-auto-exposure-range-max={exp} "
-                    f"ctrl-exposure-time={exp} "
-                    f"ctrl-analog-gain={gain} "
-                    f"ctrl-gamma={gamma}"
-                )
-            elif src == "zedsrc":
-                cam_props = f"camera-id={cid} "
+            port = cam.stream_port
 
             pipeline = (
-                f"{src} {cam_props} "
-                f"! queue ! videoconvert ! videoscale "
+                f"udpsrc port={port} "
+                f"! application/x-rtp,encoding-name=H265,payload=96 "
+                f"! rtph265depay "
+                f"! h265parse "
+                f"! avdec_h265 "
+                f"! videoconvert "
+                f"! videoscale "
                 f"! {self.video_sink} force-aspect-ratio=false"
             )
+            print(f"[create_camera_widget] Stream pipeline for port {port}: {pipeline}")
         else:
             pipeline = None
 
@@ -952,8 +904,6 @@ class CameraNode(Node):
             is_selected = (cam.position == self.current_index and cam.active)
             existing = getattr(cam.widget, 'selection_overlay', None)
 
-            # Ensure every border-ready active camera has an overlay,
-            # whether selected or not — so notify_deselected can always fire.
             if cam.active and cam.border_ready and existing is None:
                 try:
                     cam_w = cam.widget.camera_width
@@ -1072,7 +1022,7 @@ class CameraNode(Node):
 
     def print_infomation(self):
         print(f"Current Selected: {self.current_index}")
-        print(f"{'Pos':>3} | {'Active':>6} | {'Index':>5} | {'Serial':>9} | {'CamID':>5} | {'X':>4} | {'Y':>4} | {'W':>4} | {'H':>4}")
+        print(f"{'Pos':>3} | {'Active':>6} | {'Index':>5} | {'Serial':>9} | {'Port':>5} | {'X':>4} | {'Y':>4} | {'W':>4} | {'H':>4}")
         print("-" * 75)
         for cam in self.cameras:
             widget = cam.widget
@@ -1083,7 +1033,8 @@ class CameraNode(Node):
                 x = y = w = h = 0
             active_str = "\033[92mTrue  \033[0m" if cam.active else "\033[91mFalse \033[0m"
             serial_str = str(cam.serial) if cam.serial else "N/A"
-            print(f"{cam.position:>3} | {active_str} | {cam.index:>5} | {serial_str:>9} | {cam.camera_id:>5} | {x:>4} | {y:>4} | {w:>4} | {h:>4}")
+            port_str   = str(cam.stream_port) if cam.stream_port else "N/A"
+            print(f"{cam.position:>3} | {active_str} | {cam.index:>5} | {serial_str:>9} | {port_str:>5} | {x:>4} | {y:>4} | {w:>4} | {h:>4}")
 
 
 def main():
