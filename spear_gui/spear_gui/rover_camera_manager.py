@@ -33,11 +33,11 @@ CAMERAS = [
     {"camera_id": 0, "source": "zedxonesrc", "port": 5000, "exposure": 10000, "gain": 30000},
     {"camera_id": 1, "source": "zedxonesrc", "port": 5001, "exposure": 10000, "gain": 30000},
     {"camera_id": 0, "source": "zedsrc",     "port": 5002, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 0, "source": "zedxonesrc",     "port": 5003, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 0, "source": "zedxonesrc",     "port": 5004, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 0, "source": "zedxonesrc",     "port": 5005, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 0, "source": "zedxonesrc",     "port": 5006, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 0, "source": "zedsrc",     "port": 5007, "exposure": 50,    "gain": 50},  # ZED X Mini
+    {"camera_id": 2, "source": "zedxonesrc",     "port": 5003, "exposure": 50,    "gain": 50},  # ZED X Mini
+    {"camera_id": 3, "source": "zedxonesrc",     "port": 5004, "exposure": 50,    "gain": 50},  # ZED X Mini
+    {"camera_id": 4, "source": "zedxonesrc",     "port": 5005, "exposure": 50,    "gain": 50},  # ZED X Mini
+    {"camera_id": 5, "source": "zedxonesrc",     "port": 5006, "exposure": 50,    "gain": 50},  # ZED X Mini
+    # {"camera_id": 1, "source": "zedsrc",     "port": 5007, "exposure": 50,    "gain": 50},  # ZED X Mini
 ]
 
 # ──────────────────────── Pipeline ────────────────────────
