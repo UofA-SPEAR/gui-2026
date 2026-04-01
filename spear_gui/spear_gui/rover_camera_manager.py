@@ -13,6 +13,18 @@ Usage:
 Publishing settings:
     ros2 topic pub --once /camera_settings std_msgs/msg/String "data: '5000,exposure=10000,gain=30000'"
     # Format: "<port>,<setting>=<value>,<setting>=<value>,..."
+
+
+Serials = [302801647, 303928833, 305325257, 307142683, 308873104, 309256978, 44249482, 58896881]
+
+
+for zedsrc you control which image you get out via the stream-type property in the pipeline:
+0 Left image only (default)
+1 Right image only
+2 Both left + right (composite, use zeddemux to split)
+3 Depth map only
+4 Left + depth (composite, use zeddemux to split)
+
 """
 
 import gi
@@ -26,26 +38,26 @@ from std_msgs.msg import String
 
 # ──────────────────────── Config ────────────────────────
 
-RECEIVER_IP = "192.168.8.118"  # IP of the machine receiving the stream
+RECEIVER_IP = "192.168.8.224"  # IP of the machine receiving the stream
 BITRATE     = 4000000           # bits per second
 
 CAMERAS = [
-    {"camera_id": 0, "source": "zedxonesrc", "port": 5000, "exposure": 10000, "gain": 30000},
-    {"camera_id": 1, "source": "zedxonesrc", "port": 5001, "exposure": 10000, "gain": 30000},
-    {"camera_id": 0, "source": "zedsrc",     "port": 5002, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 2, "source": "zedxonesrc",     "port": 5003, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 3, "source": "zedxonesrc",     "port": 5004, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 4, "source": "zedxonesrc",     "port": 5005, "exposure": 50,    "gain": 50},  # ZED X Mini
-    {"camera_id": 5, "source": "zedxonesrc",     "port": 5006, "exposure": 50,    "gain": 50},  # ZED X Mini
-    # {"camera_id": 1, "source": "zedsrc",     "port": 5007, "exposure": 50,    "gain": 50},  # ZED X Mini
+    {"camera_sn": 302801647, "source": "zedxonesrc", "port": 5000, "exposure": 10000, "gain": 30000},
+    {"camera_sn": 303928833, "source": "zedxonesrc", "port": 5001, "exposure": 10000, "gain": 30000},
+    {"camera_sn": 305325257, "source": "zedxonesrc", "port": 5002, "exposure": 10000, "gain": 30000},
+    {"camera_sn": 307142683, "source": "zedxonesrc", "port": 5003, "exposure": 10000, "gain": 30000},
+    {"camera_sn": 308873104, "source": "zedxonesrc", "port": 5004, "exposure": 10000, "gain": 30000},
+    {"camera_sn": 309256978, "source": "zedxonesrc", "port": 5005, "exposure": 10000, "gain": 30000},
+    {"camera_sn": 44249482, "source": "zedsrc", "port": 5006, "exposure": 10000, "gain": 30000},
+    {"camera_sn": 58896881, "source": "zedsrc", "port": 5007, "exposure": 10000, "gain": 30000},
 ]
 
 # ──────────────────────── Pipeline ────────────────────────
 
-def build_pipeline(source, camera_id, port, exposure, gain):
+def build_pipeline(source, camera_sn, port, exposure, gain):
     if source == "zedxonesrc":
         src_props = (
-            f"camera-id={camera_id} "
+            f"camera-sn={camera_sn} "
             f"ctrl-auto-exposure=false "
             f"ctrl-auto-exposure-range-min={exposure} "
             f"ctrl-auto-exposure-range-max={exposure} "
@@ -53,9 +65,9 @@ def build_pipeline(source, camera_id, port, exposure, gain):
             f"ctrl-analog-gain={gain} "
         )
     elif source == "zedsrc":
-        src_props = f"camera-id={camera_id} "
+        src_props = f"camera-sn={camera_sn} "
     else:
-        src_props = f"camera-id={camera_id} "
+        src_props = f"camera-sn={camera_sn} "
 
     return (
         f"{source} {src_props}"
@@ -75,7 +87,7 @@ def build_pipeline(source, camera_id, port, exposure, gain):
 class CameraStream:
     def __init__(self, config, logger):
         self.source    = config["source"]
-        self.camera_id = config["camera_id"]
+        self.camera_sn = config["camera_sn"]
         self.port      = config["port"]
         self.exposure  = config["exposure"]
         self.gain      = config["gain"]
@@ -90,12 +102,12 @@ class CameraStream:
             self._start_pipeline()
 
     def _start_pipeline(self):
-        pipeline_str = build_pipeline(self.source, self.camera_id, self.port, self.exposure, self.gain)
-        self.logger.info(f"[{self.source} cam {self.camera_id}] pipeline: {pipeline_str}")
+        pipeline_str = build_pipeline(self.source, self.camera_sn, self.port, self.exposure, self.gain)
+        self.logger.info(f"[{self.source} sn {self.camera_sn}] pipeline: {pipeline_str}")
 
         self.pipeline = Gst.parse_launch(pipeline_str)
         if not self.pipeline:
-            self.logger.error(f"[{self.source} cam {self.camera_id}] failed to create pipeline")
+            self.logger.error(f"[{self.source} sn {self.camera_sn}] failed to create pipeline")
             return
 
         bus = self.pipeline.get_bus()
@@ -105,10 +117,10 @@ class CameraStream:
 
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
-            self.logger.error(f"[{self.source} cam {self.camera_id}] failed to set pipeline to PLAYING")
+            self.logger.error(f"[{self.source} sn {self.camera_sn}] failed to set pipeline to PLAYING")
             return
 
-        self.logger.info(f"[{self.source} cam {self.camera_id}] streaming to {RECEIVER_IP}:{self.port}")
+        self.logger.info(f"[{self.source} sn {self.camera_sn}] streaming to {RECEIVER_IP}:{self.port}")
         self.thread = threading.Thread(target=self.loop.run, daemon=True)
         self.thread.start()
 
@@ -117,9 +129,9 @@ class CameraStream:
             if hasattr(self, key):
                 setattr(self, key, value)
             else:
-                self.logger.warn(f"[{self.source} cam {self.camera_id}] unknown setting '{key}', ignoring")
+                self.logger.warn(f"[{self.source} sn {self.camera_sn}] unknown setting '{key}', ignoring")
 
-        self.logger.info(f"[{self.source} cam {self.camera_id}] restarting with exposure={self.exposure} gain={self.gain}")
+        self.logger.info(f"[{self.source} sn {self.camera_sn}] restarting with exposure={self.exposure} gain={self.gain}")
 
         with self._lock:
             self._stop_pipeline()
@@ -139,16 +151,16 @@ class CameraStream:
         if self.thread:
             self.thread.join(timeout=2)
             self.thread = None
-        self.logger.info(f"[{self.source} cam {self.camera_id}] stopped")
+        self.logger.info(f"[{self.source} sn {self.camera_sn}] stopped")
 
     def _on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
-            self.logger.info(f"[{self.source} cam {self.camera_id}] end of stream")
+            self.logger.info(f"[{self.source} sn {self.camera_sn}] end of stream")
             self.loop.quit()
         elif message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            self.logger.error(f"[{self.source} cam {self.camera_id}] error: {err}")
-            self.logger.error(f"[{self.source} cam {self.camera_id}] debug: {debug}")
+            self.logger.error(f"[{self.source} sn {self.camera_sn}] error: {err}")
+            self.logger.error(f"[{self.source} sn {self.camera_sn}] debug: {debug}")
             self.loop.quit()
 
 # ──────────────────────── ROS2 Node ────────────────────────
@@ -166,7 +178,7 @@ class CameraSenderNode(Node):
         self.get_logger().info(f"Starting {len(self.streams)} camera stream(s)...")
         self.get_logger().info(f"Receiver: {RECEIVER_IP}")
         for port, stream in self.streams.items():
-            self.get_logger().info(f"  {stream.source} camera-id={stream.camera_id} -> port {port}")
+            self.get_logger().info(f"  {stream.source} camera-sn={stream.camera_sn} -> port {port}")
 
         for stream in self.streams.values():
             stream.start()

@@ -252,14 +252,14 @@ class ResizableContainer(QWidget):
 # ──────────────────────── Camera Node ────────────────────────
 
 class CameraConfig:
-    names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
-    serials = [309256978, 305325257, 58896881, 307142683, 308873104, 302801647, 303928833, 44249482]
+    names = ["ZED X One #1", "ZED X One #2", "ZED X One #3", "ZED X One #4", "ZED X One #5", "ZED X One #6", "ZED X Mini", "ZED X"]
+    serials = [302801647, 303928833, 305325257, 307142683, 308873104, 309256978, 44249482, 58896881]
     default_resolutions = [4, 4, 6, 0, 0, 0, 0, 0]
     camera_ids = [0, 1, 0, 3, 4, 5, 6, 1]
     ratios = [[1920, 1080]] * 8
     layout = CAMERA_LAYOUT
 
-    stream_ports = [5000, 5001, 5002, None, None, None, None, None]
+    stream_ports = [5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007]
 
 
 class Camera:
@@ -338,22 +338,22 @@ class CameraNode(Node):
             self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
 
         self.camera_info = {
-            309256978: {"type": "ZED X One", "camera_id": 0,
+            302801647:  {"type": "ZED X One", "camera_id": 0,
                         "name": "ZED X ONE #1", "port": 5000},
-            305325257: {"type": "ZED X One", "camera_id": 1,
+            303928833:  {"type": "ZED X One", "camera_id": 1,
                         "name": "ZED X ONE #2", "port": 5001},
-            58896881:  {"type": "ZED X Mini", "camera_id": 0,
-                        "name": "ZED X MINI #1", "port": 5002},
-            307142683:  {"type": "ZED X One", "camera_id": 2,
-                        "name": "ZED X ONE #3", "port": 5003},
-            308873104:  {"type": "ZED X One", "camera_id": 3,
-                        "name": "ZED X ONE #4", "port": 5004},
-            302801647:  {"type": "ZED X One", "camera_id": 4,
-                        "name": "ZED X ONE #5", "port": 5005},
-            303928833:  {"type": "ZED X One", "camera_id": 5,
-                        "name": "ZED X ONE #6", "port": 5006},
-            # 44249482:  {"type": "ZED X Mini", "camera_id": 1,
-            #             "name": "ZED X MINI #2", "port": 5007},
+            305325257: {"type": "ZED X One", "camera_id": 2,
+                        "name": "ZED X ONE #3", "port": 5002},
+            307142683:  {"type": "ZED X One", "camera_id": 3,
+                        "name": "ZED X ONE #4", "port": 5003},
+            308873104:  {"type": "ZED X One", "camera_id": 4,
+                        "name": "ZED X ONE #5", "port": 5004},
+            309256978: {"type": "ZED X One", "camera_id": 5,
+                        "name": "ZED X ONE #6", "port": 5005},
+            44249482:  {"type": "ZED X Mini", "camera_id": 6,
+                        "name": "ZED X MINI #1", "port": 5006},
+            58896881:  {"type": "ZED X Mini", "camera_id": 7,
+                        "name": "ZED X MINI #2", "port": 5007},
         }
 
         print(f"\nConfigured cameras (stream receiver):")
