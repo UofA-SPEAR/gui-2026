@@ -253,9 +253,9 @@ class ResizableContainer(QWidget):
 
 class CameraConfig:
     names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
-    serials = [309256978, 305325257, 58896881, 0, 0, 0, 0, 0]
+    serials = [309256978, 305325257, 58896881, 307142683, 308873104, 302801647, 303928833, 44249482]
     default_resolutions = [4, 4, 6, 0, 0, 0, 0, 0]
-    camera_ids = [0, 1, 0, 3, 4, 5, 6, 7]
+    camera_ids = [0, 1, 0, 3, 4, 5, 6, 1]
     ratios = [[1920, 1080]] * 8
     layout = CAMERA_LAYOUT
 
@@ -352,8 +352,8 @@ class CameraNode(Node):
                         "name": "ZED X ONE #5", "port": 5005},
             303928833:  {"type": "ZED X One", "camera_id": 5,
                         "name": "ZED X ONE #6", "port": 5006},
-            44249482:  {"type": "ZED X Mini", "camera_id": 1,
-                        "name": "ZED X MINI #2", "port": 5007},
+            # 44249482:  {"type": "ZED X Mini", "camera_id": 1,
+            #             "name": "ZED X MINI #2", "port": 5007},
         }
 
         print(f"\nConfigured cameras (stream receiver):")
