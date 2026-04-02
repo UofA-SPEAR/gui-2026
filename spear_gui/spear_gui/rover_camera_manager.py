@@ -76,7 +76,7 @@ def build_pipeline(source, camera_sn, port, exposure, gain):
         f"! video/x-raw,format=BGRx "
         f"! nvvidconv "
         f"! video/x-raw(memory:NVMM),format=NV12 "
-        f"! nvv4l2h265enc bitrate={BITRATE} preset-level=1 iframeinterval=30 "
+        f"! nvv4l2h265enc bitrate={BITRATE} preset-level=2 "
         f"! h265parse "
         f"! rtph265pay config-interval=1 pt=96 "
         f"! udpsink host={RECEIVER_IP} port={port} sync=false"
