@@ -565,42 +565,30 @@ CS_BUTTON_DEFS = [
 
 CS_BUTTON_DEFS += SETTING_BUTTON_DEFS
 
-BOX_MAIN = 0.20
-BOX_DIF  = 0.25
-BOX_VPOS = 0.50
-BOX_HOFF = 0.05
-BOX_LEF
-
-# ──────────────────────── Preview geometry ───────────────────────
 PREVIEW_BOX_DEF = PreviewBoxDef(
+    label_font_size   = 14.0,
+    label_font_family = 'Oxanium SemiBold',
+    name_font_size    = 11.0,
     slots = {
-        -2: Rect(P(-0.12, 0.5), P(0.00, 0.5), fill_color=QColor(255,255,255,0), outline_color=QColor(255,255,255,0), line_width=2.0, phases={
-            'open':  Phase([RectTween(P(-0.12, 0.44), P(0.00, 0.56), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00,   ease=QEasingCurve.OutQuint)]),
-            'close': Phase([RectTween(P(-0.12, 0.50), P(0.00, 0.50), fill_color=QColor(255,255,255,0),  outline_color=QColor(255,255,255,0),   start=0.00, dur=1.00, ease=QEasingCurve.InQuint)]),
-            'right': Phase([RectTween(P( 0.20, 0.425),P(0.35, 0.575),fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
+        -2: Rect(P(-0.16, 0.5), P(-0.02, 0.5), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,), line_width=2.0, phases={
+            'open':  Phase([RectTween(P(-0.16, 0.43), P(-0.02, 0.57), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([RectTween(P(-0.16, 0.50), P(-0.02, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,),  start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
         }),
-        -1: Rect(P(0.20, 0.5), P(0.35, 0.5), fill_color=QColor(255,255,255,0), outline_color=QColor(255,255,255,0), line_width=2.0, phases={
-            'open':  Phase([RectTween(P(0.20, 0.425), P(0.35, 0.575), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-            'close': Phase([RectTween(P(0.20, 0.500), P(0.35, 0.500), fill_color=QColor(255,255,255,0),  outline_color=QColor(255,255,255,0),   start=0.00, dur=1.00, ease=QEasingCurve.InQuint)]),
-            'left':  Phase([RectTween(P(-0.12, 0.44), P(0.00, 0.56), fill_color=QColor(255,255,255,0),  outline_color=QColor(255,255,255,0),    start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-            'right': Phase([RectTween(P(0.40, 0.400), P(0.60, 0.600), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
+        -1: Rect(P(0.075, 0.5), P(0.275, 0.5), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,), line_width=2.0, phases={
+            'open':  Phase([RectTween(P(0.075, 0.40), P(0.275, 0.60), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([RectTween(P(0.075, 0.50), P(0.275, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,),  start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
         }),
-        0: Rect(P(0.40, 0.50), P(0.60, 0.50), fill_color=QColor(255,255,255,0), outline_color=QColor(255,255,255,0), line_width=2.0, phases={
-            'open':  Phase([RectTween(P(0.40, 0.400), P(0.60, 0.600), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-            'close': Phase([RectTween(P(0.40, 0.500), P(0.60, 0.500), fill_color=QColor(255,255,255,0),  outline_color=QColor(255,255,255,0),   start=0.00, dur=1.00, ease=QEasingCurve.InQuint)]),
-            'left':  Phase([RectTween(P(0.20, 0.425), P(0.35, 0.575), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-            'right': Phase([RectTween(P(0.65, 0.425), P(0.80, 0.575), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
+        0: Rect(P(0.35, 0.50), P(0.65, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,), line_width=2.0, phases={
+            'open':  Phase([RectTween(P(0.35, 0.35), P(0.65, 0.65), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([RectTween(P(0.35, 0.50), P(0.65, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,),  start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
         }),
-        1: Rect(P(0.65, 0.50), P(0.80, 0.50), fill_color=QColor(255,255,255,0), outline_color=QColor(255,255,255,0), line_width=2.0, phases={
-            'open':  Phase([RectTween(P(0.65, 0.425), P(0.80, 0.575), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-            'close': Phase([RectTween(P(0.65, 0.500), P(0.80, 0.500), fill_color=QColor(255,255,255,0),  outline_color=QColor(255,255,255,0),   start=0.00, dur=1.00, ease=QEasingCurve.InQuint)]),
-            'left':  Phase([RectTween(P(0.40, 0.400), P(0.60, 0.600), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-            'right': Phase([RectTween(P(1.00, 0.440), P(1.12, 0.560), fill_color=QColor(255,255,255,0),  outline_color=QColor(255,255,255,0),   start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
+        1: Rect(P(0.725, 0.50), P(0.925, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,), line_width=2.0, phases={
+            'open':  Phase([RectTween(P(0.725, 0.40), P(0.925, 0.60), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([RectTween(P(0.725, 0.50), P(0.925, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,),  start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
         }),
-        2: Rect(P(1.00, 0.50), P(1.12, 0.50), fill_color=QColor(255,255,255,0), outline_color=QColor(255,255,255,0), line_width=2.0, phases={
-            'open':  Phase([RectTween(P(1.00, 0.440), P(1.12, 0.560), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-            'close': Phase([RectTween(P(1.00, 0.500), P(1.12, 0.500), fill_color=QColor(255,255,255,0),  outline_color=QColor(255,255,255,0),   start=0.00, dur=1.00, ease=QEasingCurve.InQuint)]),
-            'left':  Phase([RectTween(P(0.65, 0.425), P(0.80, 0.575), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
+        2: Rect(P(1.02, 0.50), P(1.16, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,), line_width=2.0, phases={
+            'open':  Phase([RectTween(P(1.02, 0.43), P(1.16, 0.57), fill_color=QColor(255,255,255,50), outline_color=QColor(255,255,255,255), start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([RectTween(P(1.02, 0.50), P(1.16, 0.50), fill_color=QColor(255,255,255,25), outline_color=QColor(255,255,255,),  start=0.00, dur=0.50, ease=QEasingCurve.OutQuint)]),
         }),
     }
 )

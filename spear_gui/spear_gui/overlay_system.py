@@ -978,6 +978,7 @@ class OverlayCanvas(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, False)  # already there but confirm
         self.setAutoFillBackground(False)
         self.setGeometry(parent.rect())
         self._entries: dict = {}
@@ -1580,19 +1581,14 @@ CLOSE_DUR   = 0.30
 
 # ──────────────────────── PreviewBoxDef ──────────────────────────
 
-@dataclass  
+@dataclass
 class PreviewBoxDef:
-    slots:       Dict[int, PolygonDef]
-    cam_w:       int   = 1920
-    cam_h:       int   = 1080
-    scroll_dur:  float = SCROLL_DUR
-    cam_dur:     float = CAM_DUR
-    open_dur:    float = OPEN_DUR
-    close_dur:   float = CLOSE_DUR
-    scroll_ease: QEasingCurve.Type = QEasingCurve.OutQuint
-    cam_ease:    QEasingCurve.Type = QEasingCurve.OutQuint
-    open_ease:   QEasingCurve.Type = QEasingCurve.OutQuint
-    close_ease:  QEasingCurve.Type = QEasingCurve.InQuint
+    slots:            Dict[int, PolygonDef]
+    label_font_size:  float = 14.0
+    label_font_family:str   = 'Oxanium SemiBold'
+    name_font_size:   float = 11.0
+    cam_w:            int   = 1920
+    cam_h:            int   = 1080
 
 @dataclass
 class ButtonDef:
@@ -1957,39 +1953,6 @@ class PreviewBox:
                 if snap: cr.snap(x, y, w, h, tile_alpha)
                 else:    cr.tween_to(x, y, w, h, dur, ease, tile_alpha)
 
-    def tween_box_to_slot(self, target_slot: int, dur: float, ease=QEasingCurve.OutQuint):
-        sd = self.defn.slots.get(target_slot)
-        if sd is None: return
-        p1, p2 = _box_points(SLOT_CX.get(target_slot, 0.5),
-                            1.0 if target_slot == 0 else SIDE_SCALE)
-        fill    = QColor(255, 255, 255, max(0, int(sd.outline_color.alpha() * 0.10)))
-        outline = QColor(sd.outline_color)
-        def _pts(a, b):
-            return [P(a.x, a.y), P(b.x, a.y), P(b.x, b.y), P(a.x, b.y)]
-        self._box_poly._tweens = [PolygonTween(
-            points=_pts(p1, p2), px=[P(0,0)]*4,
-            fill_color=fill, outline_color=outline,
-            start=0.0, dur=dur, ease=ease,
-        )]
-        self._box_poly._idx = 0
-        self._box_poly._save_start()
-        self._box_poly._timer.restart()
-
-    def snap_box_to_slot(self, target_slot: int):
-        sd = self.defn.slots.get(target_slot)
-        if sd is None: return
-        p1, p2 = _box_points(SLOT_CX.get(target_slot, 0.5),
-                            1.0 if target_slot == 0 else SIDE_SCALE)
-        def _pts(a, b):
-            return [P(a.x, a.y), P(b.x, a.y), P(b.x, b.y), P(a.x, b.y)]
-        self._box_poly.cur_points = _pts(p1, p2)
-        self._box_poly.cur_px     = [P(0,0)]*4
-        self._box_poly.cur_fill_color    = QColor(255,255,255, max(0, int(sd.outline_color.alpha()*0.10)))
-        self._box_poly.cur_outline_color = QColor(sd.outline_color)
-        self._box_poly._tweens = []
-        self._box_poly._idx    = 0
-        self._box_poly._dirty  = True
-
     def snap_to(self, display_mode: int, num_cams: int, alpha: int = -1):
         self.display_mode = display_mode; self.num_cams = num_cams
         self._apply_positions(display_mode, num_cams, snap=True, alpha=alpha)
@@ -2083,151 +2046,262 @@ class PreviewBox:
         painter.restore()
 
 # ──────────────────────── ScrollSystem ───────────────────────────
-
 class ScrollSystem:
-    def __init__(self, display_mode: int, num_cams: int,
-                 defn: PreviewBoxDef = None):
-        self._display_mode = display_mode % NUM_DISPLAY_MODES
-        self._num_cams     = max(1, min(num_cams, MAX_ACTIVE_CAMS))
-        self._scrolling    = False
-        self._defn = defn or PreviewBoxDef(slots={
-            s: PolygonDef(
-                points=[P(SLOT_CX.get(s,0.5)-BOX_W/2, BOX_Y),
-                        P(SLOT_CX.get(s,0.5)+BOX_W/2, BOX_Y),
-                        P(SLOT_CX.get(s,0.5)+BOX_W/2, BOX_Y+BOX_H),
-                        P(SLOT_CX.get(s,0.5)-BOX_W/2, BOX_Y+BOX_H)],
-                px=[P(0,0)]*4,
-                fill_color=QColor(255,255,255, 25 if s!=0 else 25),
-                outline_color=QColor(255,255,255, 255 if s==0 else (SIDE_ALPHA if abs(s)==1 else 0)),
-                line_width=2.0, closed=True, phases={},
-            ) for s in (-2,-1,0,1,2)
-        })
-        self._boxes = [PreviewBox(s, self._display_mode, self._num_cams, self._defn) for s in (-2, -1, 0, 1, 2)]
+    def __init__(self, current_idx: int, num_cams: int, defn: PreviewBoxDef):
+        self._num_cams  = max(1, min(num_cams, MAX_ACTIVE_CAMS))
+        self._defn      = defn
+        self._scrolling = False
+        self._order: List[int] = list(range(NUM_DISPLAY_MODES))
+        start = current_idx % NUM_DISPLAY_MODES
+        self._order = self._order[start:] + self._order[:start]
+
+        self._polys: Dict[int, AnimatedPolygon] = {
+            s: AnimatedPolygon(defn.slots[s]) for s in (-2, -1, 0, 1, 2)
+        }
+        self._cams: Dict[int, List[CamRect]] = {
+            s: [CamRect(0,0,0,0,index=i) for i in range(NUM_CAM_SLOTS)]
+            for s in (-2, -1, 0, 1, 2)
+        }
+        self._snap_all()
+        self._trigger_open()
+
 
     def _mode_for_slot(self, slot: int) -> int:
-        return (self._display_mode + slot) % NUM_DISPLAY_MODES
-
-    def _snap_box(self, box, slot):
-        new_mode = self._mode_for_slot(slot)
-        box.slot = slot
-        box._scx = box._s_scx = box._t_scx = SLOT_CX[slot]
-        box._scx_active = False
-        box._scale = box._s_scale = box._t_scale = 1.0 if slot == 0 else SIDE_SCALE
-        box.display_mode = new_mode
-        box.num_cams = self._num_cams
-        box.snap_box_to_slot(slot)
-        target_alpha = 255 if slot == 0 else (SIDE_ALPHA if abs(slot) == 1 else 0)
-        for cr in box.cams:
-            tgt_pos = cam_pos(cr.index, new_mode, self._num_cams)
-            if tgt_pos is None:
-                cr.snap(cr.cx, cr.cy, 0, 0, 0)
-            else:
-                tx, ty, tw, th = tgt_pos
-                lookup = self._num_cams - cr.index
-                ta = target_alpha if lookup >= 1 else 0
-                cr.snap(tx, ty, tw, th, ta)
-
+        return self._order[slot % len(self._order)]
+    
+    def _snap_all(self):
+        for s in (-2, -1, 0, 1, 2):
+            mode  = self._mode_for_slot(s)
+            alpha = 255 if s == 0 else (SIDE_ALPHA if abs(s) == 1 else 0)
+            for cr in self._cams[s]:
+                pos = cam_pos(cr.index, mode, self._num_cams)
+                if pos is None:
+                    cr.snap(cr.cx, cr.cy, 0, 0, 0)
+                else:
+                    x, y, w, h = pos
+                    lookup = self._num_cams - cr.index
+                    cr.snap(x, y, w, h, alpha if lookup >= 1 else 0)
+    
+    def _tween_all_cams(self, dur: float, ease):
+        for s in (-2, -1, 0, 1, 2):
+            mode  = self._mode_for_slot(s)
+            alpha = 255 if s == 0 else (SIDE_ALPHA if abs(s) == 1 else 0)
+            for cr in self._cams[s]:
+                pos = cam_pos(cr.index, mode, self._num_cams)
+                if pos is None:
+                    cr.tween_to(cr.cx, cr.cy, 0, 0, dur, ease, 0)
+                else:
+                    x, y, w, h = pos
+                    lookup = self._num_cams - cr.index
+                    cr.tween_to(x, y, w, h, dur, ease,
+                                alpha if lookup >= 1 else 0)
+    
+    def _trigger_open(self):
+        for poly in self._polys.values():
+            poly.set_phase('open')
+    
     def scroll(self, direction: int):
         if self._scrolling: return
         self._scrolling = True
-        slide = -direction
-        new_display_mode = (self._display_mode + direction) % NUM_DISPLAY_MODES
 
-        for box in self._boxes:
-            new_slot = box.slot + slide
-            box.tween_box_to_slot(new_slot, SCROLL_DUR)
-            # still tween scx for the label/clip positioning
-            if new_slot in SLOT_CX:
-                target_cx = SLOT_CX[new_slot]
+        dur  = SCROLL_DUR
+        ease = QEasingCurve.OutQuint
+        slot0_def = self._defn.slots.get(0)
+        if slot0_def:
+            p = slot0_def.phases.get('open')
+            if p and p.tweens:
+                tw = p.tweens[0]
+                dur  = tw.start + tw.dur
+                ease = tw.ease
+
+        for s, poly in self._polys.items():
+            dest_slot = s - direction
+            dest_def  = self._defn.slots.get(dest_slot)
+
+            if dest_def is None:
+                src_def = self._defn.slots.get(s)
+                close_p = src_def.phases.get('close') if src_def else None
+                if close_p and close_p.tweens:
+                    dest_tw = close_p.tweens[-1]
+                else:
+                    continue
             else:
-                target_cx = SLOT_CX[2]+(new_slot-2)*0.36 if new_slot > 2 else SLOT_CX[-2]+(new_slot+2)*0.36
-            box.tween_scx(target_cx, SCROLL_DUR)
+                open_p = dest_def.phases.get('open')
+                if not open_p or not open_p.tweens: continue
+                dest_tw = open_p.tweens[-1]
 
-            if new_slot in (0, 1, -1):
-                box.display_mode = (new_display_mode + new_slot) % NUM_DISPLAY_MODES
-                box.num_cams     = self._num_cams
-                alpha = 255 if new_slot == 0 else SIDE_ALPHA
-                for cr in box.cams:
+            poly._sp  = [P(p.x, p.y) for p in poly.cur_points]
+            poly._spx = [P(p.x, p.y) for p in poly.cur_px]
+            poly._sf  = QColor(poly.cur_fill_color)
+            poly._so  = QColor(poly.cur_outline_color)
+            poly._tweens = [PolygonTween(
+                points        = dest_tw.points,
+                px            = dest_tw.px,
+                fill_color    = dest_tw.fill_color,
+                outline_color = dest_tw.outline_color,
+                start         = 0.0,
+                dur           = dur,
+                ease          = ease,
+                span          = (0, 1),
+            )]
+            poly._idx   = 0
+            poly.hidden = False
+            poly._dirty = True
+            poly._timer.restart()
+
+        for s in (-2, -1, 0, 1, 2):
+            mode  = self._mode_for_slot(s)
+            dest_slot = s - direction
+            alpha = 255 if dest_slot == 0 else (SIDE_ALPHA if abs(dest_slot) == 1 else 0)
+            if dest_slot not in (-2, -1, 0, 1, 2):
+                alpha = 0
+            for cr in self._cams[s]:
+                pos = cam_pos(cr.index, mode, self._num_cams)
+                if pos is None:
+                    cr.tween_to(cr.cx, cr.cy, 0, 0, dur, ease, 0)
+                else:
+                    x, y, w, h = pos
                     lookup = self._num_cams - cr.index
-                    ta = alpha if lookup >= 1 else 0
-                    cr.tween_to(cr.cx, cr.cy, cr.cw, cr.ch, SCROLL_DUR, QEasingCurve.OutQuint, ta)
-            elif new_slot in (2, -2):
-                for cr in box.cams:
-                    cr.tween_to(cr.cx, cr.cy, cr.cw, cr.ch, SCROLL_DUR, QEasingCurve.OutQuint, 0)
+                    cr.tween_to(x, y, w, h, dur, ease,
+                                alpha if lookup >= 1 else 0)
 
-            box.slot = new_slot
-
-        self._display_mode = new_display_mode
-        QTimer.singleShot(int(SCROLL_DUR * 1000) + 50, self._finish_scroll)
+        self._pending_dir = direction
+        QTimer.singleShot(int(dur * 1000) + 50, self._finish_scroll)
 
     def _finish_scroll(self):
-        for box in self._boxes:
-            if box.slot not in (-2, -1, 0, 1, 2):
-                new_slot = -2 if box.slot > 2 else 2
-                self._snap_box(box, new_slot)
+        if self._pending_dir > 0:
+            self._order = self._order[1:] + [self._order[0]]
+        else:
+            self._order = [self._order[-1]] + self._order[:-1]
+
+        for s, poly in self._polys.items():
+            slot_def = self._defn.slots.get(s)
+            if slot_def is None: continue
+            open_p = slot_def.phases.get('open')
+            if not open_p or not open_p.tweens: continue
+            tw = open_p.tweens[-1]
+            poly.cur_points = [P(p.x, p.y) for p in tw.points]
+            poly.cur_px     = [P(p.x, p.y) for p in (tw.px or [P()] * len(tw.points))]
+            if tw.fill_color    is not None: poly.cur_fill_color    = QColor(tw.fill_color)
+            if tw.outline_color is not None: poly.cur_outline_color = QColor(tw.outline_color)
+            poly._sp     = [P(p.x, p.y) for p in poly.cur_points]
+            poly._spx    = [P(p.x, p.y) for p in poly.cur_px]
+            poly._sf     = QColor(poly.cur_fill_color)
+            poly._so     = QColor(poly.cur_outline_color)
+            poly._tweens = []
+            poly._idx    = 0
+            poly._dirty  = True
+            poly.hidden  = False
+
+        self._snap_all()
         self._scrolling = False
+
+    def open_anim(self):
+        self._snap_all()
+        for s in (-2, -1, 0, 1, 2):
+            if abs(s) == 2: continue
+            mode  = self._mode_for_slot(s)
+            alpha = 255 if s == 0 else SIDE_ALPHA
+            for cr in self._cams[s]:
+                tgt_pos = cam_pos(cr.index, mode, self._num_cams)
+                if tgt_pos is not None:
+                    sx, sy, sw, sh = CAMERA_LAYOUT[cr.index][mode][0]
+                    cr.snap(sx, sy, sw, sh, 0)
+                    x, y, w, h = tgt_pos
+                    lookup = self._num_cams - cr.index
+                    cr.tween_to(x, y, w, h, OPEN_DUR, QEasingCurve.OutQuint,
+                                alpha if lookup >= 1 else 0)
+        self._trigger_open()
+
+    def close_anim(self):
+        for s in (-2, -1, 0, 1, 2):
+            mode = self._mode_for_slot(s)
+            for cr in self._cams[s]:
+                if cr.alpha > 0 or cr.cw > 0:
+                    sx, sy, sw, sh = CAMERA_LAYOUT[cr.index][mode][0]
+                    cr.tween_to(sx, sy, sw, sh, CLOSE_DUR, QEasingCurve.InQuint, 0)
+        for poly in self._polys.values():
+            poly.set_phase('close')
 
     def set_num_cams(self, num_cams: int):
         self._num_cams = max(1, min(num_cams, MAX_ACTIVE_CAMS))
-        for box in self._boxes:
-            if abs(box.slot) == 2:
-                box.snap_to(box.display_mode, self._num_cams, alpha=0)
-            else:
-                box.tween_to(box.display_mode, self._num_cams, CAM_DUR)
-
-    def open_anim(self):
-        for box in self._boxes:
-            if abs(box.slot) == 2:
-                box.snap_box_to_slot(box.slot)
-                box.snap_to(box.display_mode, self._num_cams, alpha=0)
-                continue
-            box.snap_box_to_slot(box.slot)
-            box.tween_box_to_slot(box.slot, OPEN_DUR, QEasingCurve.OutQuint)
-            for cr in box.cams:
-                tgt_pos = cam_pos(cr.index, box.display_mode, self._num_cams)
-                if tgt_pos is not None:
-                    sx, sy, sw, sh = CAMERA_LAYOUT[cr.index][box.display_mode][0]
-                    cr.snap(sx, sy, sw, sh, 0)
-                    tx, ty, tw, th = tgt_pos
-                    lookup = self._num_cams - cr.index
-                    ta = (255 if box.slot == 0 else SIDE_ALPHA) if lookup >= 1 else 0
-                    cr.tween_to(tx, ty, tw, th, OPEN_DUR, QEasingCurve.OutQuint, ta)
-
-    def close_anim(self):
-        for box in self._boxes:
-            cp1, cp2 = _box_points(SLOT_CX.get(box.slot, 0.5), 0)
-            def _pts(a, b): return [P(a.x,a.y),P(b.x,a.y),P(b.x,b.y),P(a.x,b.y)]
-            box._box_poly._tweens = [PolygonTween(
-                points=_pts(cp1, cp2), px=[P(0,0)]*4,
-                fill_color=QColor(255,255,255,0), outline_color=QColor(255,255,255,0),
-                start=0.0, dur=CLOSE_DUR, ease=QEasingCurve.InQuint,
-            )]
-            box._box_poly._idx = 0
-            box._box_poly._save_start()
-            box._box_poly._timer.restart()
-            for cr in box.cams:
-                if cr.alpha > 0 or cr.cw > 0:
-                    sx, sy, sw, sh = CAMERA_LAYOUT[cr.index][box.display_mode][0]
-                    cr.tween_to(sx, sy, sw, sh, CLOSE_DUR, QEasingCurve.InQuint, 0)
+        self._tween_all_cams(CAM_DUR, QEasingCurve.OutQuint)
 
     def update(self):
-        for box in self._boxes: box.update()
+        for poly in self._polys.values(): poly.update()
+        for cams  in self._cams.values():
+            for cr in cams: cr.update()
 
-    def draw(self, painter: QPainter, sw: int, sh: int, label_font: QFont):
-        for box in sorted(self._boxes, key=lambda b: abs(b.slot), reverse=True):
-            if abs(box.slot) == 2 and not box._scx_active: continue
-            box.draw(painter, sw, sh, label_font)
+    def draw(self, painter: QPainter, sw: int, sh: int):
+        d          = self._defn
+        label_font = _make_font(d.label_font_family, d.label_font_size)
+        name_size  = d.name_font_size
+
+        for s in (-2, 2, -1, 1, 0):
+            poly = self._polys[s]
+            poly.draw(painter, sw, sh, d.cam_w, d.cam_h)
+
+            pts = list(poly.get_polygon(sw, sh, d.cam_w, d.cam_h))
+            if not pts: continue
+            xs = [p.x() for p in pts]; ys = [p.y() for p in pts]
+            bx = min(xs); by = min(ys)
+            bw = max(xs) - bx; bh = max(ys) - by
+            if bw < 1 or bh < 1: continue
+
+            mode = self._mode_for_slot(s)
+
+            name       = CAMERA_LAYOUT_NAMES[mode % len(CAMERA_LAYOUT_NAMES)]
+            name_font  = _make_font(d.label_font_family, name_size)
+            name_fm    = QFontMetrics(name_font)
+            painter.setFont(name_font)
+            painter.setPen(QColor(255, 255, 255, 255 if s == 0 else SIDE_ALPHA))
+            painter.drawText(
+                int(bx + (bw - name_fm.horizontalAdvance(name)) / 2),
+                int(by - 6),
+                name,
+            )
+            painter.setPen(Qt.NoPen)
+
+            painter.save()
+            painter.setClipRect(QRectF(bx, by, bw, bh))
+            fm = QFontMetrics(label_font)
+            for cr in self._cams[s]:
+                if cr.alpha <= 0 or cr.cw <= 0 or cr.ch <= 0: continue
+                rx = bx + cr.cx * bw;  ry = by + cr.cy * bh
+                rw = cr.cw * bw;       rh = cr.ch * bh
+                cx1 = max(rx, bx);     cy1 = max(ry, by)
+                cx2 = min(rx+rw, bx+bw); cy2 = min(ry+rh, by+bh)
+                rw2 = cx2-cx1; rh2 = cy2-cy1
+                if rw2 < 1 or rh2 < 1: continue
+                painter.setBrush(QColor(255,255,255, max(0,min(255,int(cr.alpha*0.10)))))
+                painter.setPen(Qt.NoPen)
+                painter.drawRect(QRectF(cx1,cy1,rw2,rh2))
+                pen = QPen(QColor(255,255,255, max(0,min(255,cr.alpha))))
+                pen.setWidthF(2.0)
+                painter.setPen(pen); painter.setBrush(Qt.NoBrush)
+                painter.drawRect(QRectF(cx1,cy1,rw2,rh2))
+                painter.setPen(Qt.NoPen)
+                lbl = str(cr.index + 1)
+                painter.setFont(label_font)
+                painter.setPen(QColor(255,255,255,cr.alpha))
+                painter.drawText(
+                    int(cx1+(rw2-fm.horizontalAdvance(lbl))/2),
+                    int(cy1+(rh2+fm.ascent())/2-fm.descent()),
+                    lbl,
+                )
+                painter.setPen(Qt.NoPen)
+            painter.restore()
 
     def all_done(self) -> bool:
-        return all(b.all_done() for b in self._boxes)
+        return (all(p.phase_done() for p in self._polys.values()) and
+                all(cr.done() for cams in self._cams.values() for cr in cams))
 
     @property
-    def display_mode(self) -> int: return self._display_mode
+    def display_mode(self) -> int: return self._order[0]
     @property
     def num_cams(self) -> int:     return self._num_cams
     @property
     def scrolling(self) -> bool:   return self._scrolling
-
 
 # ──────────────────────── CameraSelectOverlay ────────────────────
 
@@ -2394,7 +2468,7 @@ class CameraSelectOverlay(QWidget):
         w, h = self.width(), self.height()
         for poly in self._polygons:
             poly.draw(painter, w, h, self.cam_w, self.cam_h)
-        self._scroll.draw(painter, w, h, self._tile_font)
+        self._scroll.draw(painter, w, h)
         ctx = {
             'display_mode': self._scroll.display_mode,
             'num_cams':     self._scroll.num_cams,
