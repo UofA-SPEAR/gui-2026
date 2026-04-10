@@ -191,6 +191,7 @@ class GStreamerVideoWidget(QWidget):
         self.video_surface.winId()
         QApplication.processEvents()
 
+        print(f"[start] winId={self.video_surface.winId()}, size={self.video_surface.width()}x{self.video_surface.height()}")
         self.thread = GStreamerThread(
             self.pipeline_str,
             self.video_surface.winId(),
@@ -325,8 +326,8 @@ class ResizableContainer(QWidget):
 # ──────────────────────── Camera Node ────────────────────────
 
 class CameraConfig:
-    names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
-    serials = [309256978, 305325257, 58896881, 0, 0, 0, 0, 0]
+    names = ["ZED X One #1", "ZED X One #2", "ZED X One #3", "ZED X One #4", "ZED X One #5", "ZED X One #6", "ZED X Mini #1", "ZED X Mini #2"]
+    serials = [302801647, 303928833, 305325257, 307142683, 308873104, 309256978, 44249482, 58896881]
     default_resolutions = [4, 4, 6, 0, 0, 0, 0, 0]
     camera_ids = [0, 1, 0, 3, 4, 5, 6, 7]
     ratios = [[1920, 1080]] * 8
@@ -350,6 +351,7 @@ class Camera:
         self.pending_exposure = None
         self.pending_gain = None
         self.pending_gamma = None
+        self.port = None
 
     def has_pending_changes(self):
         return any(v is not None for v in [self.pending_exposure, self.pending_gain, self.pending_gamma])
@@ -429,12 +431,22 @@ class CameraNode(Node):
             self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
 
         self.camera_info = {
-            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
-                        "name": "ZED X ONE #1", "exposure": 10000, "gain": 30000, "gamma": 2},
-            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
-                        "name": "ZED X ONE #2", "exposure": 10000, "gain": 30000, "gamma": 2},
-            58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
-                        "name": "ZED X MINI #1", "exposure": 50,   "gain": 50, "gamma": 2},
+            302801647: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
+                        "name": "ZED X ONE #1", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5000},
+            303928833: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
+                        "name": "ZED X ONE #2", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5001},
+            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 2,
+                        "name": "ZED X ONE #3", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5002},
+            307142683: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 3,
+                        "name": "ZED X ONE #4", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5003},
+            308873104: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 4,
+                        "name": "ZED X ONE #5", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5004},
+            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 5,
+                        "name": "ZED X ONE #6", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5005},
+            44249482:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
+                        "name": "ZED X MINI #1", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5006},
+            58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 1,
+                        "name": "ZED X MINI #2", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5007},
         }
 
         print(f"\nConfigured cameras:")
@@ -662,6 +674,8 @@ class CameraNode(Node):
                 print(f"ERROR: {info['type']} requires {cam.source_type} which is not available!")
                 cam.source_type = None
                 cam.camera_id = 0
+                cam.port = info.get("port")
+                print(f"Falling back to H265 stream on port {cam.port}")
         else:
             cam.camera_id = self.config.camera_ids[cam.index]
             if self.available_zed_sources.get("zedxone"):
@@ -669,7 +683,8 @@ class CameraNode(Node):
                 print(f"Warning: Using zedxonesrc for unknown camera serial {cam.serial}")
             else:
                 cam.source_type = None
-                print(f"Warning: No ZED source available for camera {cam.serial}")
+                cam.port = 5000 + cam.index
+                print(f"Warning: Unknown serial {cam.serial}, falling back to H265 stream on port {cam.port}")
 
         self.current_index = cam.position
         print(f'Current Camera: {self.current_index}')
@@ -872,12 +887,25 @@ class CameraNode(Node):
         w = round(dims[2] * self.container.width())
         h = round(dims[3] * self.container.height())
 
-        use_camera = self.use_video_overlay and cam.source_type is not None
-
         cam_ratio = self.config.ratios[cam.index] if cam.index >= 0 else [1920, 1080]
         cam_w, cam_h = cam_ratio[0], cam_ratio[1]
 
-        if use_camera:
+        if cam.port is not None:
+            use_camera = self.use_video_overlay
+            port = cam.port
+            pipeline = (
+                f"udpsrc port={port} "
+                f"! application/x-rtp,encoding-name=H265,payload=96 "
+                f"! rtph265depay "
+                f"! h265parse "
+                f"! avdec_h265 "
+                f"! videoconvert "
+                f"! videoscale "
+                f"! {self.video_sink} force-aspect-ratio=false"
+            )
+            print(f"[create_camera_widget] Stream pipeline for port {port}: {pipeline}")
+        elif cam.source_type is not None:
+            use_camera = self.use_video_overlay
             src = cam.source_type
             cid = cam.camera_id
             exp = cam.exposure
@@ -903,6 +931,7 @@ class CameraNode(Node):
                 f"! {self.video_sink} force-aspect-ratio=false"
             )
         else:
+            use_camera = False
             pipeline = None
 
         try:
@@ -1128,6 +1157,8 @@ class CameraNode(Node):
 
 
 def main():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
     rclpy.init()
     node = CameraNode()
 
