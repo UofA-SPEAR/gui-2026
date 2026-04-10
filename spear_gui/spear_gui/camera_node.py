@@ -71,14 +71,6 @@ class GStreamerThread(QThread):
             if not self.pipeline:
                 raise RuntimeError(f"Failed to create pipeline: {self.pipeline_str}")
 
-            # Set window handle directly on the sink before pipeline starts
-            # This is the recommended approach for known sinks (avoids prepare-window-handle race)
-            if self.window_id is not None:
-                sink = self.pipeline.get_by_interface(GstVideo.VideoOverlay.__gtype__)
-                if sink:
-                    print(f"[GStreamerThread] Setting window handle directly on sink: {self.window_id}")
-                    sink.set_window_handle(self.window_id)
-
             self.bus = self.pipeline.get_bus()
             self.bus.add_signal_watch()
             self.bus.connect("message", self.on_message)
@@ -106,52 +98,34 @@ class GStreamerThread(QThread):
             print("Pipeline not initialized, cannot run", file=sys.stderr)
             return
 
-        print(f"[GST] Setting pipeline to PLAYING...")
         ret = self.pipeline.set_state(Gst.State.PLAYING)
-        print(f"[GST] set_state(PLAYING) returned: {ret.value_nick}")
         if ret == Gst.StateChangeReturn.FAILURE:
             print("Unable to set the pipeline to playing state", file=sys.stderr)
             self.error_occured.emit("Failed to set pipeline to PLAYING state")
             return
 
-        print("[GST] Pipeline loop starting...")
+        print("Pipeline is running.")
         self.loop.run()
-        print("[GST] Pipeline loop exited.")
 
     def stop(self):
-        if self.loop and self.loop.is_running():
-            self.loop.quit()
         if self.pipeline:
             self.pipeline.set_state(Gst.State.NULL)
+        self.loop.quit()
 
     def on_message(self, bus, message):
         mtype = message.type
-        src_name = message.src.get_name() if message.src else "unknown"
-        type_str = str(mtype).split(".")[-1]
-        print(f"[GST MSG] type={type_str} src={src_name}")
 
         if mtype == Gst.MessageType.EOS:
-            print("[GST] End of stream")
+            print("End of stream")
             self.loop.quit()
         elif mtype == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            print(f"[GST ERROR] {err}", file=sys.stderr)
-            print(f"[GST DEBUG] {debug}", file=sys.stderr)
+            print(f"Error: {err}", file=sys.stderr)
+            print(f"Debug info: {debug}", file=sys.stderr)
             self.error_occured.emit(f"GStreamer error: {err}")
             self.loop.quit()
-        elif mtype == Gst.MessageType.WARNING:
-            warn, debug = message.parse_warning()
-            print(f"[GST WARNING] {warn}")
-            print(f"[GST WARNING DEBUG] {debug}")
-        elif mtype == Gst.MessageType.STATE_CHANGED:
-            old_s, new_s, pending_s = message.parse_state_changed()
-            print(f"[GST STATE] {src_name}: {str(old_s).split('.')[-1]} -> {str(new_s).split('.')[-1]} (pending: {str(pending_s).split('.')[-1]})")
-        elif mtype == Gst.MessageType.BUFFERING:
-            pct = message.parse_buffering()
-            print(f"[GST BUFFERING] {pct}%")
         elif mtype == Gst.MessageType.ASYNC_DONE and not self._loaded:
             self._loaded = True
-            print("[GST] ASYNC_DONE - video loaded")
             self.video_loaded.emit()
 
         return True
@@ -169,15 +143,12 @@ class GStreamerVideoWidget(QWidget):
         self.video_resize_enabled = True
         self.camera_width = camera_width
         self.camera_height = camera_height
+        self.setStyleSheet("background-color: black;")
         self.setAttribute(Qt.WA_NativeWindow)
-        self.setAttribute(Qt.WA_NoSystemBackground)
-        self.setAutoFillBackground(False)
 
         self.video_surface = QWidget(self)
         self.video_surface.setAttribute(Qt.WA_NativeWindow)
-        self.video_surface.setAttribute(Qt.WA_NoSystemBackground)
-        self.video_surface.setAttribute(Qt.WA_OpaquePaintEvent)
-        self.video_surface.setAutoFillBackground(False)
+        self.video_surface.setStyleSheet("background:black;")
 
     def _compute_video_rect(self, widget_w, widget_h):
         cam_w = self.camera_width
@@ -194,16 +165,16 @@ class GStreamerVideoWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         w, h = self.width(), self.height()
-        if self.video_surface is not self:
-            self.video_surface.setGeometry(0, 0, w, h)
+        x_off, y_off, render_w, render_h = self._compute_video_rect(w, h)
+        self.video_surface.setGeometry(x_off, y_off, render_w, render_h)
         self.update_video_render_rectangle(w, h)
 
     def apply_video_resize(self):
         if not self.video_resize_enabled:
             return
         w, h = self.width(), self.height()
-        if self.video_surface is not self:
-            self.video_surface.setGeometry(0, 0, w, h)
+        x_off, y_off, render_w, render_h = self._compute_video_rect(w, h)
+        self.video_surface.setGeometry(x_off, y_off, render_w, render_h)
         self.update_video_render_rectangle(w, h)
 
     def start(self):
@@ -211,15 +182,15 @@ class GStreamerVideoWidget(QWidget):
             return
 
         self.show()
-        if self.video_surface is not self:
+        if self.video_surface.width() == 0 or self.video_surface.height() == 0:
             w, h = self.width(), self.height()
             if w > 0 and h > 0:
-                self.video_surface.setGeometry(0, 0, w, h)
+                x_off, y_off, rw, rh = self._compute_video_rect(w, h)
+                self.video_surface.setGeometry(x_off, y_off, rw, rh)
         self.video_surface.show()
         self.video_surface.winId()
         QApplication.processEvents()
 
-        print(f"[start] widget geom={self.geometry()} surface geom={self.video_surface.geometry()} winId={self.video_surface.winId()}")
         self.thread = GStreamerThread(
             self.pipeline_str,
             self.video_surface.winId(),
@@ -231,11 +202,9 @@ class GStreamerVideoWidget(QWidget):
         self.thread.start()
 
     def stop(self):
-        print(f"[stop] thread={self.thread} thread_running={self.thread.isRunning() if self.thread else None}")
         if self.thread:
             self.thread.stop()
-            waited = self.thread.wait(3000)
-            print(f"[stop] thread.wait returned={waited} still_running={self.thread.isRunning()}")
+            self.thread.wait(1000)
 
     def update_video_render_rectangle(self, w, h):
         if not self.thread or not self.thread.pipeline:
@@ -345,7 +314,6 @@ class PlaceholderCameraWidget(QWidget):
 
 class ResizableContainer(QWidget):
     resized = Signal()
-    moved = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -354,15 +322,11 @@ class ResizableContainer(QWidget):
         super().resizeEvent(event)
         self.resized.emit()
 
-    def moveEvent(self, event):
-        super().moveEvent(event)
-        self.moved.emit()
-
 # ──────────────────────── Camera Node ────────────────────────
 
 class CameraConfig:
-    names = ["ZED X One #1", "ZED X One #2", "ZED X One #3", "ZED X One #4", "ZED X One #5", "ZED X One #6", "ZED X Mini #1", "ZED X Mini #2"]
-    serials = [302801647, 303928833, 305325257, 307142683, 308873104, 309256978, 44249482, 58896881]
+    names = ["ZED X One #1", "ZED X One #2", "ZED X Mini #1", "Placeholder 4", "Placeholder 5", "Placeholder 6", "Placeholder 7", "Placeholder 8"]
+    serials = [309256978, 305325257, 58896881, 0, 0, 0, 0, 0]
     default_resolutions = [4, 4, 6, 0, 0, 0, 0, 0]
     camera_ids = [0, 1, 0, 3, 4, 5, 6, 7]
     ratios = [[1920, 1080]] * 8
@@ -386,7 +350,6 @@ class Camera:
         self.pending_exposure = None
         self.pending_gain = None
         self.pending_gamma = None
-        self.port = None
 
     def has_pending_changes(self):
         return any(v is not None for v in [self.pending_exposure, self.pending_gain, self.pending_gamma])
@@ -466,22 +429,12 @@ class CameraNode(Node):
             self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
 
         self.camera_info = {
-            302801647: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
-                        "name": "ZED X ONE #1", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5000},
-            303928833: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
-                        "name": "ZED X ONE #2", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5001},
-            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 2,
-                        "name": "ZED X ONE #3", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5002},
-            307142683: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 3,
-                        "name": "ZED X ONE #4", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5003},
-            308873104: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 4,
-                        "name": "ZED X ONE #5", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5004},
-            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 5,
-                        "name": "ZED X ONE #6", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5005},
-            44249482:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
-                        "name": "ZED X MINI #1", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5006},
-            58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 1,
-                        "name": "ZED X MINI #2", "exposure": 10000, "gain": 30000, "gamma": 2, "port": 5007},
+            309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
+                        "name": "ZED X ONE #1", "exposure": 10000, "gain": 30000, "gamma": 2},
+            305325257: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 1,
+                        "name": "ZED X ONE #2", "exposure": 10000, "gain": 30000, "gamma": 2},
+            58896881:  {"type": "ZED X Mini", "source": "zedsrc",    "camera_id": 0,
+                        "name": "ZED X MINI #1", "exposure": 50,   "gain": 50, "gamma": 2},
         }
 
         print(f"\nConfigured cameras:")
@@ -513,31 +466,15 @@ class CameraNode(Node):
         self.container.resize(800, 400)
         self.container.setStyleSheet("background-color: #2b2b2b;")
         self.container.resized.connect(self.on_container_resized)
-        self.container.moved.connect(self._reposition_overlay)
         self._overlay_canvas = OverlayCanvas(self.container, external_tick=True)
-        self._overlay_canvas.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowTransparentForInput | Qt.Tool)
-        self._overlay_canvas.setAttribute(Qt.WA_TranslucentBackground)
         self._overlay_canvas.show()
         self._master_timer.start()
         print("GUI setup complete.")
 
-    def _reposition_overlay(self):
-        if not self._overlay_canvas:
-            return
-        global_pos = self.container.mapToGlobal(self.container.rect().topLeft())
-        cw, ch = self.container.width(), self.container.height()
-        ow, oh = self._overlay_canvas.width(), self._overlay_canvas.height()
-        og = self._overlay_canvas.geometry()
-        print(f"[overlay] container global=({global_pos.x()},{global_pos.y()}) size=({cw},{ch})")
-        print(f"[overlay] current overlay geom=({og.x()},{og.y()},{ow},{oh})")
-        self._overlay_canvas.setGeometry(global_pos.x(), global_pos.y(), cw, ch)
-        self._overlay_canvas.raise_()
-        og2 = self._overlay_canvas.geometry()
-        print(f"[overlay] new overlay geom=({og2.x()},{og2.y()},{og2.width()},{og2.height()})")
-
     def on_container_resized(self):
         self.set_camera_positions()
-        self._reposition_overlay()
+        if self._overlay_canvas:
+            self._overlay_canvas.resizeToParent()
 
     # ──────────────────────── Key Listener ────────────────────────
 
@@ -725,8 +662,6 @@ class CameraNode(Node):
                 print(f"ERROR: {info['type']} requires {cam.source_type} which is not available!")
                 cam.source_type = None
                 cam.camera_id = 0
-                cam.port = info.get("port")
-                print(f"Falling back to H265 stream on port {cam.port}")
         else:
             cam.camera_id = self.config.camera_ids[cam.index]
             if self.available_zed_sources.get("zedxone"):
@@ -734,8 +669,7 @@ class CameraNode(Node):
                 print(f"Warning: Using zedxonesrc for unknown camera serial {cam.serial}")
             else:
                 cam.source_type = None
-                cam.port = 5000 + cam.index
-                print(f"Warning: Unknown serial {cam.serial}, falling back to H265 stream on port {cam.port}")
+                print(f"Warning: No ZED source available for camera {cam.serial}")
 
         self.current_index = cam.position
         print(f'Current Camera: {self.current_index}')
@@ -932,33 +866,18 @@ class CameraNode(Node):
         active_positions = [c.position for c in self.cameras if c.active] + [cam.position]
         max_pos = max(active_positions)
 
-        layouts = self.config.layout[cam.position][self.display_mode]
-        dims = layouts[max(0, min(max_pos + 1 - cam.position, len(layouts) - 1))]
+        dims = self.config.layout[max(max_pos, 0)][self.display_mode][0]
         x = round(dims[0] * self.container.width())
         y = round(dims[1] * self.container.height())
         w = round(dims[2] * self.container.width())
         h = round(dims[3] * self.container.height())
 
+        use_camera = self.use_video_overlay and cam.source_type is not None
+
         cam_ratio = self.config.ratios[cam.index] if cam.index >= 0 else [1920, 1080]
         cam_w, cam_h = cam_ratio[0], cam_ratio[1]
 
-        if cam.port is not None:
-            use_camera = self.use_video_overlay
-            port = cam.port
-            pipeline = (
-                f"udpsrc port={port} "
-                f"! application/x-rtp,encoding-name=H265,payload=96 "
-                f"! rtph265depay "
-                f"! h265parse "
-                f"! avdec_h265 "
-                f"! videoconvert "
-                f"! videoscale "
-                f"! queue max-size-buffers=4 leaky=downstream "
-                f"! {self.video_sink} force-aspect-ratio=false"
-            )
-            print(f"[create_camera_widget] Stream pipeline for port {port}: {pipeline}")
-        elif cam.source_type is not None:
-            use_camera = self.use_video_overlay
+        if use_camera:
             src = cam.source_type
             cid = cam.camera_id
             exp = cam.exposure
@@ -984,7 +903,6 @@ class CameraNode(Node):
                 f"! {self.video_sink} force-aspect-ratio=false"
             )
         else:
-            use_camera = False
             pipeline = None
 
         try:
@@ -1023,10 +941,7 @@ class CameraNode(Node):
                 QApplication.processEvents()
                 camera_feed_widget.start()
 
-                def on_video_loaded(c=cam, w=camera_feed_widget):
-                    lo = self._overlay_canvas.get_loading(w)
-                    if lo:
-                        lo.notify_loaded()
+                def on_video_loaded(c=cam):
                     def _reveal_border():
                         c.border_ready = True
                         self.update_camera_borders()
@@ -1062,7 +977,6 @@ class CameraNode(Node):
             return
         max_pos = max(active_positions)
 
-        active_count = len(active_positions)
         for i, cam in enumerate(self.cameras):
             if not cam.widget:
                 continue
@@ -1070,9 +984,8 @@ class CameraNode(Node):
                 self.stop_animation_for_widget(cam.widget)
                 continue
 
-            cam_rank = sorted(active_positions).index(cam.position)
-            layouts = self.config.layout[cam_rank][self.display_mode]
-            dims = layouts[max(0, min(active_count - cam_rank, len(layouts) - 1))]
+            layouts = self.config.layout[i][self.display_mode]
+            dims = layouts[max(0, min(max_pos + 1 - i, len(layouts) - 1))]
 
             x = round(dims[0] * self.container.width())
             y = round(dims[1] * self.container.height())
@@ -1130,7 +1043,6 @@ class CameraNode(Node):
     # ──────────────────────── Tween Animation ────────────────────────
 
     def remove_widget(self, cam):
-        print(f"[remove_widget] cam.position={cam.position} widget={cam.widget}")
         if cam.widget:
             self._overlay_canvas.unregister(cam.widget)
             if hasattr(cam.widget, 'stop'):
@@ -1138,9 +1050,6 @@ class CameraNode(Node):
             cam.widget.hide()
             cam.widget.deleteLater()
             cam.widget = None
-            if self.container:
-                self.container.update()
-            print(f"[remove_widget] done, widget set to None")
 
     def _master_tick(self):
         done = []
@@ -1162,22 +1071,16 @@ class CameraNode(Node):
             nh = int(sh + (tw['end_h'] - sh) * v)
             if nx != sx or ny != sy or nw != sw or nh != sh or t < 1.0:
                 widget.setGeometry(nx, ny, nw, nh)
-                if hasattr(widget, 'update_video_render_rectangle'):
-                    widget.update_video_render_rectangle(nw, nh)
             if t >= 1.0:
                 done.append(wid)
                 if hasattr(widget, 'video_resize_enabled'):
                     widget.video_resize_enabled = True
                     widget.apply_video_resize()
-                if hasattr(widget, 'thread') and widget.thread and widget.thread.pipeline:
-                    widget.thread.pipeline.set_state(Gst.State.PLAYING)
         for wid in done:
             self._tweens.pop(wid, None)
 
         if self._overlay_canvas:
             self._overlay_canvas.external_tick()
-        if self._tweens:
-            self._reposition_overlay()
 
         if not self._tweens and (not self._overlay_canvas or
                                   not self._overlay_canvas.has_active()):
@@ -1195,8 +1098,6 @@ class CameraNode(Node):
         self.stop_animation_for_widget(widget)
         if hasattr(widget, 'video_resize_enabled'):
             widget.video_resize_enabled = False
-        if hasattr(widget, 'thread') and widget.thread and widget.thread.pipeline:
-            widget.thread.pipeline.set_state(Gst.State.PAUSED)
         self._tweens[id(widget)] = {
             'widget':     widget,
             'start_geom': widget.geometry(),
@@ -1227,8 +1128,6 @@ class CameraNode(Node):
 
 
 def main():
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
     rclpy.init()
     node = CameraNode()
 
@@ -1243,8 +1142,6 @@ def main():
 
     node.setup_gui()
     node.container.show()
-    QApplication.processEvents()
-    node._reposition_overlay()
 
     def on_app_state_changed(state):
         for cam in node.cameras:
