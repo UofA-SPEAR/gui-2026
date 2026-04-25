@@ -701,6 +701,19 @@ class AnimatedOverlay(QWidget):
         for p in self._polygons: p.set_phase(phase)
         for t in self._texts:    t.set_phase(phase)
 
+    def _tick_elements(self):
+        any_visible = any_animating = False
+        for p in self._polygons:
+            p.update()
+            if not p.hidden:
+                any_visible = True
+                if not p.phase_done(): any_animating = True
+        for t in self._texts:
+            t.update()
+            if not t.hidden or t.defn.always_visible:
+                any_visible = True
+                if not t.phase_done(): any_animating = True
+        return any_visible, any_animating
 
     def _tick(self, external=False):
         any_visible, _ = self._tick_elements()
