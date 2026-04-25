@@ -49,202 +49,222 @@ class KeyEventFilter(QObject):
             return True
         return False
 
-# ──────────────────────── GStreamer (appsink) ────────────────────────
+# ──────────────────────── GStreamer ────────────────────────
+class GStreamerThread(QThread):
+    finished = Signal()
+    error_occured = Signal(str)
+    video_loaded = Signal()
+
+    def __init__(self, pipeline_str, window_id=None, parent=None):
+        super().__init__(parent)
+        self.pipeline_str = pipeline_str
+        self.window_id = window_id
+        self.pipeline = None
+        self.bus = None
+        self.loop = GLib.MainLoop()
+        self._loaded = False
+
+        try:
+            Gst.init(None)
+            self.pipeline = Gst.parse_launch(self.pipeline_str)
+
+            if not self.pipeline:
+                raise RuntimeError(f"Failed to create pipeline: {self.pipeline_str}")
+
+            # Set window handle directly on the sink before pipeline starts
+            # This is the recommended approach for known sinks (avoids prepare-window-handle race)
+            if self.window_id is not None:
+                sink = self.pipeline.get_by_interface(GstVideo.VideoOverlay.__gtype__)
+                if sink:
+                    print(f"[GStreamerThread] Setting window handle directly on sink: {self.window_id}")
+                    sink.set_window_handle(self.window_id)
+
+            self.bus = self.pipeline.get_bus()
+            self.bus.add_signal_watch()
+            self.bus.connect("message", self.on_message)
+
+            if self.window_id is not None:
+                self.bus.enable_sync_message_emission()
+                self.bus.connect("sync-message::element", self.on_sync_message)
+        except Exception as e:
+            error_msg = f"Pipeline creation failed: {e}"
+            print(error_msg, file=sys.stderr)
+            self.error_occured.emit(error_msg)
+            self.pipeline = None
+
+    def on_sync_message(self, bus, message):
+        if message.get_structure() and message.get_structure().get_name() == 'prepare-window-handle':
+            if self.window_id is not None:
+                try:
+                    print(f"Setting window handle in sync: {self.window_id}")
+                    message.src.set_window_handle(self.window_id)
+                except Exception as e:
+                    print(f"Failed to set window handle: {e}", file=sys.stderr)
+
+    def run(self):
+        if not self.pipeline:
+            print("Pipeline not initialized, cannot run", file=sys.stderr)
+            return
+
+        print(f"[GST] Setting pipeline to PLAYING...")
+        ret = self.pipeline.set_state(Gst.State.PLAYING)
+        print(f"[GST] set_state(PLAYING) returned: {ret.value_nick}")
+        if ret == Gst.StateChangeReturn.FAILURE:
+            print("Unable to set the pipeline to playing state", file=sys.stderr)
+            self.error_occured.emit("Failed to set pipeline to PLAYING state")
+            return
+
+        print("[GST] Pipeline loop starting...")
+        self.loop.run()
+        print("[GST] Pipeline loop exited.")
+
+    def stop(self):
+        if self.loop and self.loop.is_running():
+            self.loop.quit()
+        if self.pipeline:
+            self.pipeline.set_state(Gst.State.NULL)
+
+    def on_message(self, bus, message):
+        mtype = message.type
+        src_name = message.src.get_name() if message.src else "unknown"
+        type_str = str(mtype).split(".")[-1]
+        print(f"[GST MSG] type={type_str} src={src_name}")
+
+        if mtype == Gst.MessageType.EOS:
+            print("[GST] End of stream")
+            self.loop.quit()
+        elif mtype == Gst.MessageType.ERROR:
+            err, debug = message.parse_error()
+            print(f"[GST ERROR] {err}", file=sys.stderr)
+            print(f"[GST DEBUG] {debug}", file=sys.stderr)
+            self.error_occured.emit(f"GStreamer error: {err}")
+            self.loop.quit()
+        elif mtype == Gst.MessageType.WARNING:
+            warn, debug = message.parse_warning()
+            print(f"[GST WARNING] {warn}")
+            print(f"[GST WARNING DEBUG] {debug}")
+        elif mtype == Gst.MessageType.STATE_CHANGED:
+            old_s, new_s, pending_s = message.parse_state_changed()
+            print(f"[GST STATE] {src_name}: {str(old_s).split('.')[-1]} -> {str(new_s).split('.')[-1]} (pending: {str(pending_s).split('.')[-1]})")
+        elif mtype == Gst.MessageType.BUFFERING:
+            pct = message.parse_buffering()
+            print(f"[GST BUFFERING] {pct}%")
+        elif mtype == Gst.MessageType.ASYNC_DONE and not self._loaded:
+            self._loaded = True
+            print("[GST] ASYNC_DONE - video loaded")
+            self.video_loaded.emit()
+
+        return True
+
 
 class GStreamerVideoWidget(QWidget):
-    """Displays a GStreamer pipeline using appsink + Qt paintEvent.
+    clicked = Signal()
 
-    This avoids all X11/XWayland window-stacking issues — frames arrive as
-    raw RGB buffers, get wrapped as QPixmap, and are drawn by Qt's normal
-    paint system. The OverlayCanvas sits on top as a plain child widget with
-    no compositor tricks needed.
-    """
-    clicked  = Signal()
-
-    _frame_ready = Signal(object)   # carries (bytes, width, height)
-
-    def __init__(self, pipeline_str, use_overlay=True,
-                 camera_width=1920, camera_height=1080, parent=None):
+    def __init__(self, pipeline_str, use_overlay=True, camera_width=1920, camera_height=1080, parent=None):
         super().__init__(parent)
-        self.pipeline_str   = pipeline_str
-        self.use_overlay    = use_overlay
-        self.camera_width   = camera_width
-        self.camera_height  = camera_height
+
+        self.pipeline_str = pipeline_str
+        self.use_overlay = use_overlay
+        self.thread = None
         self.video_resize_enabled = True
-
-        # Public alias expected by camera_node
-        self.video_surface  = self
-        self.thread         = _AppSinkThread(pipeline_str, parent=self)
-
-        self._pixmap: Optional['QPixmap'] = None
-        self._pix_lock = False   # simple flag, always accessed from main thread
-
-        self.setAutoFillBackground(False)
-        self.setAttribute(Qt.WA_OpaquePaintEvent)
+        self.camera_width = camera_width
+        self.camera_height = camera_height
+        self.setAttribute(Qt.WA_NativeWindow)
         self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAutoFillBackground(False)
 
-        # Wire thread signals → Qt main-thread slots
-        self.thread.frame_ready.connect(self._on_new_frame,
-                                        Qt.ConnectionType.QueuedConnection)
-        self.thread.error_sig.connect(self.on_error)
-        self.thread.finished_sig.connect(self.on_finished)
+        self.video_surface = QWidget(self)
+        self.video_surface.setAttribute(Qt.WA_NativeWindow)
+        self.video_surface.setAttribute(Qt.WA_NoSystemBackground)
+        self.video_surface.setAttribute(Qt.WA_OpaquePaintEvent)
+        self.video_surface.setAutoFillBackground(False)
 
-    # ── public API used by camera_node ──────────────────────────────
+    def _compute_video_rect(self, widget_w, widget_h):
+        cam_w = self.camera_width
+        cam_h = self.camera_height
+        scale_w = widget_w / cam_w
+        scale_h = widget_h / cam_h
+        scale = max(scale_w, scale_h)
+        render_w = int(cam_w * scale)
+        render_h = int(cam_h * scale)
+        x_offset = (widget_w - render_w) // 2
+        y_offset = (widget_h - render_h) // 2
+        return x_offset, y_offset, render_w, render_h
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w, h = self.width(), self.height()
+        if self.video_surface is not self:
+            self.video_surface.setGeometry(0, 0, w, h)
+        self.update_video_render_rectangle(w, h)
+
+    def apply_video_resize(self):
+        if not self.video_resize_enabled:
+            return
+        w, h = self.width(), self.height()
+        if self.video_surface is not self:
+            self.video_surface.setGeometry(0, 0, w, h)
+        self.update_video_render_rectangle(w, h)
 
     def start(self):
         if not self.use_overlay:
             return
+
         self.show()
+        if self.video_surface is not self:
+            w, h = self.width(), self.height()
+            if w > 0 and h > 0:
+                self.video_surface.setGeometry(0, 0, w, h)
+        self.video_surface.show()
+        self.video_surface.winId()
         QApplication.processEvents()
+
+        print(f"[start] widget geom={self.geometry()} surface geom={self.video_surface.geometry()} winId={self.video_surface.winId()}")
+        self.thread = GStreamerThread(
+            self.pipeline_str,
+            self.video_surface.winId(),
+            parent=self
+        )
+        self.thread.finished.connect(self.on_finished)
+        self.thread.error_occured.connect(self.on_error)
+        self.thread.video_loaded.connect(self._on_video_loaded)
         self.thread.start()
 
     def stop(self):
-        if self.thread is not None:
-            # Detach from parent before stopping so deleteLater on the widget
-            # doesn't destroy the thread while it's still running
-            self.thread.setParent(None)
-            self.thread.stop_pipeline()
-            if not self.thread.wait(3000):
-                print("[GStreamerVideoWidget] thread did not stop in 3s, forcing")
-                self.thread.terminate()
-                self.thread.wait(1000)
-    def apply_video_resize(self):
-        self.update()
+        print(f"[stop] thread={self.thread} thread_running={self.thread.isRunning() if self.thread else None}")
+        if self.thread:
+            self.thread.stop()
+            waited = self.thread.wait(3000)
+            print(f"[stop] thread.wait returned={waited} still_running={self.thread.isRunning()}")
 
     def update_video_render_rectangle(self, w, h):
-        self.update()
-
-    # ── frame handling ───────────────────────────────────────────────
-
-    def _on_new_frame(self, frame_data):
-        data, w, h = frame_data
-        from PySide6.QtGui import QImage, QPixmap
-        img = QImage(data, w, h, w * 3, QImage.Format.Format_RGB888)
-        self._pixmap = QPixmap.fromImage(img)
-        self.update()
-
-    # ── painting ─────────────────────────────────────────────────────
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        if not painter.isActive():
+        if not self.thread or not self.thread.pipeline:
             return
-        if self._pixmap is not None:
-            painter.drawPixmap(self.rect(), self._pixmap)
-        else:
-            painter.fillRect(self.rect(), QColor(13, 13, 13))
-        painter.end()
-
-    # ── input ────────────────────────────────────────────────────────
+        surf_w = self.video_surface.width()
+        surf_h = self.video_surface.height()
+        if surf_w <= 0 or surf_h <= 0:
+            return
+        sink = self.thread.pipeline.get_by_interface(GstVideo.VideoOverlay.__gtype__)
+        if sink:
+            try:
+                sink.set_render_rectangle(0, 0, surf_w, surf_h)
+                sink.expose()
+            except Exception:
+                pass
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
 
-    def on_error(self, msg):
-        print(f"GStreamer error: {msg}")
-
     def _on_video_loaded(self):
         pass
 
+    def on_error(self, error_msg):
+        print("GStreamer error:", error_msg)
+
     def on_finished(self):
         print("Pipeline finished.")
-
-
-class _AppSinkThread(QThread):
-    """Runs the GStreamer GLib main loop and pushes frames to the widget."""
-
-    frame_ready  = Signal(object)   # (bytes, width, height)
-    error_sig    = Signal(str)
-    video_loaded = Signal()   # name expected by camera_node
-    loaded_sig   = Signal()
-    finished_sig = Signal()
-
-    def __init__(self, pipeline_str, parent=None):
-        super().__init__(parent)
-        self.pipeline_str = pipeline_str
-        self.pipeline     = None
-        self.loop         = GLib.MainLoop()
-        self._loaded      = False
-
-        # Expose .pipeline attribute expected by camera_node tween code
-        Gst.init(None)
-        try:
-            self.pipeline = Gst.parse_launch(self.pipeline_str)
-            if not self.pipeline:
-                raise RuntimeError("parse_launch returned None")
-
-            appsink = self.pipeline.get_by_name("appsink0")
-            if appsink is None:
-                # Try finding any appsink by interface
-                for e in self.pipeline.iterate_elements():
-                    if hasattr(e, 'pull_sample'):
-                        appsink = e
-                        break
-            if appsink is None:
-                raise RuntimeError("No appsink found in pipeline")
-
-            appsink.set_property("emit-signals", True)
-            appsink.set_property("sync", True)
-            appsink.set_property("max-buffers", 2)
-            appsink.set_property("drop", True)
-            appsink.connect("new-sample", self._on_new_sample)
-
-            bus = self.pipeline.get_bus()
-            bus.add_signal_watch()
-            bus.connect("message", self._on_message)
-        except Exception as e:
-            print(f"[AppSinkThread] Pipeline creation failed: {e}", file=sys.stderr)
-            self.error_sig.emit(str(e))
-            self.pipeline = None
-
-    def _on_new_sample(self, appsink):
-        sample = appsink.emit("pull-sample")
-        if sample is None:
-            return Gst.FlowReturn.OK
-        try:
-            buf  = sample.get_buffer()
-            caps = sample.get_caps()
-            st   = caps.get_structure(0)
-            w    = st.get_value("width")
-            h    = st.get_value("height")
-            data = buf.extract_dup(0, buf.get_size())
-            self.frame_ready.emit((data, w, h))
-        except Exception as e:
-            print(f"[AppSinkThread] frame error: {e}", file=sys.stderr)
-        return Gst.FlowReturn.OK
-
-    def _on_message(self, bus, message):
-        mtype = message.type
-        if mtype == Gst.MessageType.EOS:
-            self.loop.quit()
-        elif mtype == Gst.MessageType.ERROR:
-            err, debug = message.parse_error()
-            print(f"[GStreamer ERROR] {err}", file=sys.stderr)
-            self.error_sig.emit(str(err))
-            self.loop.quit()
-        elif mtype == Gst.MessageType.ASYNC_DONE and not self._loaded:
-            self._loaded = True
-            self.video_loaded.emit()
-            self.loaded_sig.emit()
-        return True
-
-    def run(self):
-        if not self.pipeline:
-                return
-        ret = self.pipeline.set_state(Gst.State.PLAYING)
-        if ret == Gst.StateChangeReturn.FAILURE:
-            self.error_sig.emit("Failed to set pipeline PLAYING")
-            return
-        self.loop.run()
-        self.finished_sig.emit()
-
-    def stop_pipeline(self):
-        if self.loop and self.loop.is_running():
-            self.loop.quit()
-        if self.pipeline:
-            self.pipeline.set_state(Gst.State.NULL)
 
 
 
@@ -441,8 +461,9 @@ class CameraNode(Node):
         self.video_sink = self.find_best_video_sink()
         print(f"Using video sink: {self.video_sink}")
 
-        # appsink works everywhere — no overlay/native-window needed
-        self.use_video_overlay = True
+        self.use_video_overlay = self.video_sink in ['ximagesink', 'xvimagesink', 'glimagesink']
+        if not self.use_video_overlay:
+            self.get_logger().warn("\033[93mWarning: Video overlay not available. Using placeholder mode.\033[0m")
 
         self.camera_info = {
             302801647: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
@@ -478,9 +499,13 @@ class CameraNode(Node):
             return False
 
     def find_best_video_sink(self):
-        # Using appsink — no display sink needed
-        print("Using appsink for frame delivery")
-        return 'appsink'
+        sinks = ['ximagesink', 'xvimagesink', 'glimagesink', 'autovideosink']
+        for sink in sinks:
+            if self.check_gstreamer_element(sink):
+                print(f"Found video sink: {sink}")
+                return sink
+        self.get_logger().warn("\033[93mWarning: No video sink available\033[0m")
+        return 'fakesink'
 
     def setup_gui(self, parent=None):
         self.container = ResizableContainer(parent)
@@ -488,37 +513,31 @@ class CameraNode(Node):
         self.container.resize(800, 400)
         self.container.setStyleSheet("background-color: #2b2b2b;")
         self.container.resized.connect(self.on_container_resized)
-        # With appsink the video is drawn by Qt paintEvent — no native X11
-        # windows involved. OverlayCanvas is a plain child widget that sits
-        # on top via normal Qt stacking. No compositor tricks needed.
+        self.container.moved.connect(self._reposition_overlay)
         self._overlay_canvas = OverlayCanvas(self.container, external_tick=True)
-        self._overlay_canvas.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._overlay_canvas.raise_()
+        self._overlay_canvas.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowTransparentForInput | Qt.Tool)
+        self._overlay_canvas.setAttribute(Qt.WA_TranslucentBackground)
+        self._overlay_canvas.show()
         self._master_timer.start()
         print("GUI setup complete.")
 
     def _reposition_overlay(self):
-        if not self._overlay_canvas or not self.container:
+        if not self._overlay_canvas:
             return
         global_pos = self.container.mapToGlobal(self.container.rect().topLeft())
         cw, ch = self.container.width(), self.container.height()
+        ow, oh = self._overlay_canvas.width(), self._overlay_canvas.height()
+        og = self._overlay_canvas.geometry()
+        print(f"[overlay] container global=({global_pos.x()},{global_pos.y()}) size=({cw},{ch})")
+        print(f"[overlay] current overlay geom=({og.x()},{og.y()},{ow},{oh})")
         self._overlay_canvas.setGeometry(global_pos.x(), global_pos.y(), cw, ch)
         self._overlay_canvas.raise_()
+        og2 = self._overlay_canvas.geometry()
+        print(f"[overlay] new overlay geom=({og2.x()},{og2.y()},{og2.width()},{og2.height()})")
 
     def on_container_resized(self):
         self.set_camera_positions()
-        if self._overlay_canvas:
-            self._overlay_canvas.resizeToParent()
-        # Keep any open panels filling the container
-        for panel in [self._settings_panel, self._cam_select_panel]:
-            if panel is not None:
-                try:
-                    panel.setGeometry(self.container.rect())
-                    panel.raise_()
-                except RuntimeError:
-                    pass
-        if self._overlay_canvas and self._settings_panel is None and self._cam_select_panel is None:
-            self._overlay_canvas.raise_()
+        self._reposition_overlay()
 
     # ──────────────────────── Key Listener ────────────────────────
 
@@ -584,24 +603,21 @@ class CameraNode(Node):
     # ──────────────────────── Settings Panel ────────────────────────
 
     def show_settings_panel(self, cam):
-        # Guard against stale references
-        for attr in ('_settings_panel', '_cam_select_panel'):
-            panel = getattr(self, attr)
-            if panel is not None:
-                try:
-                    _ = panel.isVisible()
-                except RuntimeError:
-                    setattr(self, attr, None)
         if self._settings_panel is not None or self._cam_select_panel is not None:
             return
 
+        screen = QApplication.primaryScreen().geometry()
+        _PW, _PH = 1920, 1080
         panel = SettingsOverlay(
             SETTING_DEFS, SETTING_TEXT_DEFS,
             SETTING_SLIDER_DEFS, SETTING_BUTTON_DEFS,
-            cam_w=1920, cam_h=1080,
-            parent=self.container,
+            cam_w=_PW, cam_h=_PH,
         )
-        panel.setGeometry(self.container.rect())
+        panel.setFixedSize(_PW, _PH)
+        panel.move(
+            screen.left() + (screen.width()  - _PW) // 2,
+            screen.top()  + (screen.height() - _PH) // 2,
+        )
 
         def on_apply():
             cam.apply_pending()
@@ -617,29 +633,26 @@ class CameraNode(Node):
 
         panel.open(cam, on_apply=on_apply, on_cancel=on_cancel)
         self._settings_panel = panel
-        # Clear the reference when the panel destroys itself
-        panel.destroyed.connect(lambda: setattr(self, '_settings_panel', None))
-        panel.raise_()
 
     def show_cam_select_panel(self):
-        # Guard against stale reference to deleted C++ panel object
-        if self._cam_select_panel is not None:
-            try:
-                _ = self._cam_select_panel.isVisible()
-            except RuntimeError:
-                self._cam_select_panel = None
         if self._cam_select_panel is not None:
             return
+
+        screen = QApplication.primaryScreen().geometry()
+        _PW, _PH = 1920, 1080
 
         active_cams = len([c for c in self.cameras if c.active])
 
         panel = CameraSelectOverlay(
-            cam_w=1920, cam_h=1080,
+            cam_w=_PW, cam_h=_PH,
             initial_display_mode=self.display_mode,
             initial_cams=active_cams,
-            parent=self.container,
         )
-        panel.setGeometry(self.container.rect())
+        panel.setFixedSize(_PW, _PH)
+        panel.move(
+            screen.left() + (screen.width()  - _PW) // 2,
+            screen.top()  + (screen.height() - _PH) // 2,
+        )
 
         def on_apply(display_mode, num_cams):
             self.display_mode = display_mode
@@ -669,8 +682,7 @@ class CameraNode(Node):
 
         panel.open(on_apply=on_apply, on_cancel=on_cancel)
         self._cam_select_panel = panel
-        # Clear the reference when the panel destroys itself
-        panel.destroyed.connect(lambda: setattr(self, '_cam_select_panel', None))
+
         panel.raise_()
         if self._overlay_canvas:
             self._overlay_canvas.stackUnder(panel)
@@ -940,9 +952,9 @@ class CameraNode(Node):
                 f"! h265parse "
                 f"! avdec_h265 "
                 f"! videoconvert "
-                f"! video/x-raw,format=RGB "
-                f"! queue max-size-buffers=2 leaky=downstream "
-                f"! appsink name=appsink0 emit-signals=true sync=true max-buffers=2 drop=true"
+                f"! videoscale "
+                f"! queue max-size-buffers=4 leaky=downstream "
+                f"! {self.video_sink} force-aspect-ratio=false"
             )
             print(f"[create_camera_widget] Stream pipeline for port {port}: {pipeline}")
         elif cam.source_type is not None:
@@ -968,9 +980,8 @@ class CameraNode(Node):
 
             pipeline = (
                 f"{src} {cam_props} "
-                f"! queue ! videoconvert "
-                f"! video/x-raw,format=RGB "
-                f"! appsink name=appsink0 emit-signals=true sync=true max-buffers=2 drop=true"
+                f"! queue ! videoconvert ! videoscale "
+                f"! {self.video_sink} force-aspect-ratio=false"
             )
         else:
             use_camera = False
@@ -1008,35 +1019,26 @@ class CameraNode(Node):
 
             camera_feed_widget.clicked.connect(on_widget_clicked)
 
+            if use_camera:
+                QApplication.processEvents()
+                camera_feed_widget.start()
+
+                def on_video_loaded(c=cam, w=camera_feed_widget):
+                    lo = self._overlay_canvas.get_loading(w)
+                    if lo:
+                        lo.notify_loaded()
+                    def _reveal_border():
+                        c.border_ready = True
+                        self.update_camera_borders()
+                    QTimer.singleShot(1000, _reveal_border)
+                camera_feed_widget.thread.video_loaded.connect(on_video_loaded)
+
             overlay = InlineLoadingOverlay(cam_w=cam_w, cam_h=cam_h)
             overlay._click_target = camera_feed_widget
             self._overlay_canvas.register(camera_feed_widget, loading_ov=overlay)
             overlay.start()
 
-            if use_camera:
-                QApplication.processEvents()
-                camera_feed_widget.start()
-
-                pipeline_ok = (camera_feed_widget.thread is not None and
-                               camera_feed_widget.thread.pipeline is not None)
-
-                if pipeline_ok:
-                    def on_video_loaded(c=cam, w=camera_feed_widget, ov=overlay):
-                        if ov:
-                            ov.notify_loaded()
-                        def _reveal_border():
-                            c.border_ready = True
-                            self.update_camera_borders()
-                        QTimer.singleShot(1000, _reveal_border)
-                    camera_feed_widget.thread.video_loaded.connect(on_video_loaded)
-                else:
-                    # Pipeline failed to initialise — treat as placeholder
-                    QTimer.singleShot(300, lambda ov=overlay, c=cam: (
-                        ov.notify_loaded(),
-                        setattr(c, 'border_ready', True),
-                        self.update_camera_borders()
-                    ))
-            else:
+            if not use_camera:
                 QTimer.singleShot(300, lambda ov=overlay, c=cam: (
                     ov.notify_loaded(),
                     setattr(c, 'border_ready', True),
@@ -1084,13 +1086,6 @@ class CameraNode(Node):
             return
         valid_widgets = {id(cam.widget) for cam in self.cameras if cam.widget}
         valid_widgets.add(id(self._overlay_canvas))
-        # Preserve any open panels — they're legitimate container children
-        for panel in [self._settings_panel, self._cam_select_panel]:
-            if panel is not None:
-                try:
-                    valid_widgets.add(id(panel))
-                except RuntimeError:
-                    pass
         for child in self.container.children():
             if not isinstance(child, QWidget):
                 continue
@@ -1181,12 +1176,12 @@ class CameraNode(Node):
 
         if self._overlay_canvas:
             self._overlay_canvas.external_tick()
-            # Only raise the overlay when no fullscreen panel is open —
-            # panels are child widgets too and need to stay on top.
-            if self._settings_panel is None and self._cam_select_panel is None:
-                self._overlay_canvas.raise_()
-        # Keep the timer always running — stopping it causes stale frames on
-        # XWayland because ximagesink won't flush until Qt issues a paint event.
+        if self._tweens:
+            self._reposition_overlay()
+
+        if not self._tweens and (not self._overlay_canvas or
+                                  not self._overlay_canvas.has_active()):
+            self._master_timer.stop()
     def stop_animation_for_widget(self, widget):
         if not widget: return
         wid = id(widget)
@@ -1249,8 +1244,7 @@ def main():
     node.setup_gui()
     node.container.show()
     QApplication.processEvents()
-    if node._overlay_canvas:
-        node._overlay_canvas.raise_()
+    node._reposition_overlay()
 
     def on_app_state_changed(state):
         for cam in node.cameras:
