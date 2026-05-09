@@ -90,6 +90,22 @@ class A_node(Node):
 # =========================================================
 # GUI
 # =========================================================
+class Panel(QWidget):
+    def __init__(self, title):
+        super().__init__()
+
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("panelTitle")
+
+        self.layout.addWidget(title_label)
+
+        self.layout.setSpacing(6)
+        self.layout.setContentsMargins(12, 12, 12, 12)
+
+        self.setObjectName("telemetryPanel")
 
 class MainWindow(QMainWindow):
     def __init__(self, node):
@@ -131,95 +147,99 @@ class MainWindow(QMainWindow):
         # FRONT LEFT WHEEL (0)
         # =================================================
 
-        steer_0_layout = QVBoxLayout()
+        steer_0_panel = Panel("FRONT LEFT")
+        steer_0_layout = steer_0_panel.layout
         add_topic_label(steer_0_layout, "steer degrees", "/steer_angle_0", "rad")
         add_topic_label(steer_0_layout, "req steer", "/req_steer_angle_0", "rad")
         
-        main_grid.addLayout(steer_0_layout, 0, 0)
+        main_grid.addWidget(steer_0_panel, 0, 0)
 
-        wheel_0_layout = QVBoxLayout()
-        wheel_0_layout.addWidget(QLabel("FRONT LEFT"))
+        wheel_0_panel = Panel("FRONT LEFT")
+        wheel_0_layout = wheel_0_panel.layout
         add_topic_label(wheel_0_layout, "amps", "/amps_wheel_0", "A")
         add_topic_label(wheel_0_layout, "volts", "/volts_wheel_0", "V")
         add_topic_label(wheel_0_layout, "rpm", "/rpm_wheel_0", "rounds/min")
         add_topic_label(wheel_0_layout, "req rpm", "/req_rpm_wheel_0", "rounds/min")
 
-        main_grid.addLayout(wheel_0_layout, 1, 1)
+        main_grid.addWidget(wheel_0_panel, 1, 1)
 
         # =================================================
         # FRONT RIGHT WHEEL (1)
         # =================================================
 
-        steer_1_layout = QVBoxLayout()
+        steer_1_panel = Panel("FRONT RIGHT")
+        steer_1_layout = steer_1_panel.layout
         add_topic_label(steer_1_layout, "steer degrees", "/steer_angle_1", "rad")
         add_topic_label(steer_1_layout, "req steer", "/req_steer_angle_1", "rad")
 
-        main_grid.addLayout(steer_1_layout, 0, 3)
+        main_grid.addWidget(steer_1_panel, 0, 3)
 
-        wheel_1_layout = QVBoxLayout()
-        wheel_1_layout.addWidget(QLabel("FRONT RIGHT"))
+        wheel_1_panel = Panel("FRONT RIGHT")
+        wheel_1_layout = wheel_1_panel.layout
         add_topic_label(wheel_1_layout, "amps", "/amps_wheel_1", "A")
         add_topic_label(wheel_1_layout, "volts", "/volts_wheel_1", "V")
         add_topic_label(wheel_1_layout, "rpm", "/rpm_wheel_1", "rounds/min")
         add_topic_label(wheel_1_layout, "req rpm", "/req_rpm_wheel_1", "rounds/min")
 
-        main_grid.addLayout(wheel_1_layout, 1, 2)
+        main_grid.addWidget(wheel_1_panel, 1, 2)
 
         # =================================================
         # MID WHEELS
         # =================================================
-        wheel_2_layout = QVBoxLayout()
-        wheel_2_layout.addWidget(QLabel(" "))
-        wheel_2_layout.addWidget(QLabel("MID LEFT"))
+        wheel_2_panel = Panel("MID LEFT")
+        wheel_2_layout = wheel_2_panel.layout
+        # wheel_2_layout.addWidget(QLabel(" "))
         add_topic_label(wheel_2_layout, "amps", "/amps_wheel_2", "A")
         add_topic_label(wheel_2_layout, "volts", "/volts_wheel_2", "V")
         add_topic_label(wheel_2_layout, "rpm", "/rpm_wheel_2", "rounds/min")
         add_topic_label(wheel_2_layout, "req rpm", "/req_rpm_wheel_2", "rounds/min")
-        main_grid.addLayout(wheel_2_layout, 2, 1)
+        main_grid.addWidget(wheel_2_panel, 2, 1)
 
-        wheel_3_layout = QVBoxLayout()
-        wheel_3_layout.addWidget(QLabel(" "))
-        wheel_3_layout.addWidget(QLabel("MID RIGHT"))
+        wheel_3_panel = Panel("MID RIGHT")
+        wheel_3_layout = wheel_3_panel.layout
+        # wheel_3_layout.addWidget(QLabel(" "))
         add_topic_label(wheel_3_layout, "amps", "/amps_wheel_3", "A")
         add_topic_label(wheel_3_layout, "volts", "/volts_wheel_3", "V")
         add_topic_label(wheel_3_layout, "rpm", "/rpm_wheel_3", "rounds/min")
         add_topic_label(wheel_3_layout, "req rpm", "/req_rpm_wheel_3", "rounds/min")
-        main_grid.addLayout(wheel_3_layout, 2, 2)
+        main_grid.addWidget(wheel_3_panel, 2, 2)
 
         # =================================================
         # BACK WHEELS
         # =================================================
-        wheel_4_layout = QVBoxLayout()
-        wheel_4_layout.addWidget(QLabel(" "))
-        wheel_4_layout.addWidget(QLabel("BACK LEFT"))
+        wheel_4_panel = Panel("BACK LEFT")
+        wheel_4_layout = wheel_4_panel.layout
+        # wheel_4_layout.addWidget(QLabel(" "))
         add_topic_label(wheel_4_layout, "amps", "/amps_wheel_4", "A")
         add_topic_label(wheel_4_layout, "volts", "/volts_wheel_4", "V")
         add_topic_label(wheel_4_layout, "rpm", "/rpm_wheel_4", "rounds/min")
         add_topic_label(wheel_4_layout, "req rpm", "/req_rpm_wheel_4", "rounds/min")
-        main_grid.addLayout(wheel_4_layout, 3, 1)
+        main_grid.addWidget(wheel_4_panel, 3, 1)
 
-        wheel_5_layout = QVBoxLayout()
-        wheel_5_layout.addWidget(QLabel(" "))
-        wheel_5_layout.addWidget(QLabel("BACK RIGHT"))
+        wheel_5_panel = Panel("BACK RIGHT")
+        wheel_5_layout = wheel_5_panel.layout
+        # wheel_5_layout.addWidget(QLabel(" "))
         add_topic_label(wheel_5_layout, "amps", "/amps_wheel_5", "A")
         add_topic_label(wheel_5_layout, "volts", "/volts_wheel_5", "V")
         add_topic_label(wheel_5_layout, "rpm", "/rpm_wheel_5", "rounds/min")
         add_topic_label(wheel_5_layout, "req rpm", "/req_rpm_wheel_5", "rounds/min")
-        main_grid.addLayout(wheel_5_layout, 3, 2)
+        main_grid.addWidget(wheel_5_panel, 3, 2)
 
         # =================================================
         # BACK STEERING
         # =================================================
 
-        steer_4_layout = QVBoxLayout()
+        steer_4_panel = Panel("BACK LEFT")
+        steer_4_layout = steer_4_panel.layout
         add_topic_label(steer_4_layout, "steer degrees", "/steer_angle_4", "rad")
         add_topic_label(steer_4_layout, "req steer", "/req_steer_angle_4", "rad")
-        main_grid.addLayout(steer_4_layout, 4, 0)
+        main_grid.addWidget(steer_4_panel, 4, 0)
 
-        steer_5_layout = QVBoxLayout()
+        steer_5_panel = Panel("BACK RIGHT")
+        steer_5_layout = steer_5_panel.layout
         add_topic_label(steer_5_layout, "steer degrees", "/steer_angle_5", "rad")
         add_topic_label(steer_5_layout, "req steer", "/req_steer_angle_5", "rad")
-        main_grid.addLayout(steer_5_layout, 4, 3)
+        main_grid.addWidget(steer_5_panel, 4, 3)
 
         # =================================================
         # ARM
