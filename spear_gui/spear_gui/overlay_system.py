@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore    import Qt, QTimer, QElapsedTimer, QEasingCurve, QPointF, QRectF, QEvent, QObject
-from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QRegion
-
+from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QRegion, QPainterPath
+import time
 # ──────────────────────── Easing cache ───────────────────────────
 
 import math as _math
@@ -2561,3 +2561,717 @@ class _CSFilter(QObject):
         if self._panel is None or self._panel._closing: return False
         return _filter_buttons(self._panel, event) 
 
+# ──────────────────────── GraphDef / AnimatedGraph ────────────────────────
+
+def _interp_baseline_y(baseline: List[QPointF], x: float, fallback_y: float) -> float:
+    if not baseline:
+        return fallback_y
+    if x <= baseline[0].x():
+        return baseline[0].y()
+    if x >= baseline[-1].x():
+        return baseline[-1].y()
+    for i in range(len(baseline) - 1):
+        x0, x1 = baseline[i].x(), baseline[i + 1].x()
+        if x0 <= x <= x1:
+            t = (x - x0) / (x1 - x0) if x1 != x0 else 0.0
+            return baseline[i].y() + (baseline[i + 1].y() - baseline[i].y()) * t
+    return fallback_y
+
+@dataclass
+class SeriesDef:
+    value_fn:     Optional[Callable[[Any], Optional[float]]] = None
+    data_fn:      Optional[Callable[[Any], List[float]]]     = None
+    color:        QColor  = field(default_factory=lambda: QColor(255, 255, 255, 255))
+    line_width:   float   = 1.5
+    fill_opacity: float   = 0.0
+    smooth:       bool    = False
+ 
+ 
+@dataclass
+class GraphDef:
+    p1:              P
+    p2:              P
+    px1:             P                       = field(default_factory=P)
+    px2:             P                       = field(default_factory=P)
+    series:          List[SeriesDef]         = field(default_factory=list)
+    max_time:        float                   = 10.0
+    value_range:     Tuple[float, float]     = (0.0, 100.0)
+    value_color:     QColor                  = QColor(255, 255, 255, 255)
+    ease_dur:        float                   = 0.3
+    ease_type:       QEasingCurve.Type       = QEasingCurve.OutQuint
+    hidden:          bool                    = False
+    dynamic_scale:   float                   = 0.0
+    range_labels:    Tuple[bool, bool, int]  = (False, False, 0)
+    label_sizes:     Tuple[float, float]     = (10.0, 9.0)
+    label_align:     String                  = 'right'
+    stack:           bool                    = False
+    update_interval: float                   = 0.0
+ 
+class _SeriesState: 
+    def __init__(self) -> None:
+        self.waypoints: List[Tuple[float, float]] = []
+        self.tip_committed: Optional[float] = None
+        self.tip_display:   Optional[float] = None
+        self.tip_start:     float           = 0.0
+        self.tip_t0:        float           = 0.0
+        self.pending_values:      List[float] = []
+        self.last_data_fn_result: List[float] = []
+ 
+class AnimatedGraph:
+ 
+    def __init__(self, defn: GraphDef) -> None:
+        self.defn   = defn
+        self.hidden = defn.hidden
+        self._series: List[_SeriesState] = [_SeriesState() for _ in defn.series]
+        self._range_lo_tgt:   float = defn.value_range[0]
+        self._range_hi_tgt:   float = defn.value_range[1]
+        self._range_lo:       float = defn.value_range[0]
+        self._range_hi:       float = defn.value_range[1]
+        self._range_lo_start: float = defn.value_range[0]
+        self._range_hi_start: float = defn.value_range[1]
+        self._range_ease_t0:  float = 0.0
+        self._range_easing:   bool  = False
+        self._last_update_time: float = 0.0
+ 
+    def _screen_rect(self, ww: int, wh: int) -> Tuple[float, float, float, float]:
+        d  = self.defn
+        x1 = d.p1.x * ww + d.px1.x
+        y1 = d.p1.y * wh + d.px1.y
+        x2 = d.p2.x * ww + d.px2.x
+        y2 = d.p2.y * wh + d.px2.y
+        return x1, y1, x2 - x1, y2 - y1
+ 
+    def _time_to_x(self, abs_t: float, now: float, left: float, width: float) -> float:
+        return left + (1.0 - (now - abs_t) / self.defn.max_time) * width
+ 
+    def _value_to_y(self, value: float, top: float, height: float, lo: float, hi: float) -> float:
+        ratio = (value - lo) / (hi - lo) if hi != lo else 0.5
+        return top + height * (1.0 - max(0.0, min(1.0, ratio)))
+ 
+ 
+    def _tip_display_value(self, st: _SeriesState, now: float) -> Optional[float]:
+        if st.tip_committed is None:
+            return None
+        if st.tip_display is None:
+            return st.tip_committed
+        elapsed = now - st.tip_t0
+        dur     = self.defn.ease_dur
+        if dur <= 0.0 or elapsed >= dur:
+            return st.tip_committed
+        v = _ease(elapsed / dur, self.defn.ease_type)
+        return st.tip_start + (st.tip_committed - st.tip_start) * v
+ 
+    def _push_value(self, st: _SeriesState, value: float, now: float) -> None:
+        if st.tip_committed is None:
+            st.tip_committed = value
+            st.tip_display   = value
+            st.tip_start     = value
+            st.tip_t0        = now
+            st.waypoints.append((now, value))
+            return
+ 
+        cur = self._tip_display_value(st, now)
+        st.tip_start     = cur if cur is not None else st.tip_committed
+        st.tip_display   = st.tip_start
+        st.tip_committed = value
+        st.tip_t0        = now
+ 
+        st.waypoints.append((now, value))
+ 
+        self._prune(st, now)
+ 
+    def _prune(self, st: _SeriesState, now: float) -> None:
+        cutoff  = now - self.defn.max_time
+        outside = [i for i, (t, _) in enumerate(st.waypoints) if t < cutoff]
+        if len(outside) > 1:
+            st.waypoints = st.waypoints[outside[-1]:]
+ 
+    def _step_value_at_time(self, st: _SeriesState,
+                             query_t: float, now: float) -> float:
+        if st.tip_committed is None:
+            return 0.0
+        wps = st.waypoints
+        if not wps:
+            return st.tip_committed
+        if query_t >= wps[-1][0]:
+            return st.tip_committed
+        if query_t <= wps[0][0]:
+            return wps[0][1]
+        for i in range(len(wps) - 1):
+            if wps[i][0] <= query_t < wps[i + 1][0]:
+                return wps[i][1]
+ 
+        return wps[-1][1]
+ 
+    def _step_value_at_x(self, st: _SeriesState, now: float, rx: float, rw: float, x: float) -> float:
+        if rw <= 0:
+            return 0.0
+        query_t = now - self.defn.max_time * (1.0 - (x - rx) / rw)
+        return max(0.0, self._step_value_at_time(st, query_t, now))
+ 
+    def _compute_target_range(self, now: float) -> Tuple[float, float]: # Dynamic Range = True
+        d            = self.defn
+        base_lo, base_hi = d.value_range
+        step         = d.dynamic_scale
+ 
+        if d.stack:
+            all_times: set = {now}
+            for st in self._series:
+                for abs_t, _ in st.waypoints:
+                    all_times.add(abs_t)
+            sums = [
+                sum(max(0.0, self._step_value_at_time(st, t, now))
+                    for st in self._series)
+                for t in all_times
+            ]
+            raw_lo = min(sums) if sums else base_lo
+            raw_hi = max(sums) if sums else base_hi
+        else:
+            values: List[float] = []
+            for st in self._series:
+                values.extend(v for _, v in st.waypoints)
+                if st.tip_committed is not None:
+                    values.append(st.tip_committed)
+            raw_lo = min(values) if values else base_lo
+            raw_hi = max(values) if values else base_hi
+ 
+        if step > 0:
+            new_lo = _math.floor(raw_lo / step) * step
+            new_hi = _math.ceil(raw_hi  / step) * step
+        else:
+            new_lo, new_hi = raw_lo, raw_hi
+ 
+        return (min(new_lo, base_lo), max(new_hi, base_hi))
+ 
+    def _update_dynamic_range(self, now: float) -> None:
+        lo, hi = self._compute_target_range(now)
+        if lo == self._range_lo_tgt and hi == self._range_hi_tgt:
+            return
+        cur_lo, cur_hi       = self._effective_range_eased(now)
+        self._range_lo_start = cur_lo
+        self._range_hi_start = cur_hi
+        self._range_lo_tgt   = lo
+        self._range_hi_tgt   = hi
+        self._range_ease_t0  = now
+        self._range_easing   = True
+ 
+    def _effective_range_eased(self, now: float) -> Tuple[float, float]:
+        if self.defn.dynamic_scale == 0.0:
+            return self.defn.value_range
+        if not self._range_easing:
+            return (self._range_lo, self._range_hi)
+        elapsed = now - self._range_ease_t0
+        dur     = self.defn.ease_dur
+        if dur <= 0.0 or elapsed >= dur:
+            self._range_lo     = self._range_lo_tgt
+            self._range_hi     = self._range_hi_tgt
+            self._range_easing = False
+            return (self._range_lo, self._range_hi)
+        v  = _ease(elapsed / dur, self.defn.ease_type)
+        lo = self._range_lo_start + (self._range_lo_tgt - self._range_lo_start) * v
+        hi = self._range_hi_start + (self._range_hi_tgt - self._range_hi_start) * v
+        self._range_lo = lo
+        self._range_hi = hi
+        return (lo, hi)
+ 
+    def _build_pts(self, st: _SeriesState, now: float, rx: float, ry: float, rw: float, rh: float, lo: float, hi: float) -> List[QPointF]:
+        if st.tip_committed is None:
+            return []
+ 
+        cutoff = now - self.defn.max_time
+ 
+        def to_pt(abs_t: float, val: float) -> QPointF:
+            return QPointF(self._time_to_x(abs_t, now, rx, rw), self._value_to_y(val, ry, rh, lo, hi))
+ 
+        wps = st.waypoints
+        first_inside = next((i for i, (t, _) in enumerate(wps) if t >= cutoff), len(wps))
+ 
+        pts: List[QPointF] = []
+ 
+        if first_inside > 0:
+            anchor_t, anchor_v = wps[first_inside - 1]
+            pts.append(to_pt(anchor_t, anchor_v))
+
+        for abs_t, val in wps[first_inside:]:
+            pts.append(to_pt(abs_t, val))
+ 
+        tip_val = self._tip_display_value(st, now)
+        if tip_val is None:
+            tip_val = st.tip_committed
+        pts.append(QPointF(rx + rw, self._value_to_y(tip_val, ry, rh, lo, hi)))
+ 
+        return pts
+ 
+    def _collect_x_boundaries(self, now: float,
+                                rx: float, rw: float) -> List[float]:
+        xs: set = {rx, rx + rw}
+        for st in self._series:
+            for abs_t, _ in st.waypoints:
+                xs.add(self._time_to_x(abs_t, now, rx, rw))
+        return sorted(xs)
+ 
+    def _build_stacked_pts(self, now: float, rx: float, ry: float, rw: float, rh: float, lo: float, hi: float) -> List[List[QPointF]]:
+        xs       = self._collect_x_boundaries(now, rx, rw)
+        n_ser    = len(self._series)
+        bottom_y = ry + rh
+        span     = hi - lo
+        ppu      = rh / span if span != 0 else 0.0
+ 
+        tops: List[List[float]] = [[] for _ in range(n_ser)]
+        for x in xs:
+            cum_px = 0.0
+            for si, st in enumerate(self._series):
+                v = self._step_value_at_x(st, now, rx, rw, x)
+                cum_px += v * ppu
+                tops[si].append(bottom_y - cum_px)
+ 
+        return [
+            [QPointF(xs[xi], tops[si][xi]) for xi in range(len(xs))]
+            for si in range(n_ser)
+        ]
+ 
+    def tick(self, now: float) -> None:
+        d = self.defn
+        for st in self._series:
+            self._prune(st, now)
+        if d.dynamic_scale != 0.0:
+            self._update_dynamic_range(now)
+        if d.update_interval > 0.0 and now - self._last_update_time >= d.update_interval:
+            self._last_update_time = now
+            for sd, st in zip(d.series, self._series):
+                if st.pending_values:
+                    val = sum(st.pending_values) / len(st.pending_values)
+                    st.pending_values.clear()
+                elif st.tip_committed is not None:
+                    val = st.tip_committed
+                else:
+                    continue
+                self._push_value(st, val, now)
+ 
+    def _ingest(self, ctx: Any, now: float) -> None:
+        d = self.defn
+        for sd, st in zip(d.series, self._series):
+            if sd.value_fn is not None:
+                try:    raw = sd.value_fn(ctx)
+                except: raw = None
+                if raw is not None:
+                    if d.update_interval > 0.0:
+                        st.pending_values.append(float(raw))
+                    else:
+                        self._push_value(st, float(raw), now)
+            elif sd.data_fn is not None:
+                try:    samples = sd.data_fn(ctx) or []
+                except: samples = []
+                if samples != st.last_data_fn_result:
+                    if not st.last_data_fn_result and samples:
+                        n = len(samples)
+                        for i, val in enumerate(samples):
+                            fake_t = now - d.max_time * (1.0 - (i + 1) / n)
+                            st.waypoints.append((fake_t, float(val)))
+                        last = float(samples[-1])
+                        st.tip_committed = last
+                        st.tip_display   = last
+                        st.tip_start     = last
+                        st.tip_t0        = now
+                    else:
+                        new_vals = samples[len(st.last_data_fn_result):]
+                        if d.update_interval > 0.0:
+                            st.pending_values.extend(float(v) for v in new_vals)
+                        else:
+                            for val in new_vals:
+                                self._push_value(st, float(val), now)
+                    st.last_data_fn_result = list(samples)
+    
+    def _draw_labels(self, painter: QPainter, rx: float, ry: float, rw: float, rh: float) -> None:
+        show_minmax, show_steps, step_count = self.defn.range_labels
+        size_minmax, size_steps             = self.defn.label_sizes
+        d = self.defn
+        if not show_minmax and (not show_steps or step_count <= 0):
+            return
+
+        if d.dynamic_scale != 0.0:
+            lo = self._range_lo_tgt
+            hi = self._range_hi_tgt
+        else:
+            lo, hi = d.value_range
+
+        base_color = d.value_color
+
+        def _fmt(v: float) -> str:
+            if v == int(v):
+                return str(int(v))
+            mag = abs(v)
+            if mag == 0:
+                return '0'
+            decimals = max(0, 2 - int(_math.floor(_math.log10(mag)))) if mag >= 1 else 3
+            return f'{v:.{decimals}f}'.rstrip('0').rstrip('.')
+
+        def _label_color(font_size: float) -> QColor:
+            return QColor(base_color.red(), base_color.green(), base_color.blue(), 180)
+
+        def _make_font(font_size: float) -> Tuple[QFont, QFontMetrics]:
+            f = QFont()
+            f.setPointSizeF(max(0.5, font_size))
+            return f, QFontMetrics(f)
+
+        def _draw_right(text: str, font_size: float, y_center: float) -> None:
+            f, fm = _make_font(font_size)
+            x = int(rx - 4 - fm.horizontalAdvance(text))
+            y = int(y_center + fm.ascent() * 0.5 - fm.descent() * 0.5)
+            painter.setFont(f)
+            painter.setPen(_label_color(font_size))
+            painter.drawText(x, y, text)
+            painter.setPen(Qt.NoPen)
+
+        def _draw_left(text: str, font_size: float, y_center: float) -> None:
+            f, fm = _make_font(font_size)
+            x = int(rx + 4)
+            y = int(y_center + fm.ascent() * 0.5 - fm.descent() * 0.5)
+            painter.setFont(f)
+            painter.setPen(_label_color(font_size))
+            painter.drawText(x, y, text)
+            painter.setPen(Qt.NoPen)
+        if show_minmax:
+            if d.label_align == 'right':
+                _draw_right(_fmt(hi), size_minmax, ry)
+                _draw_right(_fmt(lo), size_minmax, ry + rh)
+            else:
+                _draw_left(_fmt(hi), size_minmax, ry)
+                _draw_left(_fmt(lo), size_minmax, ry + rh)
+        if show_steps and step_count > 0:
+            for i in range(1, step_count + 1):
+                ratio = i / (step_count + 1)
+                val   = lo + ratio * (hi - lo)
+                y_pos = ry + rh * (1.0 - ratio)
+                if d.label_align == 'right':
+                    _draw_right(_fmt(val), size_steps, y_pos)
+                else:
+                    _draw_left(_fmt(val), size_steps, y_pos)
+ 
+    def draw(self, painter: QPainter, widget_w: int, widget_h: int, ctx: Any = None, cam_w: int = 1920, cam_h: int = 1080) -> None:
+        if self.hidden:
+            return
+ 
+        now = time.monotonic()
+        d   = self.defn
+ 
+        self._ingest(ctx, now)
+ 
+        rx, ry, rw, rh = self._screen_rect(widget_w, widget_h)
+        if rw <= 0 or rh <= 0:
+            return
+ 
+        lo, hi   = self._effective_range_eased(now)
+        bottom_y = ry + rh
+ 
+        if d.stack:
+            all_pts = self._build_stacked_pts(now, rx, ry, rw, rh, lo, hi)
+        else:
+            all_pts = [self._build_pts(st, now, rx, ry, rw, rh, lo, hi) for st in self._series]
+ 
+        painter.save()
+        painter.setClipRect(int(rx), int(ry), int(rw + 1), int(rh + 1))
+ 
+        for si, (sd, st) in enumerate(zip(d.series, self._series)):
+            pts = all_pts[si]
+            if not pts:
+                continue
+ 
+            if sd.fill_opacity > 0.0:
+                fill_color = QColor(sd.color)
+                fill_color.setAlphaF(sd.fill_opacity)
+                fill_poly  = QPolygonF()
+                if d.stack and si > 0:
+                    for pt in pts:
+                        fill_poly.append(pt)
+                    for pt in reversed(all_pts[si - 1]):
+                        fill_poly.append(pt)
+                else:
+                    fill_poly.append(QPointF(pts[0].x(), bottom_y))
+                    for pt in pts:
+                        fill_poly.append(pt)
+                    fill_poly.append(QPointF(pts[-1].x(), bottom_y))
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(fill_color)
+                painter.drawPolygon(fill_poly)
+                painter.setBrush(Qt.NoBrush)
+ 
+            if sd.line_width > 0.0:
+                pen = QPen(sd.color)
+                pen.setWidthF(sd.line_width)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                for i in range(len(pts) - 1):
+                    painter.drawLine(pts[i], pts[i + 1])
+                painter.setPen(Qt.NoPen)
+ 
+        painter.restore()
+        self._draw_labels(painter, rx, ry, rw, rh)
+
+@dataclass
+class PieDef:
+    p1:         P
+    p2:         P
+    px1:        P                    = field(default_factory=P)
+    px2:        P                    = field(default_factory=P)
+    names:      List[str]            = field(default_factory=list)
+    value_fns:  List[Callable[[Any], Optional[float]]] = field(default_factory=list)
+    colors:     List[QColor]         = field(default_factory=list)
+    border_width:  float             = 0.0
+    fill_opacity:  float             = 1.0
+    direction:  str                  = 'horizontal'   # 'horizontal' or 'vertical'
+    label_size: float                = 9.0
+    name_size:  float                = 9.0
+    ease_dur:   float                = 0.3
+    ease_type:  QEasingCurve.Type    = QEasingCurve.OutQuint
+    hidden:     bool                 = False
+
+class AnimatedPie:
+    def __init__(self, defn: PieDef) -> None:
+        self.defn   = defn
+        self.hidden = defn.hidden
+        
+        n           = len(defn.names)
+        self._raw_values:  List[Optional[float]] = [None] * n
+        self._cur_ratios:  List[float]           = [1.0 / n] * n
+        self._tgt_ratios:  List[float]           = [1.0 / n] * n
+        self._start_ratios: List[float]          = [1.0 / n] * n
+        self._ease_t0:      float                = 0.0
+        self._easing:       bool                 = False
+
+    def _screen_rect(self, ww: int, wh: int) -> Tuple[float, float, float, float]:
+        d  = self.defn
+        x1 = d.p1.x * ww + d.px1.x
+        y1 = d.p1.y * wh + d.px1.y
+        x2 = d.p2.x * ww + d.px2.x
+        y2 = d.p2.y * wh + d.px2.y
+        return x1, y1, x2 - x1, y2 - y1
+
+    def _recompute_targets(self) -> None:
+        vals   = [v for v in self._raw_values if v is not None and v > 0]
+        n      = len(self.defn.names)
+        total  = sum(v for v in self._raw_values if v is not None and v > 0)
+
+        if total <= 0:
+            new_tgt = [1.0 / n] * n
+        else:
+            new_tgt = []
+            for v in self._raw_values:
+                if v is not None and v > 0:
+                    new_tgt.append(v / total)
+                else:
+                    new_tgt.append(0.0)
+
+        if new_tgt == self._tgt_ratios:
+            return
+
+        now = time.monotonic()
+        if self._easing:
+            elapsed = now - self._ease_t0
+            dur     = self.defn.ease_dur
+            t       = min(1.0, elapsed / dur) if dur > 0 else 1.0
+            v       = _ease(t, self.defn.ease_type)
+            self._start_ratios = [s + (tgt - s) * v for s, tgt in zip(self._start_ratios, self._tgt_ratios)]
+        else:
+            self._start_ratios = list(self._cur_ratios)
+
+        self._tgt_ratios = new_tgt
+        self._ease_t0    = now
+        self._easing     = True
+
+    def update(self, ctx: Any) -> None:
+        changed = False
+        for i, fn in enumerate(self.defn.value_fns):
+            try:
+                raw = fn(ctx)
+            except Exception:
+                raw = None
+            if raw != self._raw_values[i]:
+                self._raw_values[i] = raw
+                changed = True
+        if changed:
+            self._recompute_targets()
+
+    def _advance_ease(self, now: float) -> None:
+        if not self._easing:
+            return
+        elapsed = now - self._ease_t0
+        dur     = self.defn.ease_dur
+        if dur <= 0.0 or elapsed >= dur:
+            self._cur_ratios = list(self._tgt_ratios)
+            self._easing     = False
+            return
+        t = elapsed / dur
+        v = _ease(t, self.defn.ease_type)
+        self._cur_ratios = [s + (tgt - s) * v for s, tgt in zip(self._start_ratios, self._tgt_ratios)]
+
+    def draw(self, painter: QPainter, widget_w: int, widget_h: int, cam_w: int = 1920, cam_h: int = 1080) -> None:
+        if self.hidden:
+            return
+
+        now = time.monotonic()
+        self._advance_ease(now)
+
+        d = self.defn
+        rx, ry, rw, rh = self._screen_rect(widget_w, widget_h)
+        if rw <= 0 or rh <= 0:
+            return
+
+        n          = len(d.names)
+        ratios     = self._cur_ratios
+        horizontal = d.direction == 'horizontal'
+        total_span = rw if horizontal else rh
+
+        cursor = 0.0
+        segments: List[Tuple[float, float, float, float, int]] = []
+        for i, ratio in enumerate(ratios):
+            span = total_span * ratio
+            if horizontal:
+                segments.append((rx + cursor, ry, span, rh, i))
+            else:
+                segments.append((rx, ry + cursor, rw, span, i))
+            cursor += span
+
+        painter.setPen(Qt.NoPen)
+        for x, y, w, h, i in segments:
+            if w < 0.5 or h < 0.5:
+                continue
+            color = QColor(d.colors[i] if i < len(d.colors) else QColor(255, 255, 255))
+            color.setAlphaF(d.fill_opacity)
+            painter.setBrush(color)
+            painter.drawRect(QRectF(x, y, w, h))
+        painter.setBrush(Qt.NoBrush)
+
+        pct_font = QFont()
+        pct_font.setPointSizeF(max(0.5, d.label_size))
+        pct_fm = QFontMetrics(pct_font)
+        painter.setFont(pct_font)
+
+        for x, y, w, h, i in segments:
+            if w < 0.5 or h < 0.5:
+                continue
+            pct   = ratios[i] * 100.0
+            label = f'{pct:.1f}%'
+            tw    = pct_fm.horizontalAdvance(label)
+            th    = pct_fm.height()
+
+            fits  = (tw + 8 <= w) if horizontal else (th + 4 <= h)
+            if not fits:
+                continue
+
+            lx = int(x + (w - tw) / 2)
+            ly = int(y + h / 2 + pct_fm.ascent() * 0.5 - pct_fm.descent() * 0.5)
+
+            color = d.colors[i] if i < len(d.colors) else QColor(255, 255, 255)
+            painter.setPen(color)
+            painter.drawText(lx, ly, label)
+
+        name_font = QFont()
+        name_font.setPointSizeF(max(0.5, d.name_size))
+        name_fm = QFontMetrics(name_font)
+        painter.setFont(name_font)
+
+        for x, y, w, h, i in segments:
+            if w < 0.5 or h < 0.5:
+                continue
+            name = d.names[i] if i < len(d.names) else ''
+            if not name:
+                continue
+
+            color = d.colors[i] if i < len(d.colors) else QColor(255, 255, 255)
+            painter.setPen(color)
+
+            nx = int(x)
+            ny = int(y - name_fm.descent() - 2)
+            painter.drawText(nx, ny, name)
+
+        painter.setPen(Qt.NoPen)
+
+        if d.border_width > 0.0:
+            half = d.border_width / 2.0
+            for x, y, w, h, i in segments:
+                if w < 0.5 or h < 0.5:
+                    continue
+                color = d.colors[i] if i < len(d.colors) else QColor(255, 255, 255)
+                pen = QPen(color)
+                pen.setWidthF(d.border_width * 2.0)
+                pen.setJoinStyle(Qt.MiterJoin)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.save()
+                painter.setClipRect(QRectF(x, y, w, h))
+                painter.drawRect(QRectF(x, y, w, h))
+                painter.restore()
+            painter.setPen(Qt.NoPen)
+
+
+@dataclass
+class WindowDef:
+    p1:  P
+    p2:  P
+    px1: P = field(default_factory=P)
+    px2: P = field(default_factory=P)
+
+class AnimatedWindow:
+
+    def __init__(self, defn: WindowDef,
+                 polygon_defs: List[PolygonDef]  = None,
+                 text_defs:    List[TextDef]     = None,
+                 graph_defs:   List[GraphDef]    = None,
+                 pie_defs:     List[PieDef]      = None):
+        self.defn      = defn
+        self._polygons = [AnimatedPolygon(d) for d in (polygon_defs or [])]
+        self._texts    = [AnimatedText(d)    for d in (text_defs    or [])]
+        self._graphs   = [AnimatedGraph(d)   for d in (graph_defs   or [])]
+        self._pies     = [AnimatedPie(d)     for d in (pie_defs     or [])]
+
+    def _screen_rect(self, ww: int, wh: int) -> Tuple[float, float, float, float]:
+        d  = self.defn
+        x1 = d.p1.x * ww + d.px1.x
+        y1 = d.p1.y * wh + d.px1.y
+        x2 = d.p2.x * ww + d.px2.x
+        y2 = d.p2.y * wh + d.px2.y
+        return x1, y1, x2 - x1, y2 - y1
+
+    def tick(self, now: float) -> None:
+        for g in self._graphs:
+            g.tick(now)
+
+    def update(self, ctx: Any) -> None:
+        for pie in self._pies:
+            pie.update(ctx)
+
+    def draw(self, painter: QPainter, widget_w: int, widget_h: int, ctx: Any = None, cam_w: int = 1920, cam_h: int = 1080) -> None:
+        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+        if ww <= 0 or wh <= 0:
+            return
+
+        painter.save()
+        painter.translate(wx, wy)
+        painter.setClipRect(QRectF(0, 0, ww, wh))
+
+        for poly in self._polygons:
+            poly.draw(painter, ww, wh, cam_w, cam_h)
+
+        for text in self._texts:
+            if text.hidden:
+                continue
+            label = text.resolve_text(ctx)
+            if not label:
+                continue
+            font = text.build_font()
+            painter.setFont(font)
+            painter.setPen(text.cur_color)
+            dx, dy = text.resolve_pos(ww, wh, cam_w, cam_h, label, font)
+            painter.drawText(dx, dy, label)
+            painter.setPen(Qt.NoPen)
+
+        for g in self._graphs:
+            g.draw(painter, ww, wh, ctx, cam_w, cam_h)
+
+        for pie in self._pies:
+            pie.draw(painter, ww, wh, cam_w, cam_h)
+
+        painter.restore()
