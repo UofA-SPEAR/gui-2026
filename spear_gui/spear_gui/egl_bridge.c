@@ -75,7 +75,7 @@ wrap_gst_gl_context(PyObject *self, PyObject *args)
         GST_GL_DISPLAY(gst_display),
         (guintptr)egl_context,
         GST_GL_PLATFORM_EGL,
-        GST_GL_API_OPENGL3
+        GST_GL_API_OPENGL3 | GST_GL_API_OPENGL
     );
     if (!gst_gl_ctx) {
         gst_object_unref(gst_display);
@@ -83,7 +83,13 @@ wrap_gst_gl_context(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    /* Build the two GstContext objects GStreamer expects from NEED_CONTEXT */
+    /* Build the three GstContext objects GStreamer expects.
+     * gst.gl.display_context : the EGL display
+     * gst.gl.app_context     : the wrapped application GL context
+     * gst.gl.local_context   : required by GStreamer 1.20+ for gst_gl_base_filter_find_gl_context
+     *                          on gst_pad_link; without it GStreamer creates its own context
+     *                          and texture IDs are not visible to the app context.
+     */
     GstContext *display_ctx = gst_context_new(GST_GL_DISPLAY_CONTEXT_TYPE, TRUE);
     gst_structure_set(
         gst_context_writable_structure(display_ctx),
@@ -96,13 +102,19 @@ wrap_gst_gl_context(PyObject *self, PyObject *args)
         "context", GST_TYPE_GL_CONTEXT, gst_gl_ctx, NULL
     );
 
+    GstContext *local_ctx = gst_context_new("gst.gl.local_context", TRUE);
+    gst_structure_set(
+        gst_context_writable_structure(local_ctx),
+        "context", GST_TYPE_GL_CONTEXT, gst_gl_ctx, NULL
+    );
+
     gst_object_unref(gst_display);
     gst_object_unref(gst_gl_ctx);
 
-    /* Return both contexts as capsules — caller sets them on the pipeline */
     PyObject *display_cap = PyCapsule_New(display_ctx, "GstContext", gst_context_capsule_destructor);
     PyObject *app_cap     = PyCapsule_New(app_ctx,     "GstContext", gst_context_capsule_destructor);
-    return Py_BuildValue("(OO)", display_cap, app_cap);
+    PyObject *local_cap   = PyCapsule_New(local_ctx,   "GstContext", gst_context_capsule_destructor);
+    return Py_BuildValue("(OOO)", display_cap, app_cap, local_cap);
 }
 
 /* ── set_pipeline_context(pipeline_ptr, capsule) ────────────────────────────
@@ -121,11 +133,10 @@ wrap_gst_gl_context(PyObject *self, PyObject *args)
 static PyObject *
 set_pipeline_contexts(PyObject *self, PyObject *args)
 {
-    PyObject *pipeline_cap, *display_cap, *app_cap;
-    if (!PyArg_ParseTuple(args, "OOO", &pipeline_cap, &display_cap, &app_cap))
+    PyObject *pipeline_cap, *display_cap, *app_cap, *local_cap;
+    if (!PyArg_ParseTuple(args, "OOOO", &pipeline_cap, &display_cap, &app_cap, &local_cap))
         return NULL;
 
-    /* pipeline.__gpointer__ is a PyCapsule in this version of PyGObject */
     GstElement *pipeline = (GstElement *)PyCapsule_GetPointer(pipeline_cap, NULL);
     if (!pipeline) {
         PyErr_SetString(PyExc_ValueError, "Invalid pipeline capsule");
@@ -134,14 +145,16 @@ set_pipeline_contexts(PyObject *self, PyObject *args)
 
     GstContext *display_ctx = (GstContext *)PyCapsule_GetPointer(display_cap, "GstContext");
     GstContext *app_ctx     = (GstContext *)PyCapsule_GetPointer(app_cap,     "GstContext");
+    GstContext *local_ctx   = (GstContext *)PyCapsule_GetPointer(local_cap,   "GstContext");
 
-    if (!display_ctx || !app_ctx) {
+    if (!display_ctx || !app_ctx || !local_ctx) {
         PyErr_SetString(PyExc_ValueError, "Invalid GstContext capsule");
         return NULL;
     }
 
     gst_element_set_context(pipeline, display_ctx);
     gst_element_set_context(pipeline, app_ctx);
+    gst_element_set_context(pipeline, local_ctx);
 
     Py_RETURN_NONE;
 }
@@ -156,13 +169,13 @@ set_pipeline_contexts(PyObject *self, PyObject *args)
 static PyObject *
 get_gl_texture_id(PyObject *self, PyObject *args)
 {
-    PyObject *buf_cap;
-    if (!PyArg_ParseTuple(args, "O", &buf_cap))
+    unsigned long long buf_int;
+    if (!PyArg_ParseTuple(args, "K", &buf_int))
         return NULL;
 
-    GstBuffer *buf = (GstBuffer *)PyCapsule_GetPointer(buf_cap, NULL);
+    GstBuffer *buf = (GstBuffer *)(uintptr_t)buf_int;
     if (!buf) {
-        PyErr_SetString(PyExc_ValueError, "Invalid buffer capsule");
+        PyErr_SetString(PyExc_ValueError, "NULL buffer pointer");
         return NULL;
     }
 
@@ -186,7 +199,7 @@ static PyMethodDef EglBridgeMethods[] = {
     {"get_egl_handles",       get_egl_handles,       METH_NOARGS,  "→ (display_ptr, context_ptr)"},
     {"wrap_gst_gl_context",   wrap_gst_gl_context,   METH_VARARGS, "(display_ptr, context_ptr) → (display_capsule, app_capsule)"},
     {"set_pipeline_contexts", set_pipeline_contexts, METH_VARARGS, "(pipeline_capsule, display_capsule, app_capsule) → None"},
-    {"get_gl_texture_id",     get_gl_texture_id,     METH_VARARGS, "(buffer_capsule) → texture_id"},
+    {"get_gl_texture_id",     get_gl_texture_id,     METH_VARARGS, "(buffer_ptr_int) → texture_id"},
     {NULL, NULL, 0, NULL}
 };
 

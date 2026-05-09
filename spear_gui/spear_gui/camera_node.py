@@ -12,10 +12,12 @@ from rclpy.node import Node
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtCore import QThread, Signal, QTimer, QEasingCurve, Qt, QObject, QEvent, qInstallMessageHandler
-from PySide6.QtGui import QColor, QPainter, QFontDatabase, QFont, QPen, QFontMetrics, QImage, QPixmap, QSurfaceFormat
+from PySide6.QtGui import QColor, QPainter, QFontDatabase, QFont, QPen, QFontMetrics, QImage, QPixmap, QSurfaceFormat, QVector4D
 from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtOpenGL import QOpenGLShaderProgram, QOpenGLShader, QOpenGLTexture
-from OpenGL import GL
+from PySide6.QtOpenGL import QOpenGLShaderProgram, QOpenGLShader, QOpenGLVertexArrayObject
+# PyOpenGL is used only as a source of GL constants (GL_COLOR_BUFFER_BIT etc).
+# All actual GL *calls* go through Qt's context().functions() to avoid context conflicts.
+import OpenGL.GL as GL
 from std_msgs.msg import String
 from collections import deque
 from spear_gui.gui_vars import CAMERA_LAYOUT
@@ -23,7 +25,21 @@ from spear_gui.overlay_system import SettingsOverlay, CameraSelectOverlay, Overl
 from spear_gui.overlay_defs import SETTING_DEFS, SETTING_TEXT_DEFS, SETTING_SLIDER_DEFS, SETTING_BUTTON_DEFS
 from spear_gui.egl_bridge import get_egl_handles, wrap_gst_gl_context, set_pipeline_contexts, get_gl_texture_id
 
-qInstallMessageHandler(lambda mode, ctx, msg: None if 'painter' in msg.lower() and 'not active' in msg.lower() else print(msg))
+import ctypes as _ctypes
+
+class _PyGObject(_ctypes.Structure):
+    _fields_ = [('ob_refcnt', _ctypes.c_ssize_t),
+                ('ob_type',   _ctypes.c_void_p),
+                ('obj',       _ctypes.c_void_p)]
+
+_libgst = _ctypes.CDLL('libgstreamer-1.0.so.0')
+_libgst.gst_sample_get_buffer.restype  = _ctypes.c_void_p
+_libgst.gst_sample_get_buffer.argtypes = [_ctypes.c_void_p]
+
+def _sample_to_buffer_ptr(sample) -> int:
+    """Extract GstBuffer* from a PyGObject-wrapped GstSample."""
+    sample_ptr = _PyGObject.from_address(id(sample)).obj
+    return _libgst.gst_sample_get_buffer(sample_ptr)
 
 Gst.init(None)
 _glib_loop   = GLib.MainLoop()
@@ -34,22 +50,16 @@ _glib_thread = threading.Thread(target=_glib_loop.run, daemon=True)
 
 _VERT = """
 #version 330 core
-const vec2 POSITIONS[4] = vec2[](
-    vec2(-1.0,  1.0),
-    vec2(-1.0, -1.0),
-    vec2( 1.0,  1.0),
-    vec2( 1.0, -1.0)
-);
-const vec2 TEXCOORDS[4] = vec2[](
-    vec2(0.0, 0.0),
-    vec2(0.0, 1.0),
-    vec2(1.0, 0.0),
-    vec2(1.0, 1.0)
-);
 out vec2 vTex;
 void main() {
-    vTex        = TEXCOORDS[gl_VertexID];
-    gl_Position = vec4(POSITIONS[gl_VertexID], 0.0, 1.0);
+    vec2 pos[4] = vec2[](
+        vec2(-1.0,  1.0),
+        vec2(-1.0, -1.0),
+        vec2( 1.0,  1.0),
+        vec2( 1.0, -1.0)
+    );
+    vTex        = pos[gl_VertexID] * 0.5 + 0.5;
+    gl_Position = vec4(pos[gl_VertexID], 0.0, 1.0);
 }
 """
 
@@ -58,18 +68,19 @@ _FRAG = """
 in  vec2      vTex;
 out vec4      fragColor;
 uniform sampler2D uTex;
-uniform vec2      uScale;   // (render_w/widget_w, render_h/widget_h)
-uniform vec2      uOffset;  // (ox/widget_w, oy/widget_h) in NDC terms
 void main() {
-    // Map fragment tex-coord through cover-fill offset/scale
-    vec2 t = vTex * uScale + uOffset;
-    if (t.x < 0.0 || t.x > 1.0 || t.y < 0.0 || t.y > 1.0) {
-        fragColor = vec4(0.051, 0.051, 0.051, 1.0); // #0d0d0d letterbox
+    vec4 c = texture(uTex, vTex);
+    // If texture samples as black, show red so we know the shader IS running
+    // but the texture content is wrong (not a shader/draw issue)
+    if (c.r < 0.01 && c.g < 0.01 && c.b < 0.01) {
+        fragColor = vec4(1.0, 0.0, 0.0, 1.0);
     } else {
-        fragColor = texture(uTex, t);
+        fragColor = c;
     }
 }
 """
+
+
 
 
 class KeyEventFilter(QObject):
@@ -112,8 +123,8 @@ class GStreamerThread(QThread):
         bus.add_signal_watch()
         bus.connect("message", self._on_message)
 
-    def set_gl_contexts(self, display_capsule, app_capsule):
-        self._gst_contexts = (display_capsule, app_capsule)
+    def set_gl_contexts(self, display_capsule, app_capsule, local_capsule):
+        self._gst_contexts = (display_capsule, app_capsule, local_capsule)
 
     def _on_new_sample(self, sink):
         sample = sink.emit("pull-sample")
@@ -126,8 +137,7 @@ class GStreamerThread(QThread):
         w    = s.get_int("width")[1]
         h    = s.get_int("height")[1]
 
-        # Extract GL texture ID via C bridge — zero CPU pixel copy
-        buf_ptr = buf.__gpointer__
+        buf_ptr = _sample_to_buffer_ptr(sample)
         try:
             tex_id = get_gl_texture_id(buf_ptr)
         except RuntimeError as e:
@@ -144,12 +154,14 @@ class GStreamerThread(QThread):
     def _on_message(self, bus, message):
         t = message.type
         if t == Gst.MessageType.NEED_CONTEXT:
-            # Provide our wrapped EGL context to GStreamer so glupload can
-            # share the same EGL display/context as Qt
             if self._gst_contexts is not None:
-                ctx_type = message.parse_context_type()
+                result = message.parse_context_type()
+                # parse_context_type() returns (bool, context_type_string)
+                ctx_type = result[1] if isinstance(result, tuple) else result
                 if ctx_type in ("gst.gl.display_context", "gst.gl.app_context"):
                     set_pipeline_contexts(self.pipeline.__gpointer__, *self._gst_contexts)
+            else:
+                print(f"[GST] NEED_CONTEXT but _gst_contexts is None!", file=sys.stderr)
         elif t == Gst.MessageType.ERROR:
             err, _ = message.parse_error()
             self.error_occured.emit(str(err))
@@ -159,6 +171,21 @@ class GStreamerThread(QThread):
         return True
 
     def run(self):
+        # Set pipeline to READY first, then pre-inject GL contexts before
+        # PLAYING. The async NEED_CONTEXT handler fires too late — GStreamer
+        # has already created its own context by then, so texture IDs end up
+        # in a different context namespace that Qt can't see.
+        ret = self.pipeline.set_state(Gst.State.READY)
+        if ret == Gst.StateChangeReturn.FAILURE:
+            self.error_occured.emit("Failed to set pipeline to READY")
+            return
+
+        if self._gst_contexts is not None:
+            try:
+                set_pipeline_contexts(self.pipeline.__gpointer__, *self._gst_contexts)
+                print("[GST] GL contexts pre-set on pipeline OK", file=sys.stderr)
+            except Exception as e:
+                print(f"[GST] Failed to pre-set GL contexts: {e}", file=sys.stderr)
         ret = self.pipeline.set_state(Gst.State.PLAYING)
         if ret == Gst.StateChangeReturn.FAILURE:
             self.error_occured.emit("Failed to set pipeline to PLAYING")
@@ -177,89 +204,84 @@ class GStreamerVideoWidget(QOpenGLWidget):
     clicked = Signal()
 
     def __init__(self, pipeline_str, camera_width=1920, camera_height=1080, parent=None):
-        fmt = QSurfaceFormat()
-        fmt.setVersion(3, 3)
-        fmt.setProfile(QSurfaceFormat.CoreProfile)
-
         super().__init__(parent)
-        self.setFormat(fmt)
 
-        self.pipeline_str  = pipeline_str
-        self.camera_width  = camera_width
-        self.camera_height = camera_height
-        self.thread        = None
-
-        self._shader       = None
-        self._vao          = None
-        self._tex_id       = 0
-        self._tex_w        = camera_width
-        self._tex_h        = camera_height
+        self.pipeline_str   = pipeline_str
+        self.camera_width   = camera_width
+        self.camera_height  = camera_height
+        self.thread         = None
+        self._shader        = None
+        self._vao           = None
+        self._tex_id        = 0
+        self._tex_w         = camera_width
+        self._tex_h         = camera_height
         self._paint_pending = False
 
-    # ── GL lifecycle ──────────────────────────────────────────────────────────
-
     def initializeGL(self):
-        # Qt's EGL context is now current — grab handles and wrap for GStreamer
+        # Get the already-initialized functions object from the current context.
+        # This is the correct PySide6 pattern — no inheritance, no manual init.
+        f = self.context().functions()
+
         display_ptr, context_ptr = get_egl_handles()
-        display_cap, app_cap     = wrap_gst_gl_context(display_ptr, context_ptr)
+        display_cap, app_cap, local_cap = wrap_gst_gl_context(display_ptr, context_ptr)
 
         self._shader = QOpenGLShaderProgram(self)
         self._shader.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Vertex,   _VERT)
         self._shader.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Fragment, _FRAG)
         self._shader.link()
 
-        self._vao = GL.glGenVertexArrays(1)
-        GL.glBindVertexArray(self._vao)
-        GL.glBindVertexArray(0)
+        self._vao = QOpenGLVertexArrayObject(self)
+        self._vao.create()
 
-        GL.glClearColor(0.051, 0.051, 0.051, 1.0)
+        f.glClearColor(0.051, 0.051, 0.051, 1.0)
 
-        # Start the pipeline now that we have a valid GL context
         self.thread = GStreamerThread(self.pipeline_str, parent=self)
-        self.thread.set_gl_contexts(display_cap, app_cap)
+        self.thread.set_gl_contexts(display_cap, app_cap, local_cap)
         self.thread.error_occured.connect(lambda msg: print(f"GST error: {msg}", file=sys.stderr))
         self.thread.new_texture.connect(self._on_new_texture, Qt.QueuedConnection)
         self.thread.start()
 
     def paintGL(self):
         self._paint_pending = False
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        f = self.context().functions()
+        f.glClear(GL.GL_COLOR_BUFFER_BIT)
 
         if not self._tex_id or not self._shader:
             return
 
-        w, h   = self.width(), self.height()
-        fw, fh = self._tex_w, self._tex_h
-        scale  = max(w / fw, h / fh)
-        rw, rh = fw * scale, fh * scale
-        ox     = (w - rw) / 2.0
-        oy     = (h - rh) / 2.0
+        if not hasattr(self, '_paint_count'):
+            self._paint_count = 0
+        self._paint_count += 1
+        if self._paint_count <= 3:
+            print(f"[QT] paintGL #{self._paint_count} tex_id={self._tex_id} shader_linked={self._shader.isLinked()}", file=sys.stderr)
 
-        # Convert pixel offset/scale to UV-space for the shader
-        scale_u  = rw / w
-        scale_v  = rh / h
-        offset_u = -ox / rw
-        offset_v = -oy / rh
+        w, h   = self.width(), self.height()
 
         self._shader.bind()
-        self._shader.setUniformValue("uTex",    0)
-        self._shader.setUniformValue("uScale",  scale_u,  scale_v)
-        self._shader.setUniformValue("uOffset", offset_u, offset_v)
+        self._shader.setUniformValue("uTex", 0)
 
-        GL.glActiveTexture(GL.GL_TEXTURE0)
-        GL.glBindTexture(GL.GL_TEXTURE_2D, self._tex_id)
-        GL.glBindVertexArray(self._vao)
-        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
-        GL.glBindVertexArray(0)
-        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        if self._paint_count <= 3:
+            print(f"[QT] uTex location={self._shader.uniformLocation('uTex')}", file=sys.stderr)
+
+        f.glActiveTexture(GL.GL_TEXTURE0)
+        f.glBindTexture(GL.GL_TEXTURE_2D, self._tex_id)
+        # Ensure GStreamer's GL writes are visible in Qt's context before sampling.
+        # Without this the texture may appear black on first frames.
+        f.glFinish()
+        self._vao.bind()
+        f.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        self._vao.release()
+        f.glBindTexture(GL.GL_TEXTURE_2D, 0)
         self._shader.release()
 
     def resizeGL(self, w, h):
-        GL.glViewport(0, 0, w, h)
+        self.context().functions().glViewport(0, 0, w, h)
 
     # ── Frame receiver ────────────────────────────────────────────────────────
 
     def _on_new_texture(self, tex_id: int, w: int, h: int):
+        if not self._tex_id:
+            print(f"[QT] first texture received: id={tex_id} {w}x{h} shader_linked={self._shader.isLinked() if self._shader else False}", file=sys.stderr)
         self._tex_id = tex_id
         self._tex_w  = w
         self._tex_h  = h
@@ -904,19 +926,27 @@ class CameraNode(Node):
         done = []
         for wid, tw in self._tweens.items():
             widget = tw['widget']
-            if not widget or widget.parent() is None:
+            try:
+                dead = not widget or widget.parent() is None
+            except RuntimeError:
+                dead = True
+            if dead:
                 done.append(wid)
                 continue
             tw['elapsed'] += 16
             t  = min(tw['elapsed'] / tw['duration'], 1.0)
             v  = 1.0 - (1.0 - t) ** 5
             sg = tw['start_geom']
-            widget.setGeometry(
-                int(sg.x()      + (tw['end_x'] - sg.x())      * v),
-                int(sg.y()      + (tw['end_y'] - sg.y())      * v),
-                int(sg.width()  + (tw['end_w'] - sg.width())  * v),
-                int(sg.height() + (tw['end_h'] - sg.height()) * v),
-            )
+            try:
+                widget.setGeometry(
+                    int(sg.x()      + (tw['end_x'] - sg.x())      * v),
+                    int(sg.y()      + (tw['end_y'] - sg.y())      * v),
+                    int(sg.width()  + (tw['end_w'] - sg.width())  * v),
+                    int(sg.height() + (tw['end_h'] - sg.height()) * v),
+                )
+            except RuntimeError:
+                done.append(wid)
+                continue
             if t >= 1.0:
                 done.append(wid)
         for wid in done:
@@ -957,6 +987,16 @@ def main():
     os.environ.pop("QT_QPA_PLATFORM", None)
     rclpy.init()
     node = CameraNode()
+
+    # Set the global default GL format before QApplication so the window is
+    # created as an OpenGLSurface from the start. Without this, adding the
+    # first QOpenGLWidget causes Qt to destroy and recreate the native window
+    # (RasterSurface → OpenGLSurface transition), causing a visible flicker.
+    fmt = QSurfaceFormat()
+    fmt.setVersion(3, 3)
+    fmt.setProfile(QSurfaceFormat.CoreProfile)
+    QSurfaceFormat.setDefaultFormat(fmt)
+
     app  = QApplication([])
     _glib_thread.start()
 
