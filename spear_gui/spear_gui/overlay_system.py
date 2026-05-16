@@ -1,6 +1,3 @@
-"""overlay_system.py — Overlay engine, settings panel, camera select: all classes.
-Def tables live in overlay_defs.py.
-"""
 from __future__ import annotations
 from typing import Optional, Dict, List, Tuple, Callable, Any, Union
 from dataclasses import dataclass, field
@@ -9,6 +6,9 @@ from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore    import Qt, QTimer, QElapsedTimer, QEasingCurve, QPointF, QRectF, QEvent, QObject
 from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QRegion, QPainterPath
 import time
+import collections
+import statistics
+import threading
 # ──────────────────────── Easing cache ───────────────────────────
 
 import math as _math
@@ -45,18 +45,28 @@ def _ease(t: float, curve) -> float:
 
 @dataclass(frozen=True)
 class P:
-    x: float = 0.0; y: float = 0.0
+    x: float = 0.0
+    y: float = 0.0
 
 def Rect(
-    p1: P, p2: P, px1: P = P(), px2: P = P(),
-    tl: Optional[Tuple[P, P]] = None, tr: Optional[Tuple[P, P]] = None,
-    br: Optional[Tuple[P, P]] = None, bl: Optional[Tuple[P, P]] = None,
-    fill_color:    Optional[QColor] = None, outline_color: Optional[QColor] = None,
-    line_width:    float = 0.0,
-    uniform_scale: bool  = False,
-    closed:        bool  = True,
-    phases: Optional[Dict[str, Phase]] = None,
-    h_flip = False, v_flip = False, d_flip = False
+    p1:            P                          = P(), 
+    p2:            P                          = P(), 
+    px1:           P                          = P(), 
+    px2:           P                          = P(),
+    tl:            Optional[Tuple[P, P]]      = None, 
+    tr:            Optional[Tuple[P, P]]      = None,
+    br:            Optional[Tuple[P, P]]      = None, 
+    bl:            Optional[Tuple[P, P]]      = None,
+    fill_color:    Optional[QColor]           = QColor(255, 255, 255, 255), 
+    outline_color: Optional[QColor]           = None,
+    line_width:    float                      = 0.0, 
+    draw_progress: Optional[float]            = None,
+    uniform_scale: bool                       = False,
+    closed:        bool                       = True,
+    h_flip:        bool                       = False, 
+    v_flip:        bool                       = False, 
+    d_flip:        bool                       = False,
+    phases:        Optional[Dict[str, Phase]] = None
 ) -> 'PolygonDef':
     def _split(offset):
         if offset is None:
@@ -77,6 +87,7 @@ def Rect(
         fill_color    = fill_color    or QColor(0, 0, 0, 0),
         outline_color = outline_color or QColor(0, 0, 0, 0),
         line_width    = line_width,
+        draw_progress = draw_progress,
         uniform_scale = uniform_scale,
         closed        = closed,
         phases        = phases or {},
@@ -129,6 +140,21 @@ def RectTween(
 # ──────────────────────── Polygon ────────────────────────────────
 
 @dataclass
+class PolygonDef:
+    points:        List[P]                    = None
+    phases:        Optional[Dict[str, Phase]] = None
+    closed:        bool                       = True
+    line_width:    float                      = 0.0
+    uniform_scale: bool                       = False
+    px:            Optional[List[P]]          = None
+    fill_color:    Optional[QColor]           = None
+    outline_color: Optional[QColor]           = None
+    draw_progress: float                      = 1.0
+    h_flip:        bool                       = False
+    v_flip:        bool                       = False
+    d_flip:        bool                       = False
+
+@dataclass
 class PolygonTween:
     points:        List[P]
     px:            Optional[List[P]]        = None
@@ -144,20 +170,25 @@ class PolygonTween:
     prev_phase:    Optional[str]            = None
     _blend_anchor: Optional[float]          = None
 
+
 @dataclass
-class PolygonDef:
-    points:        List[P]
-    phases:        Dict[str, Phase]
-    closed:        bool            = True
-    line_width:    float           = 0.0
-    uniform_scale: bool            = False
-    px:            Optional[List[P]] = None
-    fill_color:    Optional[QColor]  = None
-    outline_color: Optional[QColor]  = None
-    draw_progress: float             = 1.0
-    h_flip:        bool              = False
-    v_flip:        bool              = False
-    d_flip:        bool              = False
+class TextDef:
+    x:              float                          = 0.0
+    y:              float                          = 0.0
+    text:           str                            = 'Sample Text'
+    font_size:      float                          = 10.0
+    color:          QColor                         = QColor(255, 255, 255, 255)
+    phases:         Optional[Dict[str, Phase]]     = None
+    bold:           bool                           = False
+    italic:         bool                           = False
+    font_family:    str                            = 'Oxanium SemiBold'
+    h_align:        float                          = 0.5
+    v_align:        float                          = 0.5
+    uniform_scale:  bool                           = False
+    px:             float                          = 0.0
+    py:             float                          = 0.0
+    text_fn:        Optional[Callable[[Any], str]] = None
+    always_visible: bool                           = True
 
 
 # ──────────────────────── Geometry helpers ───────────────────────
@@ -173,15 +204,27 @@ def lerp_color(src, dst, v):
 
 @dataclass
 class Tween:
-    rect: Rect; start: float; dur: float; ease: QEasingCurve.Type
-    color: Optional[QColor] = None; px: Rect = field(default_factory=Rect)
+    rect: Rect; 
+    start: float; 
+    dur: float; 
+    ease: QEasingCurve.Type
+    color: Optional[QColor] = None; 
+    px: Rect = field(default_factory=Rect)
     prev_phase: Optional[str] = None
 
 @dataclass
 class TextTween:
-    x: float; y: float; start: float; dur: float; ease: QEasingCurve.Type
-    color: Optional[QColor] = None; h_align: float = 0.0; v_align: float = 0.0
-    font_size: Optional[float] = None; px: float = 0.0; py: float = 0.0
+    x: float
+    y: float
+    start: float
+    dur: float
+    ease: QEasingCurve.Type
+    color: Optional[QColor] = None
+    h_align: float = 0.0
+    v_align: float = 0.0
+    font_size: Optional[float] = None
+    px: float = 0.0
+    py: float = 0.0
     prev_phase: Optional[str] = None
     span: Tuple[float, float] = (0, 1)
 
@@ -193,6 +236,106 @@ class Reset:
 class Phase:
     tweens: list
 
+def TextBlock(
+    x:           float                      = 0.0,
+    y:           float                      = 0.0,
+    text:        str                        = 'Sample Text',
+    font_size:   float                      = 10.0,
+    color:       QColor                     = QColor(255, 255, 255, 255),
+    phases:      Optional[Dict[str, Phase]] = None,
+    bold:        bool                       = False,
+    italic:      bool                       = False,
+    font_family: str                        = '',
+    h_align:     float                      = 0.0,
+    v_align:     float                      = 0.0,
+    uniform_scale: bool                     = False,
+    px:          float                      = 0.0,
+    py:          float                      = 0.0,
+    text_fn:     Optional[Callable]         = None,
+    always_visible: bool                    = True,
+    line_offset: Optional[float]            = None,
+) -> List['TextDef']:
+
+    lines = text.split('\n')
+    n     = len(lines)
+
+    effective_line_offset = font_size if line_offset is None else line_offset
+
+    if n == 1:
+        return [TextDef(
+            x=x, y=y, text=text, font_size=font_size, color=color,
+            phases=phases, bold=bold, italic=italic,
+            font_family=font_family, h_align=h_align, v_align=v_align,
+            uniform_scale=uniform_scale, px=px, py=py,
+            text_fn=text_fn, always_visible=always_visible,
+        )]
+
+    result: List[TextDef] = []
+
+    for i, line_text in enumerate(lines):
+        line_py = py + effective_line_offset * i
+        adjusted_phases: Optional[Dict[str, Phase]] = None
+        if phases:
+            adjusted_phases = {}
+            for phase_name, phase in phases.items():
+                new_tweens = []
+                for tw in phase.tweens:
+                    if isinstance(tw, TextTween):
+                        new_tweens.append(TextTween(
+                            x          = tw.x,
+                            y          = tw.y,
+                            start      = tw.start,
+                            dur        = tw.dur,
+                            ease       = tw.ease,
+                            color      = tw.color,
+                            h_align    = tw.h_align,
+                            v_align    = tw.v_align,
+                            font_size  = tw.font_size,
+                            px         = tw.px,
+                            py         = tw.py + effective_line_offset * i,
+                            prev_phase = tw.prev_phase,
+                            span       = tw.span,
+                        ))
+                    else:
+                        new_tweens.append(tw)
+                adjusted_phases[phase_name] = Phase(new_tweens)
+
+        if text_fn is not None:
+            def _make_line_fn(line_index: int, fallback: str):
+                def _fn(ctx):
+                    try:
+                        full  = str(text_fn(ctx))
+                        parts = full.split('\n')
+                        return parts[line_index] if line_index < len(parts) else ''
+                    except Exception:
+                        return fallback
+                return _fn
+            resolved_text_fn = _make_line_fn(i, line_text)
+            resolved_text    = ''
+        else:
+            resolved_text_fn = None
+            resolved_text    = line_text
+
+        result.append(TextDef(
+            x             = x,
+            y             = y,
+            text          = resolved_text,
+            font_size     = font_size,
+            color         = color,
+            phases        = adjusted_phases,
+            bold          = bold,
+            italic        = italic,
+            font_family   = font_family,
+            h_align       = h_align,
+            v_align       = v_align,
+            uniform_scale = uniform_scale,
+            px            = px,
+            py            = line_py,
+            text_fn       = resolved_text_fn,
+            always_visible= always_visible,
+        ))
+
+    return result
 
 # ──────────────────────── _TweenDriver ───────────────────────────
 
@@ -214,6 +357,9 @@ class _TweenDriver:
     def _cur(self): return self._tweens[self._idx] if self._idx < len(self._tweens) else None
 
     def set_phase(self, phase: str, phases: dict):
+        if not phases:
+            self.hidden = False
+            return
         self._prev   = self._phase; self._phase = phase
         self._idx    = 0
         self._tweens = self._active_tweens(phase, self._prev, phases)
@@ -339,16 +485,6 @@ class _TweenDriver:
     def _snap_to(self, tw): pass
     def _reset_to_def(self): pass
     def _apply(self, tw, v): pass
-
-
-@dataclass
-class TextDef:
-    x: float; y: float; text: str; font_size: float; color: QColor
-    phases: Dict[str, Phase]; bold: bool; italic: bool; font_family: str
-    h_align: float; v_align: float; uniform_scale: bool
-    px: float = 0.0; py: float = 0.0
-    text_fn: Optional[Callable[[Any], str]] = None; always_visible: bool = False
-
 
 # ──────────────────────── AnimatedPolygon ────────────────────────
 class AnimatedPolygon(_TweenDriver):
@@ -1163,17 +1299,12 @@ def expand_defs(defs: List[PolygonDef]) -> List[PolygonDef]:
 class AttributeDef:
     value_fn: Callable[[Any], float]
     set_fn:   Callable[[Any, float], None]
-    min_val:  float
-    max_val:  float
-    step:     float
+    min_val:  float = 0.0
+    max_val:  float = 0.0
+    step:     float = 0.0
     label:    str = ''
     unit:     str = ''
     delay:    float = 0.0
-
-
-KNOB_SIZE_PX   = 8.0   # diamond half-extent
-KNOB_HIT_PX    = 14.0  # square hit-box half-extent
-
 
 def make_track_def(
     x: float, y: float, px: float, py: float,
@@ -1201,9 +1332,6 @@ def make_knob_def(
     fill_color: QColor = None,
     phases: Dict[str, Phase] = None,
 ) -> PolygonDef:
-    # All 4 points share the same normalised position (injected at runtime).
-    # Only px offsets define the diamond shape.
-    s  = KNOB_SIZE_PX
     fc = fill_color or QColor(255, 255, 255)
     return PolygonDef(
         points        = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
@@ -1221,8 +1349,6 @@ def make_mark_fill_def(
     fill_color: QColor = None,
     phases: Dict[str, Phase] = None,
 ) -> PolygonDef:
-    """Fill bar between initial-value and knob position.
-    Width is injected at runtime; only the left anchor is baked in."""
     half = h_px / 2.0
     fc   = fill_color or QColor(255, 255, 255, 60)
     return PolygonDef(
@@ -1243,8 +1369,6 @@ def make_mark_tick_def(
     fill_color: QColor = None,
     phases: Dict[str, Phase] = None,
 ) -> PolygonDef:
-    """Thin vertical tick at the initial-value position.
-    Position injected at runtime."""
     hw = w_px / 2.0
     hh = h_px / 2.0
     fc = fill_color or QColor(255, 255, 255, 200)
@@ -1269,18 +1393,198 @@ class SliderTextDefs:
 
 @dataclass
 class SliderGroupDef:
-    x:   float;  y:   float
-    px:  float = 0.0;  py: float = 0.0
-    lx:  float = 0.0;  lpx: float = 0.0
-    attr:   AttributeDef   = None
-    track:  PolygonDef     = None
-    knob:   PolygonDef     = None
-    mark_fill: PolygonDef  = None
-    mark_tick: PolygonDef  = None
-    texts:  SliderTextDefs = field(default_factory=SliderTextDefs)
-    phases: Dict[str, Phase] = field(default_factory=dict)
-    delay: float = 0.0
+    x:         float                = 0.0
+    y:         float                = 0.0
+    px:        float                = 0.0
+    py:        float                = 0.0
+    lx:        float                = 0.0
+    lpx:       float                = 0.0
+    attr:      AttributeDef         = None
+    track:     PolygonDef           = None
+    knob:      PolygonDef           = None
+    mark_fill: PolygonDef           = None
+    mark_tick: PolygonDef           = None
+    texts:     SliderTextDefs       = field(default_factory=SliderTextDefs)
+    phases:    Dict[str, Phase]     = field(default_factory=dict)
+    delay:     float                = 0.0
+    event_out: Optional['EventDef'] = None
+    knob_hit_px: float              = 10.0
 
+class SliderDef(SliderGroupDef):
+    def __new__(
+        cls,
+        x:   float = 0.0,
+        y:   float = 0.0,
+        lx:  float = 0.0,
+        attr: AttributeDef = None,       # AttributeDef or EventDef
+        event_out          = None,       # Optional EventDef
+        px:  float = 0.0,
+        py:  float = 0.0,
+        lpx: float = 0.0,
+        delay:       float = 0.0,
+        font_family: str   = 'Oxanium SemiBold',
+        track_h:   float = 4.0,
+        knob_size: int   = 10,
+        mark_h:    float = 6.0,
+        tick_h:    float = 12.0,
+        track_idle:    QColor = QColor(255, 255, 255,  40),
+        track_press:   QColor = QColor(200, 220, 255,  80),
+        fill_idle:     QColor = QColor(200, 220, 255,  60),
+        fill_press:    QColor = QColor(200, 220, 255, 120),
+        tick_idle:     QColor = QColor(255, 255, 255, 200),
+        tick_press:    QColor = QColor(200, 220, 255, 255),
+        knob_idle:     QColor = QColor(255, 255, 255, 220),
+        knob_hover:    QColor = QColor(255, 255, 255, 255),
+        knob_press:    QColor = QColor(180, 210, 255, 255),
+        text_dim:      QColor = QColor(200, 220, 255, 160),
+        text_bright:   QColor = QColor(200, 220, 255, 255),
+        zero_white:    QColor = QColor(255, 255, 255,   0),
+        zero_color:    QColor = QColor(200, 220, 255,   0),
+        **kwargs,
+    ):
+        fam        = font_family
+        label_text = attr.label if attr and attr.label else ''
+        unit_text  = attr.unit  if attr and attr.unit  else ''
+
+        def _track_phases():
+            pts_full = [P(x, y), P(x+lx, y), P(x+lx, y), P(x, y)]
+            pts_zero = [P(x, y), P(x,    y), P(x,    y), P(x, y)]
+            return {
+                'open':     Phase([PolygonTween(points=pts_zero, fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
+                                   PolygonTween(points=pts_full, fill_color=track_idle, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint)]),
+                'close':    Phase([PolygonTween(points=pts_zero, fill_color=zero_white,  start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
+                'pressed':  Phase([PolygonTween(points=pts_full, fill_color=track_press, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
+                'released': Phase([PolygonTween(points=pts_full, fill_color=track_idle,  start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
+            }
+
+        def _knob_phases():
+            s  = knob_size
+            sh = int(knob_size * 1.3)
+            sp = int(knob_size * 0.8)
+            def _px(e): return [P(0, -e), P(e, 0), P(0, e), P(-e, 0)]
+            pts = [P(0, 0)] * 4
+            return {
+                'open':      Phase([PolygonTween(points=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
+                                    PolygonTween(points=pts, px=_px(s),  fill_color=knob_idle,  start=0.10, dur=0.40, ease=QEasingCurve.OutBack)]),
+                'close':     Phase([PolygonTween(points=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
+                'hovered':   Phase([PolygonTween(points=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutQuint)]),
+                'unhovered': Phase([PolygonTween(points=pts, px=_px(s),  fill_color=knob_idle,  start=0.00, dur=0.15, ease=QEasingCurve.OutQuint)]),
+                'pressed':   Phase([PolygonTween(points=pts, px=_px(sp), fill_color=knob_press, start=0.00, dur=0.08, ease=QEasingCurve.OutQuint)]),
+                'released':  Phase([PolygonTween(points=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutBack)]),
+            }
+
+        def _mark_phases(idle_col, press_col):
+            pts = [P(0, 0)] * 4
+            return {
+                'open':     Phase([PolygonTween(points=pts, fill_color=zero_color, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
+                                   PolygonTween(points=pts, fill_color=idle_col,   start=0.10, dur=0.40, ease=QEasingCurve.OutQuint)]),
+                'close':    Phase([PolygonTween(points=pts, fill_color=zero_color, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
+                'pressed':  Phase([PolygonTween(points=pts, fill_color=press_col,  start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
+                'released': Phase([PolygonTween(points=pts, fill_color=idle_col,   start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
+            }
+
+        def _text_phases(tx, ty, tpx=0.0, tpy=0.0, h_align=0.5, v_align=0.5):
+            return {
+                'open':     Phase([TextTween(tx, ty, 0.05, 0.40, QEasingCurve.OutQuint, text_dim, h_align, v_align, px=tpx, py=tpy)]),
+                'close':    Phase([TextTween(tx, ty, 0.00, 0.20, QEasingCurve.InQuint, zero_color, h_align, v_align, px=tpx, py=tpy)]),
+                'pressed':  Phase([TextTween(tx, ty, 0.00, 0.10, QEasingCurve.OutQuint, text_bright, h_align, v_align, px=tpx, py=tpy)]),
+                'released': Phase([TextTween(tx, ty, 0.00, 0.20, QEasingCurve.OutQuint, text_dim, h_align, v_align, px=tpx, py=tpy)]),
+            }
+
+        def _group_phases():
+            return {
+                'open':  Phase([PolygonTween(points=[P(0, 0)], px=[P(0, 0)], start=0.00, dur=0.40, ease=QEasingCurve.OutQuint)]),
+                'close': Phase([PolygonTween(points=[P(0, 0)], px=[P(0, 20)], start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
+            }
+
+        instance = super().__new__(cls)
+        SliderGroupDef.__init__(
+            instance,
+            x=x, y=y, px=px, py=py,
+            lx=lx, lpx=lpx,
+            attr=attr,
+            event_out=event_out,
+            delay=delay,
+            knob_hit_px=knob_size,
+
+            track=make_track_def(
+                x=x, y=y, px=px, py=py,
+                lx=lx, lpx=lpx,
+                h_px=track_h,
+                fill_color=zero_white,
+                phases=_track_phases(),
+            ),
+
+            knob=make_knob_def(
+                fill_color=zero_white,
+                phases=_knob_phases(),
+            ),
+
+            mark_fill=make_mark_fill_def(
+                x=x, y=y, px=px, py=py,
+                h_px=mark_h,
+                fill_color=zero_color,
+                phases=_mark_phases(fill_idle, fill_press),
+            ),
+
+            mark_tick=make_mark_tick_def(
+                x=x, y=y, px=px, py=py,
+                w_px=2.0, h_px=tick_h,
+                fill_color=zero_white,
+                phases=_mark_phases(tick_idle, tick_press),
+            ),
+
+            texts=SliderTextDefs(
+                label=TextDef(
+                    x=x, y=y, px=px - 8, py=py,
+                    text=label_text, font_size=11.0,
+                    color=zero_color,
+                    phases=_text_phases(x, y, tpx=px - 8, tpy=py, h_align=1.0, v_align=0.5),
+                    bold=False, italic=False, font_family=fam,
+                    h_align=1.0, v_align=0.5, uniform_scale=False,
+                    always_visible=True,
+                ) if label_text else None,
+
+                min_val=TextDef(
+                    x=0.0, y=0.0, px=0.0, py=14.0,
+                    text='', font_size=9.0,
+                    color=zero_color,
+                    phases=_text_phases(0.0, 0.0, tpy=14.0, h_align=0.0, v_align=0.0),
+                    bold=False, italic=False, font_family=fam,
+                    h_align=0.0, v_align=0.0, uniform_scale=False,
+                    always_visible=True,
+                    text_fn=lambda ctx: (f"{int(ctx.defn.attr.min_val)}{unit_text}" if ctx else ''),
+                ) if (attr and attr.min_val is not None) else None,
+
+                max_val=TextDef(
+                    x=0.0, y=0.0, px=0.0, py=14.0,
+                    text='', font_size=9.0,
+                    color=zero_color,
+                    phases=_text_phases(0.0, 0.0, tpy=14.0, h_align=1.0, v_align=0.0),
+                    bold=False, italic=False, font_family=fam,
+                    h_align=1.0, v_align=0.0, uniform_scale=False,
+                    always_visible=True,
+                    text_fn=lambda ctx: (f"{int(ctx.defn.attr.max_val)}{unit_text}" if ctx else ''),
+                ) if (attr and attr.max_val is not None) else None,
+
+                current=TextDef(
+                    x=0.0, y=0.0, px=0.0, py=-12.0,
+                    text='', font_size=10.0,
+                    color=zero_color,
+                    phases=_text_phases(0.0, 0.0, tpy=-12.0, h_align=0.5, v_align=1.0),
+                    bold=False, italic=False, font_family=fam,
+                    h_align=0.5, v_align=1.0, uniform_scale=False,
+                    always_visible=True,
+                    text_fn=lambda ctx: (f"{int(ctx._cur_value)}{unit_text}" + (f"  ({int(ctx._cur_value - ctx._initial_value):+})" if ctx.has_change else '')) if ctx else '',
+                ),
+            ),
+
+            phases=_group_phases(),
+        )
+        return instance
+
+    def __init__(self, *args, **kwargs):
+        pass
 
 # ──────────────────────── SliderGroup ────────────────────────────
 
@@ -1330,15 +1634,38 @@ class SliderGroup:
         self._last_text_cur_x:  float = 0.0
         self._last_text_cur_y:  float = 0.0
         self._snap_knob_to_start: bool = False
+        self._snap_knob_to_start: bool  = False
+ 
+        self._tick_display_sx:    float = 0.0 
+        self._tick_target_sx:     float = 0.0
+        self._tick_ease_start_sx: float = 0.0
+        self._tick_ease_t0:       float = 0.0
+        self._tick_easing:        bool  = False
+        self._tick_frozen:        bool  = False
 
     def init_value(self, ctx):
-        if self.defn.attr:
-            self._cur_value = self._initial_value = self.defn.attr.value_fn(ctx)
-
+        attr = self.defn.attr
+        if attr is None:
+            return
+        if isinstance(attr, EventDef):
+            if attr._is_numeric:
+                self._cur_value = self._initial_value = float(attr.value)
+        else:
+            self._cur_value = self._initial_value = attr.value_fn(ctx)
+    
     def commit(self, ctx):
         if self.defn.attr:
             self.defn.attr.set_fn(ctx, self._cur_value)
             self._initial_value = self._cur_value
+        if self.defn.event_out is not None:
+            self.defn.event_out.value = self._cur_value
+ 
+        self._tick_ease_start_sx = self._tick_display_sx
+        self._tick_target_sx     = self._knob_sx   # knob is already at cur_value
+        self._tick_ease_t0       = time.monotonic()
+        self._tick_easing        = True
+        self._tick_frozen        = False
+ 
 
     def revert(self):
         self._cur_value = self._initial_value
@@ -1403,8 +1730,8 @@ class SliderGroup:
         return all(c.phase_done() for c in comps if c is not None)
 
     def hit_test_knob(self, mx: float, my: float, w: int, h: int) -> bool:
-        return (abs(mx - self._knob_sx) <= KNOB_HIT_PX and
-                abs(my - self._knob_sy) <= KNOB_HIT_PX)
+        return (abs(mx - self._knob_sx) <= self.defn.knob_hit_px and
+                abs(my - self._knob_sy) <= self.defn.knob_hit_px)
 
     def drag_to(self, mx: float, my: float, w: int, h: int):
         span = self._track_x2 - self._track_x1
@@ -1414,12 +1741,29 @@ class SliderGroup:
         attr  = self.defn.attr
         if attr is None:
             return
-        raw = attr.min_val + ratio * (attr.max_val - attr.min_val)
-        if attr.step > 0:
-            raw = round(raw / attr.step) * attr.step
-        self._cur_value = max(attr.min_val, min(attr.max_val, raw))
+        if isinstance(attr, EventDef):
+            if not attr._is_numeric:
+                return
+            lo   = float(attr.min_val) if attr.min_val is not None else 0.0
+            hi   = float(attr.max_val) if attr.max_val is not None else 1.0
+            step = float(attr.step)    if attr.step    else 0.0
+        else:
+            lo, hi, step = attr.min_val, attr.max_val, attr.step
+        raw = lo + ratio * (hi - lo)
+        if step > 0:
+            raw = round(raw / step) * step
+        self._cur_value = max(lo, min(hi, raw))
+    
 
     def update(self, widget_w: int, widget_h: int):
+        if not self._tick_frozen and not self._tick_easing and self._tick_display_sx == 0.0:
+            _attr = self.defn.attr
+            if _attr and (_attr.max_val - _attr.min_val) != 0:
+                init_ratio = (self._initial_value - _attr.min_val) / (_attr.max_val - _attr.min_val)
+            else:
+                init_ratio = 0.0
+            init_ratio = max(0.0, min(1.0, init_ratio))
+            
         # 1. Tick group
         self._group.update()
         gp  = self._group.cur_points[0]
@@ -1460,12 +1804,31 @@ class SliderGroup:
             self._snap_knob_to_start = False
 
         # 5. Initial Mark Position
-        if attr and (attr.max_val - attr.min_val) != 0:
-            init_ratio = (self._initial_value - attr.min_val) / (attr.max_val - attr.min_val)
+        if self._dragging:
+            self._tick_frozen = True
         else:
-            init_ratio = 0.0
-        init_ratio = max(0.0, min(1.0, init_ratio))
-        self._init_sx = self._track_x1 + init_ratio * (self._track_x2 - self._track_x1)
+            if self._tick_easing:
+                elapsed = time.monotonic() - self._tick_ease_t0
+                dur = 0.5
+                if elapsed >= dur:
+                    self._tick_display_sx = self._tick_target_sx
+                    self._tick_easing     = False
+                else:
+                    t = elapsed / dur
+                    v = 1.0 - (1.0 - t) ** 5
+                    self._tick_display_sx = (
+                        self._tick_ease_start_sx
+                        + (self._tick_target_sx - self._tick_ease_start_sx) * v
+                    )
+            elif not self._tick_frozen:
+                if attr and (attr.max_val - attr.min_val) != 0:
+                    init_ratio = (self._initial_value - attr.min_val) / (attr.max_val - attr.min_val)
+                else:
+                    init_ratio = 0.0
+                init_ratio = max(0.0, min(1.0, init_ratio))
+                self._tick_display_sx = self._track_x1 + init_ratio * (self._track_x2 - self._track_x1)
+ 
+        self._init_sx = self._tick_display_sx
 
         # 6. Knob
         if self._knob is not None:
@@ -1485,8 +1848,8 @@ class SliderGroup:
         # 7. Mark Fill
         if self._mark_fill is not None:
             self._mark_fill.update()
-            left_x  = min(self._knob_sx, self._init_sx)
-            right_x = max(self._knob_sx, self._init_sx)
+            left_x  = min(self._knob_sx, self._tick_display_sx)
+            right_x = max(self._knob_sx, self._tick_display_sx)
             half = (self.defn.mark_fill.px[2].y - self.defn.mark_fill.px[0].y) / 2
             self._mark_fill.cur_points = [P(0, 0)] * 4
             self._mark_fill.cur_px = [
@@ -1503,10 +1866,10 @@ class SliderGroup:
             base_px = self.defn.mark_tick.px or [P(0, 0)] * 4
             self._mark_tick.cur_points = [P(0, 0)] * 4
             self._mark_tick.cur_px = [
-                P(base_px[0].x + self._init_sx, base_px[0].y + self._knob_sy),
-                P(base_px[1].x + self._init_sx, base_px[1].y + self._knob_sy),
-                P(base_px[2].x + self._init_sx, base_px[2].y + self._knob_sy),
-                P(base_px[3].x + self._init_sx, base_px[3].y + self._knob_sy),
+                P(base_px[0].x + self._tick_display_sx, base_px[0].y + self._knob_sy),
+                P(base_px[1].x + self._tick_display_sx, base_px[1].y + self._knob_sy),
+                P(base_px[2].x + self._tick_display_sx, base_px[2].y + self._knob_sy),
+                P(base_px[3].x + self._tick_display_sx, base_px[3].y + self._knob_sy),
             ]
             self._mark_tick._dirty = True
 
@@ -1603,11 +1966,65 @@ class PreviewBoxDef:
     cam_w:            int   = 1920
     cam_h:            int   = 1080
 
+
+
+# ──────────────────────── ButtonDef ──────────────────────────
+
+class ButtonDiamond(PolygonDef):
+    def __new__(
+        cls,
+        p:    P   = P(0.5, 0.5),
+        px:   P   = P(0.0, 0.0),
+        size: int = 16,
+        fill_idle:     QColor = QColor(255, 255, 255, 120),
+        fill_hover:    QColor = QColor(255, 255, 255, 200),
+        fill_press:    QColor = QColor(255, 255, 255, 240),
+        fill_zero:     QColor = QColor(255, 255, 255,   0),
+        outline_color: QColor = QColor(255, 255, 255, 255),
+        line_width:    float  = 1.0,
+        open_start:    float = 0.10,
+        open_dur:      float = 0.30,
+        close_dur:     float = 0.20,
+        phase_open:     Phase = None,
+        phase_close:    Phase = None,
+        phase_hovered:  Phase = None,
+        phase_unhovered:Phase = None,
+        phase_pressed:  Phase = None,
+        phase_released: Phase = None,
+        **kwargs,
+    ):
+        pts = [p] * 4
+        def _px(s): return [P(px.x, px.y-s), P(px.x+s, px.y), P(px.x, px.y+s), P(px.x-s, px.y)]
+        phases = {
+            'open':      phase_open      or Phase([PolygonTween(points=pts, px=_px(0),             fill_color=fill_zero,  outline_color=QColor(outline_color.red(), outline_color.green(), outline_color.blue(), 0), start=0.00, dur=0.00, ease=QEasingCurve.Linear),
+                                                   PolygonTween(points=pts, px=_px(size),          fill_color=fill_idle,  outline_color=outline_color,start=open_start, dur=open_dur,ease=QEasingCurve.OutBack)]),
+            'close':     phase_close     or Phase([PolygonTween(points=pts, px=_px(0),             fill_color=fill_zero,  outline_color=QColor(outline_color.red(), outline_color.green(), outline_color.blue(), 0),start=0.00, dur=close_dur,ease=QEasingCurve.InQuint)]),
+            'hovered':   phase_hovered   or Phase([PolygonTween(points=pts, px=_px(int(size*1.3)), fill_color=fill_hover, outline_color=outline_color,start=0.00, dur=0.12, ease=QEasingCurve.OutQuint)]),
+            'unhovered': phase_unhovered or Phase([PolygonTween(points=pts, px=_px(size),          fill_color=fill_idle,  outline_color=outline_color,start=0.00, dur=0.15, ease=QEasingCurve.OutQuint)]),
+            'pressed':   phase_pressed   or Phase([PolygonTween(points=pts, px=_px(int(size*0.8)), fill_color=fill_press, outline_color=outline_color,start=0.00, dur=0.08, ease=QEasingCurve.OutQuint)]),
+            'released':  phase_released  or Phase([PolygonTween(points=pts, px=_px(int(size*1.3)), fill_color=fill_hover, outline_color=outline_color,start=0.00, dur=0.12, ease=QEasingCurve.OutBack)]),
+        }
+
+        instance = super().__new__(cls)
+        PolygonDef.__init__(
+            instance,
+            points        = pts,
+            px            = _px(size),
+            fill_color    = fill_zero,
+            outline_color = QColor(outline_color.red(), outline_color.green(), outline_color.blue(), 0),
+            line_width    = line_width,
+            closed        = True,
+            phases        = phases,
+        )
+        return instance
+
+    def __init__(self, *args, **kwargs):
+        pass
+
 @dataclass
 class ButtonDef:
     poly:   PolygonDef
-    label:  str
-    action: str
+    label:  str = ''
     hx1:    P = field(default_factory=P)
     hx2:    P = field(default_factory=P)
     hpx1:   P = field(default_factory=P)
@@ -1616,6 +2033,9 @@ class ButtonDef:
     font_family: str   = 'Oxanium SemiBold'
     font_size:   float = 10.0
     text_color:  QColor = field(default_factory=lambda: QColor(255, 255, 255))
+    action: str = 'set'
+    event_out:   Any = None
+    event_delta: Any = None
 
 # ──────────────────────── AnimatedButton ─────────────────────────
 class AnimatedButton:
@@ -1665,6 +2085,44 @@ class AnimatedButton:
     def phase_done(self) -> bool:
         text_done = self._text.phase_done() if self._text is not None else True
         return self._polygon.phase_done() and text_done
+    
+    def fire_event(self) -> None:
+        ev = self.defn.event_out
+        if ev is None:
+            return
+        delta  = self.defn.event_delta
+        action = self.defn.action
+
+        if action == 'increment':
+            if delta is not None and isinstance(ev.value, (int, float)) and not isinstance(ev.value, bool):
+                new_val = ev.value + delta
+                lo = getattr(ev, 'min_val', None)
+                hi = getattr(ev, 'max_val', None)
+                if lo is not None: new_val = max(float(lo), new_val)
+                if hi is not None: new_val = min(float(hi), new_val)
+                ev.value = int(round(new_val)) if isinstance(ev.value, int) else new_val
+            return
+
+        if action == 'set':
+            if delta is not None:
+                ev.value = delta
+            return
+
+        if isinstance(ev.value, bool):
+            ev.value = (not ev.value) if delta is None else bool(delta)
+        elif isinstance(ev.value, (int, float)):
+            if delta is None:
+                return
+            new_val = ev.value + delta
+            lo = getattr(ev, 'min_val', None)
+            hi = getattr(ev, 'max_val', None)
+            if lo is not None: new_val = max(float(lo), new_val)
+            if hi is not None: new_val = min(float(hi), new_val)
+            ev.value = int(round(new_val)) if isinstance(ev.value, int) else new_val
+        elif isinstance(ev.value, str):
+            if delta is not None:
+                ev.value = str(delta)
+ 
 
     def draw(self, painter: QPainter, w: int, h: int):
         self._polygon.draw(painter, w, h, self.cam_w, self.cam_h)
@@ -1788,8 +2246,10 @@ class SettingsOverlay(QWidget):
         if self._dragging_slider is not None:
             sl = self._dragging_slider
             sl._pressed = sl._dragging = False
-            sl.set_phase('hovered' if sl._hovered else 'unhovered')
+            sl.set_phase('released')
             self._dragging_slider = None
+            hovered = sl._hovered
+            QTimer.singleShot(150, lambda: sl.set_phase('hovered' if hovered else 'unhovered'))
             return
         for btn in self._buttons:
             if btn._pressed:
@@ -2011,9 +2471,9 @@ class PreviewBox:
 
         # Layout name
         name       = CAMERA_LAYOUT_NAMES[self.display_mode % len(CAMERA_LAYOUT_NAMES)]
-        name_size  = 13.0 if is_centre else 9.0
+        size_name  = 13.0 if is_centre else 9.0
         name_alpha = 255  if is_centre else SIDE_ALPHA
-        name_font  = _make_font('Oxanium SemiBold', name_size)
+        name_font  = _make_font('Oxanium SemiBold', size_name)
         name_fm    = QFontMetrics(name_font)
         name_x     = int(bx + (bw - name_fm.horizontalAdvance(name)) / 2)
         name_y     = int(by - 8)
@@ -2458,7 +2918,9 @@ class CameraSelectOverlay(QWidget):
         for btn in self._buttons:
             if btn._pressed:
                 btn._pressed = False; btn._set_phase('released')
-                if btn.hit_test(mx, my, w, h): self._handle_button(btn)
+                if btn.hit_test(mx, my, w, h):
+                    btn.fire_event()
+                    self._handle_button(btn)
                 return
 
     def leaveEvent(self, event):
@@ -2524,13 +2986,19 @@ def _filter_buttons(panel, event) -> bool:
     elif t == QEvent.MouseButtonRelease:
         if event.button() != Qt.LeftButton: return False
         if hasattr(panel, '_dragging_slider') and panel._dragging_slider is not None:
-            sl = panel._dragging_slider; sl._pressed = sl._dragging = False
-            sl.set_phase('hovered' if sl._hovered else 'unhovered')
-            panel._dragging_slider = None; return True
+            sl = panel._dragging_slider
+            sl._pressed = sl._dragging = False
+            sl.set_phase('released')
+            panel._dragging_slider = None
+            hovered = sl._hovered
+            QTimer.singleShot(150, lambda: sl.set_phase('hovered' if hovered else 'unhovered'))
+            return True
         for btn in panel._buttons:
             if btn._pressed:
                 btn._pressed = False; btn._set_phase('released')
-                if btn.hit_test(lx, ly, pw, ph): panel._handle_button(btn)
+                if btn.hit_test(lx, ly, pw, ph):
+                    btn.fire_event()
+                    panel._handle_button(btn)
                 return True
         return False
 
@@ -2594,18 +3062,21 @@ class GraphDef:
     px1:             P                       = field(default_factory=P)
     px2:             P                       = field(default_factory=P)
     series:          List[SeriesDef]         = field(default_factory=list)
-    max_time:        float                   = 10.0
-    value_range:     Tuple[float, float]     = (0.0, 100.0)
+    max_time:        Any                     = 10.0
+    value_range:     Tuple[float, float]     = (0.0, 0.0)
     value_color:     QColor                  = QColor(255, 255, 255, 255)
     ease_dur:        float                   = 0.3
     ease_type:       QEasingCurve.Type       = QEasingCurve.OutQuint
-    hidden:          bool                    = False
     dynamic_scale:   float                   = 0.0
-    range_labels:    Tuple[bool, bool, int]  = (False, False, 0)
-    label_sizes:     Tuple[float, float]     = (10.0, 9.0)
-    label_align:     String                  = 'right'
+    show_minmax:     bool                    = False
+    show_step:      bool                    = False
+    step_count:      Any                     = 0
+    size_minmax:     float                   = 10.0
+    size_step:      float                   = 9.0
+    label_align:     str                     = 'right'
     stack:           bool                    = False
     update_interval: float                   = 0.0
+    hidden:          bool                    = False
  
 class _SeriesState: 
     def __init__(self) -> None:
@@ -2642,11 +3113,16 @@ class AnimatedGraph:
         return x1, y1, x2 - x1, y2 - y1
  
     def _time_to_x(self, abs_t: float, now: float, left: float, width: float) -> float:
-        return left + (1.0 - (now - abs_t) / self.defn.max_time) * width
- 
+        return left + (1.0 - (now - abs_t) / self._max_time) * width
+
     def _value_to_y(self, value: float, top: float, height: float, lo: float, hi: float) -> float:
         ratio = (value - lo) / (hi - lo) if hi != lo else 0.5
         return top + height * (1.0 - max(0.0, min(1.0, ratio)))
+
+    @property
+    def _max_time(self) -> float:
+        mt = self.defn.max_time
+        return float(mt()) if callable(mt) else float(mt)
  
  
     def _tip_display_value(self, st: _SeriesState, now: float) -> Optional[float]:
@@ -2681,7 +3157,7 @@ class AnimatedGraph:
         self._prune(st, now)
  
     def _prune(self, st: _SeriesState, now: float) -> None:
-        cutoff  = now - self.defn.max_time
+        cutoff  = now - self._max_time
         outside = [i for i, (t, _) in enumerate(st.waypoints) if t < cutoff]
         if len(outside) > 1:
             st.waypoints = st.waypoints[outside[-1]:]
@@ -2703,10 +3179,10 @@ class AnimatedGraph:
  
         return wps[-1][1]
  
-    def _step_value_at_x(self, st: _SeriesState, now: float, rx: float, rw: float, x: float) -> float:
+    def _step_value_at_x(self, st, now, rx, rw, x):
         if rw <= 0:
             return 0.0
-        query_t = now - self.defn.max_time * (1.0 - (x - rx) / rw)
+        query_t = now - self._max_time * (1.0 - (x - rx) / rw)
         return max(0.0, self._step_value_at_time(st, query_t, now))
  
     def _compute_target_range(self, now: float) -> Tuple[float, float]: # Dynamic Range = True
@@ -2777,8 +3253,7 @@ class AnimatedGraph:
     def _build_pts(self, st: _SeriesState, now: float, rx: float, ry: float, rw: float, rh: float, lo: float, hi: float) -> List[QPointF]:
         if st.tip_committed is None:
             return []
- 
-        cutoff = now - self.defn.max_time
+        cutoff = now - self._max_time
  
         def to_pt(abs_t: float, val: float) -> QPointF:
             return QPointF(self._time_to_x(abs_t, now, rx, rw), self._value_to_y(val, ry, rh, lo, hi))
@@ -2866,7 +3341,7 @@ class AnimatedGraph:
                     if not st.last_data_fn_result and samples:
                         n = len(samples)
                         for i, val in enumerate(samples):
-                            fake_t = now - d.max_time * (1.0 - (i + 1) / n)
+                            fake_t = now - self._max_time * (1.0 - (i + 1) / n)
                             st.waypoints.append((fake_t, float(val)))
                         last = float(samples[-1])
                         st.tip_committed = last
@@ -2882,21 +3357,27 @@ class AnimatedGraph:
                                 self._push_value(st, float(val), now)
                     st.last_data_fn_result = list(samples)
     
-    def _draw_labels(self, painter: QPainter, rx: float, ry: float, rw: float, rh: float) -> None:
-        show_minmax, show_steps, step_count = self.defn.range_labels
-        size_minmax, size_steps             = self.defn.label_sizes
+    def _draw_labels(self, painter: QPainter,
+                     rx: float, ry: float, rw: float, rh: float) -> None:
         d = self.defn
-        if not show_minmax and (not show_steps or step_count <= 0):
+ 
+        show_minmax = d.show_minmax
+        show_step  = d.show_step
+        step_count  = int(d.step_count() if callable(d.step_count) else d.step_count)
+        size_minmax = d.size_minmax
+        size_step   = d.size_step
+ 
+        if not show_minmax and (not show_step or step_count <= 0):
             return
-
+ 
         if d.dynamic_scale != 0.0:
             lo = self._range_lo_tgt
             hi = self._range_hi_tgt
         else:
             lo, hi = d.value_range
-
+ 
         base_color = d.value_color
-
+ 
         def _fmt(v: float) -> str:
             if v == int(v):
                 return str(int(v))
@@ -2905,49 +3386,46 @@ class AnimatedGraph:
                 return '0'
             decimals = max(0, 2 - int(_math.floor(_math.log10(mag)))) if mag >= 1 else 3
             return f'{v:.{decimals}f}'.rstrip('0').rstrip('.')
-
-        def _label_color(font_size: float) -> QColor:
-            return QColor(base_color.red(), base_color.green(), base_color.blue(), 180)
-
-        def _make_font(font_size: float) -> Tuple[QFont, QFontMetrics]:
+ 
+        def _label_color():
+            return QColor(base_color.red(), base_color.green(),
+                          base_color.blue(), 180)
+ 
+        def _make_label_font(font_size: float):
             f = QFont()
             f.setPointSizeF(max(0.5, font_size))
             return f, QFontMetrics(f)
-
+ 
         def _draw_right(text: str, font_size: float, y_center: float) -> None:
-            f, fm = _make_font(font_size)
+            f, fm = _make_label_font(font_size)
             x = int(rx - 4 - fm.horizontalAdvance(text))
             y = int(y_center + fm.ascent() * 0.5 - fm.descent() * 0.5)
             painter.setFont(f)
-            painter.setPen(_label_color(font_size))
+            painter.setPen(_label_color())
             painter.drawText(x, y, text)
             painter.setPen(Qt.NoPen)
-
+ 
         def _draw_left(text: str, font_size: float, y_center: float) -> None:
-            f, fm = _make_font(font_size)
+            f, fm = _make_label_font(font_size)
             x = int(rx + 4)
             y = int(y_center + fm.ascent() * 0.5 - fm.descent() * 0.5)
             painter.setFont(f)
-            painter.setPen(_label_color(font_size))
+            painter.setPen(_label_color())
             painter.drawText(x, y, text)
             painter.setPen(Qt.NoPen)
+ 
+        _draw = _draw_right if d.label_align == 'right' else _draw_left
+ 
         if show_minmax:
-            if d.label_align == 'right':
-                _draw_right(_fmt(hi), size_minmax, ry)
-                _draw_right(_fmt(lo), size_minmax, ry + rh)
-            else:
-                _draw_left(_fmt(hi), size_minmax, ry)
-                _draw_left(_fmt(lo), size_minmax, ry + rh)
-        if show_steps and step_count > 0:
+            _draw(_fmt(hi), size_minmax, ry)
+            _draw(_fmt(lo), size_minmax, ry + rh)
+ 
+        if show_step and step_count > 0:
             for i in range(1, step_count + 1):
                 ratio = i / (step_count + 1)
-                val   = lo + ratio * (hi - lo)
-                y_pos = ry + rh * (1.0 - ratio)
-                if d.label_align == 'right':
-                    _draw_right(_fmt(val), size_steps, y_pos)
-                else:
-                    _draw_left(_fmt(val), size_steps, y_pos)
- 
+                _draw(_fmt(lo + ratio * (hi - lo)), size_step,
+                      ry + rh * (1.0 - ratio))
+
     def draw(self, painter: QPainter, widget_w: int, widget_h: int, ctx: Any = None, cam_w: int = 1920, cam_h: int = 1080) -> None:
         if self.hidden:
             return
@@ -3022,8 +3500,8 @@ class PieDef:
     border_width:  float             = 0.0
     fill_opacity:  float             = 1.0
     direction:  str                  = 'horizontal'   # 'horizontal' or 'vertical'
-    label_size: float                = 9.0
-    name_size:  float                = 9.0
+    size_label: float                = 9.0
+    size_name:  float                = 9.0
     ease_dur:   float                = 0.3
     ease_type:  QEasingCurve.Type    = QEasingCurve.OutQuint
     hidden:     bool                 = False
@@ -3145,7 +3623,7 @@ class AnimatedPie:
         painter.setBrush(Qt.NoBrush)
 
         pct_font = QFont()
-        pct_font.setPointSizeF(max(0.5, d.label_size))
+        pct_font.setPointSizeF(max(0.5, d.size_label))
         pct_fm = QFontMetrics(pct_font)
         painter.setFont(pct_font)
 
@@ -3169,7 +3647,7 @@ class AnimatedPie:
             painter.drawText(lx, ly, label)
 
         name_font = QFont()
-        name_font.setPointSizeF(max(0.5, d.name_size))
+        name_font.setPointSizeF(max(0.5, d.size_name))
         name_fm = QFontMetrics(name_font)
         painter.setFont(name_font)
 
@@ -3207,43 +3685,311 @@ class AnimatedPie:
             painter.setPen(Qt.NoPen)
 
 
+
+class DataChannel:
+    def __init__(self, name: str, max_samples: int = 100, unit: str = '') -> None:
+        self.name        = name
+        self.max_samples = max_samples
+        self.unit        = unit
+        self._lock   = threading.Lock()
+        self._buffer: collections.deque[float] = collections.deque(maxlen=max_samples)
+
+    def push(self, value: float) -> None:
+        with self._lock:
+            self._buffer.append(value)
+
+    @property
+    def latest(self) -> Optional[float]:
+        with self._lock:
+            return self._buffer[-1] if self._buffer else None
+
+    @property
+    def samples(self) -> List[float]:
+        with self._lock:
+            return list(self._buffer)
+
+    @property
+    def count(self) -> int:
+        with self._lock:
+            return len(self._buffer)
+
+    def average(self) -> Optional[float]:
+        with self._lock:
+            data = list(self._buffer)
+        return statistics.mean(data) if data else None
+
+    def minimum(self) -> Optional[float]:
+        with self._lock:
+            return min(self._buffer) if self._buffer else None
+
+    def maximum(self) -> Optional[float]:
+        with self._lock:
+            return max(self._buffer) if self._buffer else None
+
+    def delta(self) -> Optional[float]:
+        with self._lock:
+            if len(self._buffer) < 2:
+                return None
+            return self._buffer[-1] - self._buffer[-2]
+
+    def trend(self) -> Optional[float]:
+        with self._lock:
+            data = list(self._buffer)
+        n = len(data)
+        if n < 2:
+            return None
+        xs    = range(n)
+        x_bar = (n - 1) / 2.0
+        y_bar = sum(data) / n
+        num   = sum((x - x_bar) * (y - y_bar) for x, y in zip(xs, data))
+        den   = sum((x - x_bar) ** 2 for x in xs)
+        return num / den if den else 0.0
+
+    def snapshot(self) -> Dict[str, Any]:
+        data = self.samples
+        n    = len(data)
+        avg  = statistics.mean(data) if data else None
+        mn   = min(data)             if data else None
+        mx   = max(data)             if data else None
+        dlt  = (data[-1] - data[-2]) if n >= 2 else None
+        lat  = data[-1]              if data else None
+        if n >= 2:
+            x_bar = (n - 1) / 2.0
+            y_bar = avg
+            num   = sum((x - x_bar) * (y - y_bar) for x, y in enumerate(data))
+            den   = sum((x - x_bar) ** 2 for x in range(n))
+            slope = num / den if den else 0.0
+        else:
+            slope = None
+        return {
+            'latest':  lat,
+            'average': avg,
+            'minimum': mn,
+            'maximum': mx,
+            'delta':   dlt,
+            'trend':   slope,
+            'samples': data,
+            'count':   n,
+            'unit':    self.unit,
+        }
+
+
+@dataclass
+class WindowTween:
+    p1:   P
+    p2:   P
+    px1:  P                    = field(default_factory=P)
+    px2:  P                    = field(default_factory=P)
+    start: float               = 0.0
+    dur:   float               = 0.5
+    ease:  QEasingCurve.Type   = QEasingCurve.OutQuint
+    prev_phase: Optional[str]  = None
+
+@dataclass
+class WindowPhase:
+    tweens: List[WindowTween]
+
 @dataclass
 class WindowDef:
-    p1:  P
-    p2:  P
-    px1: P = field(default_factory=P)
-    px2: P = field(default_factory=P)
+    p1:           P
+    p2:           P
+    px1:          P                          = field(default_factory=P)
+    px2:          P                          = field(default_factory=P)
+    phase_event:  Any                        = None
+    phases:       Dict[str, WindowPhase]     = field(default_factory=dict)
+    polygon_defs: List['PolygonDef']         = field(default_factory=list)
+    text_defs:    List['TextDef']            = field(default_factory=list)
+    slider_defs:  List['SliderGroupDef']     = field(default_factory=list)
+    button_defs:  List['ButtonDef']          = field(default_factory=list)
+    graph_defs:   List['GraphDef']           = field(default_factory=list)
+    pie_defs:     List['PieDef']             = field(default_factory=list)
 
 class AnimatedWindow:
+    def __init__(self, defn: WindowDef, cam_w: int = 1920, cam_h: int = 1080) -> None:
+        self.defn   = defn
+        self.cam_w  = cam_w
+        self.cam_h  = cam_h
 
-    def __init__(self, defn: WindowDef,
-                 polygon_defs: List[PolygonDef]  = None,
-                 text_defs:    List[TextDef]     = None,
-                 graph_defs:   List[GraphDef]    = None,
-                 pie_defs:     List[PieDef]      = None):
-        self.defn      = defn
-        self._polygons = [AnimatedPolygon(d) for d in (polygon_defs or [])]
-        self._texts    = [AnimatedText(d)    for d in (text_defs    or [])]
-        self._graphs   = [AnimatedGraph(d)   for d in (graph_defs   or [])]
-        self._pies     = [AnimatedPie(d)     for d in (pie_defs     or [])]
+        self._polygons = [AnimatedPolygon(d) for d in defn.polygon_defs]
+        self._texts    = [AnimatedText(d)    for d in defn.text_defs]
+        self._graphs   = [AnimatedGraph(d)   for d in defn.graph_defs]
+        self._pies     = [AnimatedPie(d)     for d in defn.pie_defs]
+        self._sliders  = [SliderGroup(d, cam_w, cam_h) for d in defn.slider_defs]
+        self._buttons  = [AnimatedButton(d, cam_w, cam_h) for d in defn.button_defs]
+
+        self._dragging_slider: Optional[SliderGroup] = None
+        self._cur_phase: str = ''
+
+        self._cur_p1  = P(defn.p1.x,  defn.p1.y)
+        self._cur_p2  = P(defn.p2.x,  defn.p2.y)
+        self._cur_px1 = P(defn.px1.x, defn.px1.y)
+        self._cur_px2 = P(defn.px2.x, defn.px2.y)
+        self._s_p1    = self._cur_p1
+        self._s_p2    = self._cur_p2
+        self._s_px1   = self._cur_px1
+        self._s_px2   = self._cur_px2
+        self._win_tweens: List[WindowTween] = []
+        self._win_timer   = QElapsedTimer()
+        self._win_timer.restart()
+        self._win_idx: int = 0
+        self._win_prev_phase: str = ''
+
+        for sl in self._sliders:
+            sl.init_value(None)
+        self._broadcast('open')
+
+        if defn.phase_event is not None:
+            defn.phase_event.value = 'open'
 
     def _screen_rect(self, ww: int, wh: int) -> Tuple[float, float, float, float]:
-        d  = self.defn
-        x1 = d.p1.x * ww + d.px1.x
-        y1 = d.p1.y * wh + d.px1.y
-        x2 = d.p2.x * ww + d.px2.x
-        y2 = d.p2.y * wh + d.px2.y
+        x1 = self._cur_p1.x  * ww + self._cur_px1.x
+        y1 = self._cur_p1.y  * wh + self._cur_px1.y
+        x2 = self._cur_p2.x  * ww + self._cur_px2.x
+        y2 = self._cur_p2.y  * wh + self._cur_px2.y
         return x1, y1, x2 - x1, y2 - y1
 
+    def _broadcast(self, phase: str) -> None:
+        prev = self._cur_phase
+        self._cur_phase = phase
+        for p   in self._polygons: p.set_phase(phase)
+        for t   in self._texts:    t.set_phase(phase)
+        for sl  in self._sliders:  sl.set_phase(phase)
+        for btn in self._buttons:  btn._set_phase(phase)
+        wp = self.defn.phases.get(phase)
+        if wp:
+            self._win_tweens = [
+                tw for tw in wp.tweens
+                if tw.prev_phase is None or tw.prev_phase == prev
+            ]
+        else:
+            self._win_tweens = []
+        self._win_idx        = 0
+        self._win_prev_phase = prev
+        self._s_p1  = self._cur_p1
+        self._s_p2  = self._cur_p2
+        self._s_px1 = self._cur_px1
+        self._s_px2 = self._cur_px2
+        self._win_timer.restart()
+
+    def _poll_phase_event(self) -> None:
+        ev = self.defn.phase_event
+        if ev is None:
+            return
+        val = str(ev.value)
+        if val != self._cur_phase:
+            self._broadcast(val)
+
+    def _tick_win_tweens(self) -> None:
+        tweens = self._win_tweens
+        if not tweens or self._win_idx >= len(tweens):
+            return
+        elapsed = self._win_timer.elapsed() / 1000.0
+        tw = tweens[self._win_idx]
+        if elapsed < tw.start:
+            return
+        t = min(1.0, (elapsed - tw.start) / tw.dur) if tw.dur > 0 else 1.0
+        v = _ease(t, tw.ease)
+        self._cur_p1  = P(self._s_p1.x  + (tw.p1.x  - self._s_p1.x)  * v,
+                          self._s_p1.y  + (tw.p1.y  - self._s_p1.y)  * v)
+        self._cur_p2  = P(self._s_p2.x  + (tw.p2.x  - self._s_p2.x)  * v,
+                          self._s_p2.y  + (tw.p2.y  - self._s_p2.y)  * v)
+        self._cur_px1 = P(self._s_px1.x + (tw.px1.x - self._s_px1.x) * v,
+                          self._s_px1.y + (tw.px1.y - self._s_px1.y) * v)
+        self._cur_px2 = P(self._s_px2.x + (tw.px2.x - self._s_px2.x) * v,
+                          self._s_px2.y + (tw.px2.y - self._s_px2.y) * v)
+        if t >= 1.0:
+            self._s_p1  = self._cur_p1
+            self._s_p2  = self._cur_p2
+            self._s_px1 = self._cur_px1
+            self._s_px2 = self._cur_px2
+            self._win_idx += 1
+
     def tick(self, now: float) -> None:
+        self._poll_phase_event()
+        self._tick_win_tweens()
         for g in self._graphs:
             g.tick(now)
 
-    def update(self, ctx: Any) -> None:
-        for pie in self._pies:
-            pie.update(ctx)
+    def update(self, ctx: Any, widget_w: int, widget_h: int) -> None:
+        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+        for p  in self._polygons: p.update()
+        for t  in self._texts:    t.update()
+        for pie in self._pies:    pie.update(ctx)
+        for sl in self._sliders:  sl.update(int(ww), int(wh))
+        for btn in self._buttons: btn.update()
 
-    def draw(self, painter: QPainter, widget_w: int, widget_h: int, ctx: Any = None, cam_w: int = 1920, cam_h: int = 1080) -> None:
+    def _to_local(self, mx: float, my: float, widget_w: int, widget_h: int) -> Tuple[float, float, float, float]:
+        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+        return mx - wx, my - wy, ww, wh
+
+    def mouse_press(self, mx: float, my: float, widget_w: int, widget_h: int) -> bool:
+        lx, ly, ww, wh = self._to_local(mx, my, widget_w, widget_h)
+        for sl in self._sliders:
+            if sl.hit_test_knob(lx, ly, int(ww), int(wh)):
+                self._dragging_slider = sl
+                sl._dragging = True
+                sl.drag_to(lx, ly, int(ww), int(wh))
+                sl.commit(None)
+                sl.set_phase('pressed')
+                return True
+        for btn in self._buttons:
+            if btn.hit_test(lx, ly, int(ww), int(wh)):
+                btn._pressed = True
+                btn._set_phase('pressed')
+                return True
+        return False
+
+    def mouse_move(self, mx: float, my: float, widget_w: int, widget_h: int) -> bool:
+        lx, ly, ww, wh = self._to_local(mx, my, widget_w, widget_h)
+        if self._dragging_slider is not None:
+            self._dragging_slider.drag_to(lx, ly, int(ww), int(wh))
+            self._dragging_slider.commit(None)
+            return True
+        for sl in self._sliders:
+            hit = sl.hit_test_knob(lx, ly, int(ww), int(wh))
+            if hit != sl._hovered:
+                sl._hovered = hit
+                sl.set_phase('hovered' if hit else 'unhovered')
+        for btn in self._buttons:
+            hit = btn.hit_test(lx, ly, int(ww), int(wh))
+            if hit != btn._hovered:
+                btn._hovered = hit
+                btn._set_phase('hovered' if hit else 'unhovered')
+        return False
+
+    def mouse_release(self, mx: float, my: float, widget_w: int, widget_h: int) -> bool:
+        lx, ly, ww, wh = self._to_local(mx, my, widget_w, widget_h)
+        sl = self._dragging_slider
+        if sl is not None:
+            sl._dragging = sl._pressed = False
+            sl.set_phase('released')
+            sl.commit(None)
+            self._dragging_slider = None
+            hovered = sl._hovered
+            QTimer.singleShot(150, lambda: sl.set_phase('hovered' if hovered else 'unhovered'))
+            return True
+        for btn in self._buttons:
+            if btn._pressed:
+                btn._pressed = False
+                btn._set_phase('released')
+                if btn.hit_test(lx, ly, int(ww), int(wh)):
+                    btn.fire_event()
+                return True
+        return False
+
+    def mouse_leave(self) -> None:
+        for sl in self._sliders:
+            if sl._hovered:
+                sl._hovered = False
+                sl.set_phase('unhovered')
+        for btn in self._buttons:
+            if btn._hovered:
+                btn._hovered = False
+                btn._set_phase('unhovered')
+
+    def draw(self, painter: QPainter,
+             widget_w: int, widget_h: int,
+             ctx: Any = None) -> None:
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         if ww <= 0 or wh <= 0:
             return
@@ -3252,8 +3998,10 @@ class AnimatedWindow:
         painter.translate(wx, wy)
         painter.setClipRect(QRectF(0, 0, ww, wh))
 
+        iww, iwh = int(ww), int(wh)
+
         for poly in self._polygons:
-            poly.draw(painter, ww, wh, cam_w, cam_h)
+            poly.draw(painter, iww, iwh, self.cam_w, self.cam_h)
 
         for text in self._texts:
             if text.hidden:
@@ -3264,14 +4012,45 @@ class AnimatedWindow:
             font = text.build_font()
             painter.setFont(font)
             painter.setPen(text.cur_color)
-            dx, dy = text.resolve_pos(ww, wh, cam_w, cam_h, label, font)
+            dx, dy = text.resolve_pos(iww, iwh, self.cam_w, self.cam_h, label, font)
             painter.drawText(dx, dy, label)
             painter.setPen(Qt.NoPen)
 
         for g in self._graphs:
-            g.draw(painter, ww, wh, ctx, cam_w, cam_h)
+            g.draw(painter, iww, iwh, ctx, self.cam_w, self.cam_h)
 
         for pie in self._pies:
-            pie.draw(painter, ww, wh, cam_w, cam_h)
+            pie.draw(painter, iww, iwh, self.cam_w, self.cam_h)
+
+        for sl in self._sliders:
+            sl.draw(painter, iww, iwh)
+
+        for btn in self._buttons:
+            btn.draw(painter, iww, iwh)
 
         painter.restore()
+
+@dataclass
+class EventDef:
+    name:    str
+    value:   Any                             = None
+    min_val: Optional[Union[int, float]]     = None
+    max_val: Optional[Union[int, float]]     = None
+    step:    Optional[Union[int, float]]     = None
+    label:   str                             = ''
+    unit:    str                             = ''
+    delay:   float                           = 0.0
+
+    @property
+    def _is_numeric(self) -> bool:
+        return isinstance(self.value, (int, float)) and not isinstance(self.value, bool)
+
+    def _clamp(self, v: float) -> Union[int, float]:
+        if self.min_val is not None: v = max(float(self.min_val), v)
+        if self.max_val is not None: v = min(float(self.max_val), v)
+        if self.step:                v = round(v / self.step) * self.step
+        return int(round(v)) if isinstance(self.value, int) else float(v)
+
+    def set_numeric(self, v: float) -> None:
+        if self._is_numeric:
+            self.value = self._clamp(v)
