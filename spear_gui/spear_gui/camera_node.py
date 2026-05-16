@@ -475,7 +475,7 @@ class CameraNode(Node):
         screen = QApplication.primaryScreen().geometry()
         _PW, _PH = 1920, 1080
         panel = SettingsOverlay(
-            SETTING_RECT_DEFS, SETTING_TEXT_DEFS,
+            SETTING_DEFS, SETTING_TEXT_DEFS,
             SETTING_SLIDER_DEFS, SETTING_BUTTON_DEFS,
             cam_w=_PW, cam_h=_PH,
         )
