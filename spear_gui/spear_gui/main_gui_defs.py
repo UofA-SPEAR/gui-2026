@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QEasingCurve
+from PySide6.QtCore import Qt, QEasingCurve
 from PySide6.QtGui  import QColor
 
 from spear_gui.overlay_system import (
@@ -167,12 +167,12 @@ MAIN_WINDOW_DEFS = [
             ButtonDef(
                 poly=ButtonDiamond(p=P(0.25, 0.25), px=P(0, 0), size=40),
                 label='+', text_color=QColor(160, 255, 160, 255),
-                action='increment', event_out=_ev['graph_steps'], event_delta=1,
+                key=Qt.Key_Up, action='increment', event_out=_ev['graph_steps'], event_delta=1,
             ),
             ButtonDef(
                 poly=ButtonDiamond(p=P(0.50, 0.25), px=P(0, 0), size=40),
                 label='−', text_color=QColor(255, 160, 160, 255),
-                action='increment', event_out=_ev['graph_steps'], event_delta=-1,
+                key=Qt.Key_Down, action='increment', event_out=_ev['graph_steps'], event_delta=-1,
             ),
             ButtonDef(
                 poly=ButtonDiamond(p=P(0.75, 0.25), px=P(0, 0), size=40),

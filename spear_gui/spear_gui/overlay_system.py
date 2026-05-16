@@ -2033,21 +2033,23 @@ class ButtonDef:
     font_family: str   = 'Oxanium SemiBold'
     font_size:   float = 10.0
     text_color:  QColor = field(default_factory=lambda: QColor(255, 255, 255))
-    action: str = 'set'
+    key:         Optional[int] = None 
+    action:      str = 'set'
     event_out:   Any = None
     event_delta: Any = None
 
 # ──────────────────────── AnimatedButton ─────────────────────────
 class AnimatedButton:
     def __init__(self, defn: ButtonDef, cam_w: int = 1920, cam_h: int = 1080):
-        self.defn     = defn
-        self.cam_w    = cam_w
-        self.cam_h    = cam_h
-        self._hovered = False
-        self._pressed = False
-        self._polygon = AnimatedPolygon(defn.poly)
-        self._text    = AnimatedText(defn.text) if defn.text else None
-        self._locked  = False
+        self.defn       = defn
+        self.cam_w      = cam_w
+        self.cam_h      = cam_h
+        self._hovered   = False
+        self._pressed   = False
+        self._key_held  = False
+        self._polygon   = AnimatedPolygon(defn.poly)
+        self._text      = AnimatedText(defn.text) if defn.text else None
+        self._locked    = False
         self._cur_phase = ''
 
     def _set_phase(self, phase: str):
@@ -2059,6 +2061,24 @@ class AnimatedButton:
         self._polygon.set_phase(phase)
         if self._text is not None:
             self._text.set_phase(phase)
+    
+    def key_press(self, key: int) -> bool:
+        if (self.defn.key is None or self.defn.key != key or self._cur_phase == 'close' or self._key_held):
+            return False
+        self._key_held = True
+        self._pressed  = True
+        self._set_phase('pressed')
+        return True
+
+    def key_release(self, key: int) -> bool:
+        if self.defn.key is None or self.defn.key != key or not self._key_held:
+            return False
+        self._key_held = False
+        self._pressed  = False
+        self._set_phase('released')
+        self.fire_event()
+        QTimer.singleShot(150, lambda: (self._set_phase('hovered' if self._hovered else 'unhovered')))
+        return True
 
     def _hit_rect(self, w: int, h: int) -> Tuple[float, float, float, float]:
         d  = self.defn
@@ -3921,6 +3941,18 @@ class AnimatedWindow:
     def _to_local(self, mx: float, my: float, widget_w: int, widget_h: int) -> Tuple[float, float, float, float]:
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         return mx - wx, my - wy, ww, wh
+    
+    def key_press(self, key: int) -> bool:
+        for btn in self._buttons:
+            if btn.key_press(key):
+                return True
+        return False
+
+    def key_release(self, key: int) -> bool:
+        for btn in self._buttons:
+            if btn.key_release(key):
+                return True
+        return False
 
     def mouse_press(self, mx: float, my: float, widget_w: int, widget_h: int) -> bool:
         lx, ly, ww, wh = self._to_local(mx, my, widget_w, widget_h)

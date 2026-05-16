@@ -109,6 +109,8 @@ class MainOverlayWidget(QWidget):
         self.setStyleSheet('background-color: #0a0c12;')
         self.setWindowTitle('Main Overlay')
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocus()
 
         self._polygons = [AnimatedPolygon(d) for d in MAIN_POLYGON_DEFS]
         self._texts    = [AnimatedText(d)    for d in MAIN_TEXT_DEFS]
@@ -141,6 +143,20 @@ class MainOverlayWidget(QWidget):
             win.tick(now)
             win.update(ctx, self.width(), self.height())
         self.update()
+
+    def keyPressEvent(self, event):
+        if event.isAutoRepeat():
+            return
+        for win in self._windows:
+            if win.key_press(event.key()):
+                return
+
+    def keyReleaseEvent(self, event):
+        if event.isAutoRepeat():
+            return
+        for win in self._windows:
+            if win.key_release(event.key()):
+                return
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton: return
