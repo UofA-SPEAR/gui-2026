@@ -159,11 +159,16 @@ MAIN_WINDOW_DEFS = [
     WindowDef(
         p1=P(0.50, 0.50), p2=P(1.00, 1.00),
         phase_event=_ev['window2_phase'],
+        text_defs=[
+            TextDef(x=0.50, y=0.10, text='Number: <#>', font_size=9.0, color=QColor(255, 255, 255, 255), h_align=0.5, v_align=0.0,
+            text_fn=lambda ctx: _ev['graph_steps'].value),
+        ],
         slider_defs=[
             SliderDef(x=0.20, y=0.40, lx=0.60, attr=AttributeDef(value_fn=lambda ctx: _ev['graph_steps'].value, set_fn  =lambda ctx, v: None, min_val=0, max_val=10, step=1, label='GRAPH STEPS', unit=''), event_out=_ev['graph_steps']),
             SliderDef(x=0.20, y=0.60, lx=0.60, attr=AttributeDef(value_fn=lambda ctx: _ev['graph_time'].value, set_fn  =lambda ctx, v: None, min_val=1, max_val=60, step=1, label='GRAPH TIME', unit='s'), event_out=_ev['graph_time']),
         ],
         button_defs=[
+            ButtonDef(key=Qt.Key_W, action='increment', event_out=_ev['graph_steps'], event_delta=10),
             ButtonDef(
                 poly=ButtonDiamond(p=P(0.25, 0.25), px=P(0, 0), size=40),
                 label='+', text_color=QColor(160, 255, 160, 255),
@@ -182,12 +187,12 @@ MAIN_WINDOW_DEFS = [
             ButtonDef(
                 poly=ButtonDiamond(p=P(0.25, 0.75), px=P(0, 0), size=40),
                 label='1', text_color=QColor(255, 255, 255, 220),
-                action='set', event_out=_ev['window1_phase'], event_delta='phase1',
+                key=Qt.Key_Left, action='set', event_out=_ev['window1_phase'], event_delta='phase1',
             ),
             ButtonDef(
                 poly=ButtonDiamond(p=P(0.50, 0.75), px=P(0, 0), size=40),
                 label='2', text_color=QColor(255, 255, 255, 220),
-                action='set', event_out=_ev['window1_phase'], event_delta='phase2',
+                key=Qt.Key_Right, action='set', event_out=_ev['window1_phase'], event_delta='phase2',
             ),
             ButtonDef(
                 poly=ButtonDiamond(p=P(0.75, 0.75), px=P(0, 0), size=40),

@@ -141,7 +141,7 @@ def RectTween(
 
 @dataclass
 class PolygonDef:
-    points:        List[P]                    = None
+    points:        List[P]                    = field(default_factory=lambda: [P(0, 0), P(0, 0)])
     phases:        Optional[Dict[str, Phase]] = None
     closed:        bool                       = True
     line_width:    float                      = 0.0
@@ -2023,7 +2023,7 @@ class ButtonDiamond(PolygonDef):
 
 @dataclass
 class ButtonDef:
-    poly:   PolygonDef
+    poly:   PolygonDef = PolygonDef()
     label:  str = ''
     hx1:    P = field(default_factory=P)
     hx2:    P = field(default_factory=P)
@@ -2051,6 +2051,8 @@ class AnimatedButton:
         self._text      = AnimatedText(defn.text) if defn.text else None
         self._locked    = False
         self._cur_phase = ''
+        self._last_poly:  QPolygonF = QPolygonF()
+        self._press_poly: QPolygonF = QPolygonF()
 
     def _set_phase(self, phase: str):
         # Always allow open to interrupt close, always allow open/close to set
@@ -2065,8 +2067,9 @@ class AnimatedButton:
     def key_press(self, key: int) -> bool:
         if (self.defn.key is None or self.defn.key != key or self._cur_phase == 'close' or self._key_held):
             return False
-        self._key_held = True
-        self._pressed  = True
+        self._key_held  = True
+        self._pressed   = True
+        self._press_poly = QPolygonF(self._last_poly)
         self._set_phase('pressed')
         return True
 
@@ -2089,18 +2092,29 @@ class AnimatedButton:
         return x1, y1, x2, y2
 
     def hit_test(self, mx: float, my: float, w: int, h: int) -> bool:
-        poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
-        return poly.containsPoint(QPointF(mx, my), Qt.OddEvenFill)
+        if not self._last_poly.isEmpty():
+            return self._last_poly.containsPoint(QPointF(mx, my), Qt.OddEvenFill)
+        return self._polygon.get_polygon(w, h, self.cam_w, self.cam_h).containsPoint(QPointF(mx, my), Qt.OddEvenFill)
+
+    def _hit_test_press_poly(self, mx: float, my: float) -> bool:
+        if not self._press_poly.isEmpty():
+            return self._press_poly.containsPoint(QPointF(mx, my), Qt.OddEvenFill)
+        return False
 
     def hit_test_global(self, gx: float, gy: float, panel) -> bool:
         return self.hit_test(gx - panel.x(), gy - panel.y(), panel.width(), panel.height())
 
-    def update(self):
+    def update(self, widget_w: int = 0, widget_h: int = 0):
         self._polygon.update()
         if self._text is not None:
             self._text.update()
         if self._locked and self._polygon.phase_done():
             self._locked = False
+        w = widget_w if widget_w > 0 else self._draw_w
+        h = widget_h if widget_h > 0 else self._draw_h
+        if w > 0 and h > 0:
+            self._polygon._dirty = True
+            self._last_poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
 
     def phase_done(self) -> bool:
         text_done = self._text.phase_done() if self._text is not None else True
@@ -2145,6 +2159,9 @@ class AnimatedButton:
  
 
     def draw(self, painter: QPainter, w: int, h: int):
+        self._draw_w    = w
+        self._draw_h    = h
+        self._last_poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
         self._polygon.draw(painter, w, h, self.cam_w, self.cam_h)
         if self._text is not None and not self._text.hidden:
             label = self._text.resolve_text(None)
@@ -2274,7 +2291,9 @@ class SettingsOverlay(QWidget):
         for btn in self._buttons:
             if btn._pressed:
                 btn._pressed = False; btn._set_phase('released')
-                if btn.hit_test(mx, my, w, h): self._handle_button(btn)
+                if btn.hit_test(mx, my, w, h): 
+                    btn.fire_event()
+                    self._handle_button(btn)
                 return
 
     def leaveEvent(self,event):
@@ -3015,8 +3034,9 @@ def _filter_buttons(panel, event) -> bool:
             return True
         for btn in panel._buttons:
             if btn._pressed:
-                btn._pressed = False; btn._set_phase('released')
-                if btn.hit_test(lx, ly, pw, ph):
+                btn._pressed = False
+                btn._set_phase('released')
+                if btn._hit_test_press_poly(lx, ly):
                     btn.fire_event()
                     panel._handle_button(btn)
                 return True
@@ -3966,7 +3986,8 @@ class AnimatedWindow:
                 return True
         for btn in self._buttons:
             if btn.hit_test(lx, ly, int(ww), int(wh)):
-                btn._pressed = True
+                btn._pressed      = True
+                btn._press_poly   = QPolygonF(btn._last_poly)
                 btn._set_phase('pressed')
                 return True
         return False
@@ -4004,8 +4025,9 @@ class AnimatedWindow:
             if btn._pressed:
                 btn._pressed = False
                 btn._set_phase('released')
-                if btn.hit_test(lx, ly, int(ww), int(wh)):
+                if btn._hit_test_press_poly(lx, ly):
                     btn.fire_event()
+                QTimer.singleShot(150, lambda b=btn: (b._set_phase('hovered' if b._hovered else 'unhovered')))
                 return True
         return False
 
