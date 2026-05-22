@@ -113,7 +113,7 @@ class MainWindow(QMainWindow):
 
         self.node = node
 
-        self.setWindowTitle("Robot Telemetry")
+        self.setWindowTitle("Motor vals and misc")
         self.resize(1200, 700)
 
         self.labels = {}
@@ -246,9 +246,11 @@ class MainWindow(QMainWindow):
         # =================================================
 
         for arm_id in range(6):
-            layout = QVBoxLayout()
-            layout.addWidget(QLabel(" "))
-            layout.addWidget(QLabel(f"ARM {arm_id}"))
+            panel = Panel(f"ARM {arm_id}")
+            layout = panel.layout
+            # layout = QVBoxLayout()
+            # layout.addWidget(QLabel(" "))
+            # layout.addWidget(QLabel(f"ARM {arm_id}"))
 
             add_topic_label(layout, "amps", f"/amps_arm_{arm_id}", "A")
             add_topic_label(layout, "volts", f"/volts_arm_{arm_id}", "V")
@@ -256,7 +258,7 @@ class MainWindow(QMainWindow):
             add_topic_label(layout, "encoder in", f"/encoder_in_{arm_id}", "rpm")
             add_topic_label(layout, "encoder out", f"/encoder_out_{arm_id}", "rpm")
 
-            main_grid.addLayout(layout, arm_id, 5)
+            main_grid.addWidget(panel, arm_id, 5)
 
         # =================================================
         # MISC
@@ -318,6 +320,29 @@ def main(args=None):
     node = A_node()
 
     app = QApplication(sys.argv)
+    app.setStyleSheet("""
+        QMainWindow {
+            background-color: #0f1117;
+        }
+
+        QWidget {
+            color: #d6d6d6;
+            font-size: 13px;
+        }
+
+        #telemetryPanel {
+            background-color: #1a1d26;
+            border: 1px solid #2c3240;
+            border-radius: 12px;
+        }
+
+        #panelTitle {
+            font-size: 16px;
+            font-weight: bold;
+            color: #7aa2ff;
+            padding-bottom: 8px;
+        }
+        """)
 
     window = MainWindow(node)
 
@@ -341,3 +366,6 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+
+#source /opt/ros/humble/setup.bash
+#source install/setup.bash
