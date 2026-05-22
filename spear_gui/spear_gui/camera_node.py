@@ -13,8 +13,8 @@ from collections import deque
 from PySide6.QtCore import qInstallMessageHandler
 from typing import Optional
 from spear_gui.gui_vars import CAMERA_LAYOUT
-from spear_gui.overlay_system import LoadingOverlay, SelectionOverlay, SettingsOverlay, CameraSelectOverlay
-from spear_gui.overlay_defs import (
+from spear_gui.overlay_legacy import LoadingOverlay, SelectionOverlay, SettingsOverlay, CameraSelectOverlay
+from spear_gui.camera_node_defs import (
     SETTING_DEFS, SETTING_TEXT_DEFS,
     SETTING_SLIDER_DEFS, SETTING_BUTTON_DEFS,
 )
