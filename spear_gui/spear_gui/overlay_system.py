@@ -216,6 +216,7 @@ class TextDef:
     char_display:   float                          = 1.0
     sub_char_clip:  bool                           = False
     backward:       bool                           = False
+    ignore_scale:   bool                           = False
 
 # ──────────────────────── Tween dataclasses ──────────────────────
 
@@ -364,82 +365,102 @@ def TextBlock(
 def DataTable(
     x:              float,
     y:              float,
-    px:             float                                  = 0.0,
-    py:             float                                  = 0.0,
-    value_x:        float                                  = 0.5,
-    value_px:       float                                  = 0.0,
-    row_height:     float                                  = 18.0, # pixels
-    value_names:    List[str]                              = None,
-    values:         List[Union[str, Callable[[Any], Any]]] = None,
-    value_units:    List[str]                              = None,
-    fallbacks:      Optional[List[str]]                    = None,
-    formats:        Optional[List[Optional[str]]]          = None,
-    unit_gap:       float                                  = 4.0,  # pixels
-    color:          QColor                                 = None,
-    font_size:      float                                  = 10.0,
-    font_family:    str                                    = 'Oxanium SemiBold',
-    bold:           bool                                   = False,
-    italic:         bool                                   = False,
-    phases:         Dict[str, Phase]                       = None,
-    char_display:   float                                  = 1.0,
-    sub_char_clip:  bool                                   = False,
-    backward:       bool                                   = False,
-    always_visible: bool                                   = True,
+    px:             float                    = 0.0,
+    py:             float                    = 0.0,
+    value_x:        float                    = 0.5,
+    value_px:       float                    = 0.0,
+    row_height:     float                    = 18.0,
+    values:         List[Tuple]              = None,
+    unit_gap:       float                    = 4.0,
+    color:          QColor                   = None,
+    font_size:      float                    = 10.0,
+    font_family:    str                      = 'Oxanium SemiBold',
+    bold:           bool                     = False,
+    italic:         bool                     = False,
+    phases:         Dict[str, Phase]         = None,
+    char_display:   float                    = 1.0,
+    sub_char_clip:  bool                     = False,
+    backward:       bool                     = False,
+    always_visible: bool                     = True,
+    title:          str                      = '',
+    title_font_size: float                   = 12.0,
 ) -> List[TextDef]:
-    value_names = value_names or []
-    values      = values      or []
-    value_units = value_units or []
- 
-    n = len(value_names)
-    assert len(values) == n and len(value_units) == n, ("DataTable: value_names, values, and value_units must have the same length")
+    values = values or []
+    n      = len(values)
+
+    names       = []
+    raw_values  = []
+    value_units = []
+    formats     = []
+    for entry in values:
+        if isinstance(entry, tuple):
+            name = entry[0]
+            val  = entry[1] if len(entry) > 1 else ''
+            unit = entry[2] if len(entry) > 2 else ''
+            fmt  = entry[3] if len(entry) > 3 else None
+        else:
+            raise ValueError("DataTable: each entry must be a tuple (name, value, unit='', format=None)")
+        names.append(name)
+        raw_values.append(val)
+        value_units.append(unit)
+        formats.append(fmt)
+
     col = color or QColor(255, 255, 255, 200)
     ph  = phases or {}
-    fallbacks = fallbacks if fallbacks is not None else ['-'] * n
-    formats   = formats   if formats   is not None else [None] * n
-    assert len(fallbacks) == n, "DataTable: fallbacks must have the same length as values"
-    assert len(formats)   == n, "DataTable: formats must have the same length as values"
     result: List[TextDef] = []
- 
+
+    # Title — sits at row index 0 in delay terms, data rows start at index 1
+    if title:
+        title_phases = {}
+        for phase_name, phase in ph.items():
+            delay = phase.line_delay * 0  # title always gets no delay (index 0)
+            title_phases[phase_name] = Phase(
+                [_tw_replace(tw, start=tw.start + delay) if isinstance(tw, TextTween) else tw
+                 for tw in phase.tweens],
+                line_delay  = 0.0,
+                loop        = phase.loop,
+                stop_phases = phase.stop_phases,
+            )
+        result.append(TextDef(
+            x             = x,
+            y             = y,
+            px            = px,
+            py            = py,
+            text          = title,
+            font_size     = title_font_size,
+            color         = QColor(col),
+            phases        = title_phases,
+            bold          = True,
+            italic        = True,
+            font_family   = font_family,
+            h_align       = 0.0,
+            v_align       = 1.0,
+            uniform_scale = False,
+            always_visible= always_visible,
+            char_display  = char_display,
+            sub_char_clip = sub_char_clip,
+            backward      = backward,
+        ))
+
+    # Data rows — offset by 1 in delay index to account for title
+    title_offset = 1 if title else 0
+
     for i in range(n):
         row_py = py + row_height * i
         row_phases: Dict[str, Phase] = {}
         for phase_name, phase in ph.items():
-            delay = phase.line_delay * i
+            delay = phase.line_delay * (i + title_offset)
             if delay == 0.0:
                 row_phases[phase_name] = phase
             else:
-                new_tweens = []
-                for tw in phase.tweens:
-                    if isinstance(tw, Reset):
-                        new_tweens.append(tw)
-                    elif isinstance(tw, TextTween):
-                        new_tweens.append(TextTween(
-                            start       = tw.start + delay,
-                            dur         = tw.dur,
-                            ease        = tw.ease,
-                            color       = tw.color,
-                            x           = tw.x,
-                            y           = tw.y,
-                            px          = tw.px,
-                            py          = tw.py,
-                            h_align     = tw.h_align,
-                            v_align     = tw.v_align,
-                            font_size   = tw.font_size,
-                            char_display= tw.char_display,
-                            prev_phase  = tw.prev_phase,
-                            span        = tw.span,
-                            blend       = tw.blend,
-                        ))
-                    else:
-                        new_tweens.append(tw)
                 row_phases[phase_name] = Phase(
-                    new_tweens,
+                    [_tw_replace(tw, start=tw.start + delay) if isinstance(tw, TextTween) else tw
+                     for tw in phase.tweens],
                     line_delay  = 0.0,
                     loop        = phase.loop,
                     stop_phases = phase.stop_phases,
                 )
- 
-        # Common TextDef kwargs
+
         common = dict(
             font_size     = font_size,
             color         = QColor(col),
@@ -453,75 +474,38 @@ def DataTable(
             sub_char_clip = sub_char_clip,
             backward      = backward,
         )
-        # Name TextDef
-        result.append(TextDef(
-            x       = x,
-            y       = y,
-            px      = px,
-            py      = row_py,
-            text    = value_names[i],
-            h_align = 0.0,
-            v_align = 0.0,
-            **common,
-        ))
- 
-        # Value TextDef
-        raw_value  = values[i]
-        fmt_spec   = formats[i]
-        fallback   = fallbacks[i]
- 
-        if callable(raw_value): # Dynamic string
-            def _make_value_fn(fn, spec, fb):
-                def _fn(ctx):
-                    try:
-                        v = fn(ctx)
-                    except Exception:
-                        v = None
-                    if v is None:
-                        return fb
-                    try:
-                        return format(v, spec) if spec else str(v)
-                    except Exception:
-                        return str(v)
-                return _fn
-            value_text_fn = _make_value_fn(raw_value, fmt_spec, fallback)
-            value_text    = ''
-        else: # Static string
-            value_text_fn = None
-            if fmt_spec:
-                try:
-                    value_text = format(raw_value, fmt_spec)
-                except Exception:
-                    value_text = str(raw_value)
-            else:
-                value_text = str(raw_value)
- 
-        result.append(TextDef(
-            x       = value_x,
-            y       = y,
-            px      = value_px,
-            py      = row_py,
-            text    = value_text,
-            text_fn = value_text_fn,
-            h_align = 1.0,
-            v_align = 0.0,
-            **common,
-        ))
- 
-        # Unit TextDef
-        result.append(TextDef(
-            x       = value_x,
-            y       = y,
-            px      = value_px + unit_gap,
-            py      = row_py,
-            text    = value_units[i],
-            h_align = 0.0,
-            v_align = 0.0,
-            **common,
-        ))
- 
-    return result
 
+        result.append(TextDef(x=x, y=y, px=px, py=row_py,
+            text=names[i], h_align=0.0, v_align=0.0, **common))
+
+        raw_value = raw_values[i]
+        fmt_spec  = formats[i]
+        unit      = value_units[i]
+
+        if callable(raw_value):
+            def _make_value_fn(fn, spec):
+                def _fn(ctx):
+                    try:    v = fn(ctx)
+                    except: v = None
+                    if v is None: return '-'
+                    try:    return format(v, spec) if spec else str(v)
+                    except: return str(v)
+                return _fn
+            value_text_fn = _make_value_fn(raw_value, fmt_spec)
+            value_text    = ''
+        else:
+            value_text_fn = None
+            try:    value_text = format(raw_value, fmt_spec) if fmt_spec else str(raw_value)
+            except: value_text = str(raw_value)
+
+        result.append(TextDef(x=value_x, y=y, px=value_px, py=row_py,
+            text=value_text, text_fn=value_text_fn,
+            h_align=1.0, v_align=0.0, **common))
+
+        result.append(TextDef(x=value_x, y=y, px=value_px + unit_gap, py=row_py,
+            text=unit, h_align=0.0, v_align=0.0, **common))
+
+    return result
 
 # ──────────────────────── _TweenDriver ───────────────────────────
 
@@ -590,7 +574,7 @@ class _TweenDriver:
         while i < n:
             tw = tweens[i]
             group = [tw]
-            if len(group) == 1 and getattr(tw, 'span', (0,1)) == (0,1):
+            if len(group) == 1 and getattr(tw, 'span', (0,1)) == (0,1) and not getattr(tw, 'blend', False):
                 if elapsed < tw.start:
                     return
                 end = tw.start + tw.dur
@@ -1427,17 +1411,21 @@ class AnimatedText(_TweenDriver):
             return template.replace('<#>', value) if '<#>' in template else value
         return template
 
-    def build_font(self):
-        if (self._cached_font is None or self._dirty):
+    def build_font(self, scale: float = 1.0):
+        scaled_size = max(0.5, self.cur_font_size * scale)
+        if self._cached_font is None or self._cached_font.pointSizeF() != scaled_size:
             f = QFont()
             if self.defn.font_family: f.setFamily(self.defn.font_family)
-            f.setPointSizeF(max(0.5, self.cur_font_size))
-            f.setBold(self.defn.bold); f.setItalic(self.defn.italic)
+            f.setPointSizeF(scaled_size)
+            f.setBold(self.defn.bold)
+            f.setItalic(self.defn.italic)
             self._cached_font = f
+            self._cached_fm   = None
         return self._cached_font
 
-    def resolve_pos(self, widget_w, widget_h, cam_w, cam_h, label, font):
-        if (not self._dirty and self._cached_label == label and self._cached_tw == widget_w and self._cached_th == widget_h):
+    def resolve_pos(self, widget_w, widget_h, cam_w, cam_h, label, font, scale=1.0):
+        if (not self._dirty and self._cached_label == label
+                and self._cached_tw == widget_w and self._cached_th == widget_h):
             return self._cached_dx, self._cached_dy
         if self._cached_fm is None or self._dirty:
             self._cached_fm = QFontMetrics(font)
@@ -1447,15 +1435,18 @@ class AnimatedText(_TweenDriver):
             bx = (0.5+(self.cur_x-0.5)*s/(widget_w/cam_w))*widget_w
             by = (0.5+(self.cur_y-0.5)*s/(widget_h/cam_h))*widget_h
         else:
-            bx = self.cur_x*widget_w; by = self.cur_y*widget_h
-        bx += self.cur_px; by += self.cur_py
-        dx = int(bx - self.cur_h_align * fm.horizontalAdvance(label) + self._always_px_offset)
-        dy = int(by + fm.ascent() - self.cur_v_align * fm.height() + self._always_py_offset)
-        self._cached_dx = dx; self._cached_dy = dy
+            bx = self.cur_x*widget_w
+            by = self.cur_y*widget_h
+        bx += self.cur_px * scale
+        by += self.cur_py * scale
+        dx = int(bx - self.cur_h_align * fm.horizontalAdvance(label) + self._always_px_offset * scale)
+        dy = int(by + fm.ascent() - self.cur_v_align * fm.height()   + self._always_py_offset * scale)
+        self._cached_dx    = dx
+        self._cached_dy    = dy
         self._cached_label = label
-        self._cached_tw = widget_w; self._cached_th = widget_h
-        self._dirty = False
-        
+        self._cached_tw    = widget_w
+        self._cached_th    = widget_h
+        self._dirty        = False
         return dx, dy
     
     def resolve_display_text(self, full_label: str) -> str:
@@ -1475,48 +1466,46 @@ class AnimatedText(_TweenDriver):
             return full_label[n - count:]
         return full_label[:count]
     
-    def draw_text(self, painter: QPainter, widget_w: int, widget_h: int, cam_w: int, cam_h: int, ctx: Any) -> None:
+    def draw_text(self, painter: QPainter, widget_w: int, widget_h: int, cam_w: int, cam_h: int, ctx: Any, scale: float = 1.0) -> None:
         if self.hidden:
             return
- 
+
         full_label = self.resolve_text(ctx)
         if not full_label:
             return
- 
+
         cd = self.cur_char_display
         if cd <= 0.0:
             return
- 
-        font = self.build_font()
+
+        scale = 1.0 if self.defn.ignore_scale else scale
+        font = self.build_font(scale)
         fm   = QFontMetrics(font)
- 
+
         orig_x, orig_y = self.cur_x, self.cur_y
         self.cur_x += self._always_x_offset
         self.cur_y += self._always_y_offset
-        dx, dy = self.resolve_pos(widget_w, widget_h, cam_w, cam_h, full_label, font)
+        dx, dy = self.resolve_pos(widget_w, widget_h, cam_w, cam_h, full_label, font, scale)
         self.cur_x, self.cur_y = orig_x, orig_y
-        dx += int(self._always_px_offset)
-        dy += int(self._always_py_offset)
- 
-        color = (self._always_text_color if self._always_text_color is not None else self.cur_color)
- 
+        dx += int(self._always_px_offset * scale)
+        dy += int(self._always_py_offset * scale)
+
+        color = self._always_text_color if self._always_text_color is not None else self.cur_color
+
         painter.setFont(font)
         painter.setPen(color)
- 
+
         if cd >= 1.0:
             painter.drawText(int(dx), int(dy), full_label)
             painter.setPen(Qt.NoPen)
             return
- 
-        n = len(full_label)
- 
+
         if self.defn.sub_char_clip:
             full_w  = fm.horizontalAdvance(full_label)
             clip_w  = full_w * cd
             ascent  = fm.ascent()
             descent = fm.descent()
             height  = ascent + descent
- 
             if self.defn.backward:
                 clip_x = dx + full_w - clip_w
                 painter.save()
@@ -1528,13 +1517,11 @@ class AnimatedText(_TweenDriver):
                 painter.setClipRect(QRectF(dx, dy - ascent, clip_w, height))
                 painter.drawText(int(dx), int(dy), full_label)
                 painter.restore()
- 
         else:
             display_label = self.resolve_display_text(full_label)
             if not display_label:
                 painter.setPen(Qt.NoPen)
                 return
- 
             if self.defn.backward:
                 disp_w  = fm.horizontalAdvance(display_label)
                 full_w  = fm.horizontalAdvance(full_label)
@@ -1542,11 +1529,8 @@ class AnimatedText(_TweenDriver):
                 painter.drawText(int(dx_disp), int(dy), display_label)
             else:
                 painter.drawText(int(dx), int(dy), display_label)
- 
+
         painter.setPen(Qt.NoPen)
-
-
-
 
 # ──────────────────────── SLIDER DEF ────────────────────────
 
@@ -2167,17 +2151,16 @@ class SliderGroup:
             self._text_current._dirty  = True
         
             
-    def draw(self, painter: QPainter, w: int, h: int):
+    def draw(self, painter: QPainter, w: int, h: int, scale: float = 1.0):
         cam_w, cam_h = self.cam_w, self.cam_h
         if self._track     is not None: self._track.draw(painter, w, h, cam_w, cam_h)
         if self._mark_fill is not None: self._mark_fill.draw(painter, w, h, cam_w, cam_h)
         if self._mark_tick is not None: self._mark_tick.draw(painter, w, h, cam_w, cam_h)
         if self._knob      is not None: self._knob.draw(painter, w, h, cam_w, cam_h)
-        for text in (self._text_label, self._text_min,
-                    self._text_max, self._text_current):
+        for text in (self._text_label, self._text_min, self._text_max, self._text_current):
             if text is None or text.hidden:
                 continue
-            text.draw_text(painter, w, h, cam_w, cam_h, self)
+            text.draw_text(painter, w, h, cam_w, cam_h, self, scale=scale)
 
 # ──────────────────────── BUTTON DEF ────────────────────────
 
@@ -2378,10 +2361,10 @@ class AnimatedButton:
         if self._text is not None and not self._text.hidden:
             label = self._text.resolve_text(None)
             if label:
-                font = self._text.build_font()
+                font = self._text.build_font(scale=1.0)
                 painter.setFont(font)
                 painter.setPen(self._text.cur_color)
-                dx, dy = self._text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font)
+                dx, dy = self._text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font, scale=1.0)
                 painter.drawText(dx, dy, label)
                 painter.setPen(Qt.NoPen)
         elif self.defn.label:
@@ -3277,6 +3260,8 @@ class AnimatedWindow:
         if ww <= 0 or wh <= 0:
             return
 
+        scale = min(ww / self.cam_w, wh / self.cam_h)
+
         painter.save()
         painter.translate(wx, wy)
         painter.setClipRect(QRectF(0, 0, ww, wh))
@@ -3287,9 +3272,8 @@ class AnimatedWindow:
             poly.draw(painter, iww, iwh, self.cam_w, self.cam_h)
 
         for text in self._texts:
-            if text.hidden:
-                continue
-            text.draw_text(painter, iww, iwh, self.cam_w, self.cam_h, ctx)
+            if text.hidden: continue
+            text.draw_text(painter, iww, iwh, self.cam_w, self.cam_h, ctx, scale=scale)
 
         for g in self._graphs:
             g.draw(painter, iww, iwh, ctx, self.cam_w, self.cam_h)
@@ -3298,7 +3282,7 @@ class AnimatedWindow:
             pie.draw(painter, iww, iwh, self.cam_w, self.cam_h)
 
         for sl in self._sliders:
-            sl.draw(painter, iww, iwh)
+            sl.draw(painter, iww, iwh, scale=scale)
 
         for btn in self._buttons:
             btn.draw(painter, iww, iwh)
@@ -3490,6 +3474,10 @@ def _ease(t: float, curve) -> float:
     if curve == QEasingCurve.InSine:    return 1.0 - _math.cos(t * _math.pi / 2)
     # Fallback for any unlisted curve
     c = QEasingCurve(curve); return c.valueForProgress(t)
+
+def _tw_replace(tw, **kwargs):
+    d = {**tw.__dict__, **kwargs}
+    return type(tw)(**d)
 
 def lerp_color(src: QColor, dst: QColor, v: float) -> QColor:
     iv = 1.0 - v

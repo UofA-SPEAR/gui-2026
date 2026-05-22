@@ -47,36 +47,40 @@ MAIN_TEXT_DEFS    = []
 
 # ──────────────────────── WINDOW DEFS ────────────────────────
 
-RED_ORANGE = GradientDef(
+WHITE_GRADIENT = GradientDef(
     stops=[
         GradientStop(0.0, QColor(255, 255, 255, 50)),
         GradientStop(1.0, QColor(255, 255, 255, 0)),
     ],
     # phases={
-    #     'open':  Phase([GradientTween(
+    #     'open': Phase([GradientTween(start=0.0, dur=0.4, ease=QEasingCurve.OutQuint, 
     #         stops=[
     #             GradientStop(0.0, QColor(255, 255, 255, 255)),
     #             GradientStop(1.0, QColor(255, 255, 255, 0)),
     #         ],
-    #         start=0.0, dur=0.4, ease=QEasingCurve.OutQuint,
     #     )]),
     # },
 )
 
+# all DataTables shared the same phases so this is a bandaid solution for simplifying for now
+data_table_phase = {
+    'open':  Phase([TextTween(char_display=1.0, color=QColor(200, 220, 255, 220), start=0.6, dur=0.7, ease=QEasingCurve.OutQuint)], line_delay=0.05),
+    'close': Phase([TextTween(char_display=0.0, color=QColor(200, 220, 255,   0), start=0.0, dur=0.5, ease=QEasingCurve.OutQuint)], line_delay=0.00),
+}
+
 MAIN_WINDOW_DEFS = [
-    # EventListener Test
-    WindowDef(
-        p1=P(0.0, 0.0), p2=P(1.0, 1.0),
-        phase_event=_ev['random_phase'],
-        listener_defs=[
-            EventListener(value_fn=lambda ctx: ctx['test_value1']['latest'], targets=[_ev['random_phase']], conditions=[lambda v: v > 5], values=['big', 'small']),
-        ],
-        polygon_defs=[
-            PolygonDef(points=[P(0.0, 0.0), P(0.1, 0.0), P(0.1, 0.1), P(0.0, 0.1)], fill_color=QColor(20, 20, 20, 255), phases={
-                    'big':  Phase([PolygonTween(fill_color=QColor(20, 255, 20, 255), start=0.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
-                    'small':  Phase([PolygonTween(fill_color=QColor(255, 20, 20, 255), start=0.0, dur=0.5, ease=QEasingCurve.OutQuint)])}),
-        ]
-    ),
+    # WindowDef(
+    #     p1=P(0.0, 0.0), p2=P(1.0, 1.0),
+    #     phase_event=_ev['random_phase'],
+    #     listener_defs=[
+    #         EventListener(value_fn=lambda ctx: ctx['test_value1']['latest'], targets=[_ev['random_phase']], conditions=[lambda v: v > 5], values=['big', 'small']),
+    #     ],
+    #     polygon_defs=[
+    #         PolygonDef(points=[P(0.0, 0.0), P(0.1, 0.0), P(0.1, 0.1), P(0.0, 0.1)], fill_color=QColor(20, 20, 20, 255), phases={
+    #                 'big':  Phase([PolygonTween(fill_color=QColor(20, 255, 20, 255), start=0.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
+    #                 'small':  Phase([PolygonTween(fill_color=QColor(255, 20, 20, 255), start=0.0, dur=0.5, ease=QEasingCurve.OutQuint)])}),
+    #     ]
+    # ),
 
     # WindowDef(
     #     p1=P(0.50, 0.00), p2=P(1.00, 0.50),
@@ -195,286 +199,362 @@ MAIN_WINDOW_DEFS = [
     #     ],
     # ),
     
-    WindowDef(
-        p1=P(0.50, 0.50), p2=P(1.00, 1.00),
-        phase_event=_ev['window2_phase'],
-        text_defs=[
-            TextDef(x=0.50, y=0.10, text='Number: <#>', font_size=9.0, color=QColor(255, 255, 255, 255), h_align=0.5, v_align=0.0,
-            text_fn=lambda ctx: _ev['graph_steps'].value),
-        ],
-        slider_defs=[
-            SliderDef(x=0.20, y=0.40, lx=0.60, attr=AttributeDef(value_fn=lambda ctx: _ev['graph_steps'].value, set_fn  =lambda ctx, v: None, min_val=0, max_val=10, step=1, label='GRAPH STEPS', unit=''), event_out=_ev['graph_steps']),
-            SliderDef(x=0.20, y=0.60, lx=0.60, attr=AttributeDef(value_fn=lambda ctx: _ev['graph_time'].value, set_fn  =lambda ctx, v: None, min_val=1, max_val=60, step=1, label='GRAPH TIME', unit='s'), event_out=_ev['graph_time']),
-        ],
-        button_defs=[
-            ButtonDef(key=Qt.Key_W, action='set', event_out=_ev['window5_phase'], event_delta='open'),
-            ButtonDef(key=Qt.Key_S, action='set', event_out=_ev['window5_phase'], event_delta='close'),
-            ButtonDef(key=Qt.Key_A, action='increment', event_out=_ev['graph_steps'], event_delta=10),
-            ButtonDef(key=Qt.Key_Up, action='set', event_out=_ev['test_event'], event_delta='test_value9'),
-            ButtonDef(key=Qt.Key_Down, action='set', event_out=_ev['test_event'], event_delta='test_value1'),
+    # WindowDef(
+    #     p1=P(0.50, 0.50), p2=P(1.00, 1.00),
+    #     phase_event=_ev['window2_phase'],
+    #     text_defs=[
+    #         TextDef(x=0.50, y=0.10, text='Number: <#>', font_size=9.0, color=QColor(255, 255, 255, 255), h_align=0.5, v_align=0.0,
+    #         text_fn=lambda ctx: _ev['graph_steps'].value),
+    #     ],
+    #     slider_defs=[
+    #         SliderDef(x=0.20, y=0.40, lx=0.60, attr=AttributeDef(value_fn=lambda ctx: _ev['graph_steps'].value, set_fn  =lambda ctx, v: None, min_val=0, max_val=10, step=1, label='GRAPH STEPS', unit=''), event_out=_ev['graph_steps']),
+    #         SliderDef(x=0.20, y=0.60, lx=0.60, attr=AttributeDef(value_fn=lambda ctx: _ev['graph_time'].value, set_fn  =lambda ctx, v: None, min_val=1, max_val=60, step=1, label='GRAPH TIME', unit='s'), event_out=_ev['graph_time']),
+    #     ],
+    #     button_defs=[
+    #         ButtonDef(key=Qt.Key_A, action='increment', event_out=_ev['graph_steps'], event_delta=10),
+    #         ButtonDef(
+    #             poly=ButtonDiamond(p=P(0.25, 0.25), px=P(0, 0), size=40),
+    #             label='+', text_color=QColor(160, 255, 160, 255),
+    #             key=Qt.Key_Up, action='increment', event_out=_ev['graph_steps'], event_delta=1,
+    #         ),
+    #         ButtonDef(
+    #             poly=ButtonDiamond(p=P(0.50, 0.25), px=P(0, 0), size=40),
+    #             label='−', text_color=QColor(255, 160, 160, 255),
+    #             key=Qt.Key_Down, action='increment', event_out=_ev['graph_steps'], event_delta=-1,
+    #         ),
+    #         ButtonDef(
+    #             poly=ButtonDiamond(p=P(0.75, 0.25), px=P(0, 0), size=40),
+    #             label='set', text_color=QColor(255, 255, 255, 220),
+    #             action='set', event_out=_ev['graph_steps'], event_delta=4,
+    #         ),
+    #         ButtonDef(
+    #             poly=ButtonDiamond(p=P(0.25, 0.75), px=P(0, 0), size=40),
+    #             label='1', text_color=QColor(255, 255, 255, 220),
+    #             key=Qt.Key_Left, action='set', event_out=_ev['window4_phase'], event_delta='open',
+    #         ),
+    #         ButtonDef(
+    #             poly=ButtonDiamond(p=P(0.50, 0.75), px=P(0, 0), size=40),
+    #             label='2', text_color=QColor(255, 255, 255, 220),
+    #             key=Qt.Key_Right, action='set', event_out=_ev['window4_phase'], event_delta='close',
+    #         ),
+    #         ButtonDef(
+    #             poly=ButtonDiamond(p=P(0.75, 0.75), px=P(0, 0), size=40),
+    #             label='3', text_color=QColor(255, 255, 255, 220),
+    #             action='set', event_out=_ev['test_event'], event_delta='test_value9',
+    #         ),
+    #     ],
+    # ),
+
+    # WindowDef(
+    #     p1=P(0.0, 0.0), p2=P(1.0, 1.0),
+    #     phase_event=_ev['window4_phase'],
+    #     gradient_defs=[WHITE_GRADIENT],
+    #     polygon_defs=[
+
+    #         # BOTTOM LEFT BEVEL CORNER
+    #         PolygonDef(
+    #             points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
+    #             px=[P(0, -90), P(10, -90), P(90, -10), P(90, 0)],
+    #             fill_color = QColor(255, 255, 255, 0),
+    #             outline_color = QColor(100, 100, 100, 255),
+    #             line_width = 2,
+    #             closed=False,
+    #             draw_progress=0,
+    #             d_flip=True,
+    #             phases={
+    #                 'open': Phase([PolygonTween(draw_progress=1, start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([Reset()]),
+    #             },
+    #         ),
+    #         PolygonDef(
+    #             points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
+    #             px=[P(3, -88), P(8, -88), P(18, -78), P(15, -78), P(7, -85), P(3, -85)],
+    #             fill_color = QColor(255, 255, 255, 0),
+    #             phases={
+    #                 'open': Phase([PolygonTween(fill_color=QColor(255, 255, 255, 255), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([Reset()]),
+    #             },
+    #         ),
+    #         PolygonDef(
+    #             points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
+    #             px=[P(88, -3), P(88, -8), P(78, -18), P(78, -15), P(85, -7), P(85, -3)],
+    #             fill_color = QColor(255, 255, 255, 0),
+    #             phases={
+    #                 'open': Phase([PolygonTween(fill_color=QColor(255, 255, 255, 255), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([Reset()]),
+    #             },
+    #         ),
+    #         PolygonDef(
+    #             points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
+    #             px=[P(16, -75), P(19, -75), P(75, -19), P(75, -16)],
+    #             fill_color = QColor(255, 255, 255, 0),
+    #             phases={
+    #                 'open': Phase([PolygonTween(fill_color=QColor(255, 255, 255, 255), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([Reset()]),
+    #             },
+    #         ),
+    #         PolygonDef(
+    #             points=[P(0.0, 1.0), P(0.0, 1.0), P(0.0, 1.0), P(0.0, 1.0)],
+    #             px=[P(19, -75), P(19, -100), P(100, -19), P(75, -19)],
+    #             gradient=WHITE_GRADIENT,
+    #             gradient_p1=P(0.0, 1.0), gradient_px1=P(40, -40),
+    #             gradient_p2=P(0.0, 1.0), gradient_px2=P(41, -41),
+    #             phases={
+    #                 'open': Phase([PolygonTween(gradient_px1=P(49, -49), gradient_px2=P(60, -60), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([Reset()]),
+    #             },
+    #         ),
+
+    #         # BOTTOM LINE
+    #         PolygonDef(
+    #             points=[P(1, 1), P(0, 1), P(0, 1), P(0, 0)],
+    #             px=[P(0, -15), P(95, -15), P(15, -95), P(15, 100)],
+    #             fill_color = QColor(255, 255, 255, 0),
+    #             outline_color = QColor(100, 100, 100, 255),
+    #             line_width = 2,
+    #             closed=False,
+    #             draw_progress=0,
+    #             d_flip=True,
+    #             phases={
+    #                 'open': Phase([PolygonTween(draw_progress=1, start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([Reset()]),
+    #             },
+    #         ),
+
+    #         Rect(P(0.40, 0.40), P(0.60, 0.60), fill_color=QColor(255, 255, 255, 255), phases={
+    #             'open': Phase([Reset(),
+    #                 RectTween(P(0.20, 0.40), P(0.40, 0.60), start=0.00, dur=2.00, ease=QEasingCurve.OutSine, blend=True),
+    #                 RectTween(P(0.00, 0.20), P(0.00, 0.20), start=1.00, dur=0.70, ease=QEasingCurve.OutSine)])}),
 
 
-            ButtonDef(
-                poly=ButtonDiamond(p=P(0.25, 0.25), px=P(0, 0), size=40),
-                label='+', text_color=QColor(160, 255, 160, 255),
-                key=Qt.Key_Up, action='increment', event_out=_ev['graph_steps'], event_delta=1,
-            ),
-            ButtonDef(
-                poly=ButtonDiamond(p=P(0.50, 0.25), px=P(0, 0), size=40),
-                label='−', text_color=QColor(255, 160, 160, 255),
-                key=Qt.Key_Down, action='increment', event_out=_ev['graph_steps'], event_delta=-1,
-            ),
-            ButtonDef(
-                poly=ButtonDiamond(p=P(0.75, 0.25), px=P(0, 0), size=40),
-                label='set', text_color=QColor(255, 255, 255, 220),
-                action='set', event_out=_ev['graph_steps'], event_delta=4,
-            ),
-            ButtonDef(
-                poly=ButtonDiamond(p=P(0.25, 0.75), px=P(0, 0), size=40),
-                label='1', text_color=QColor(255, 255, 255, 220),
-                key=Qt.Key_Left, action='set', event_out=_ev['window4_phase'], event_delta='open',
-            ),
-            ButtonDef(
-                poly=ButtonDiamond(p=P(0.50, 0.75), px=P(0, 0), size=40),
-                label='2', text_color=QColor(255, 255, 255, 220),
-                key=Qt.Key_Right, action='set', event_out=_ev['window4_phase'], event_delta='close',
-            ),
-            ButtonDef(
-                poly=ButtonDiamond(p=P(0.75, 0.75), px=P(0, 0), size=40),
-                label='3', text_color=QColor(255, 255, 255, 220),
-                action='set', event_out=_ev['test_event'], event_delta='test_value9',
-            ),
-        ],
-    ),
+
+
+
+    #         # Same gradient, different polygon shape and anchor direction (vertical)
+    #         PolygonDef(
+    #             points=[P(0.6, 0.2), P(0.9, 0.2), P(0.9, 0.5), P(0.6, 0.5)],
+    #             closed=True,
+    #             gradient=WHITE_GRADIENT,
+    #             gradient_p1=P(0.6, 0.2), gradient_px1=P(0, 0),
+    #             gradient_p2=P(0.6, 0.5), gradient_px2=P(0, 0),
+    #             phases={},
+    #         ),
+
+    #         PolygonDef(
+    #             points=[P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5)],
+    #             px=[P(-35, -35), P(-15, -35), P(-15, -15), P(-35, -15)],
+    #             closed=True,
+    #             fill_color=QColor(100, 150, 255, 180),
+    #             phases={
+    #                 'open': Phase([PolygonTween(fill_color=QColor(100, 150, 255, 180), start=0.0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([PolygonTween(fill_color=QColor(100, 150, 255, 0), start=0.0, dur=0.3, ease=QEasingCurve.InQuint)]),
+    #                 'always': Phase(
+    #                     tweens=[
+    #                         PolygonTween(px=[P(50, 0), P(50, 0), P(50, 0), P(50, 0)], start=0.0, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                         PolygonTween(px=[P(50, 50), P(50, 50), P(50, 50), P(50, 50)], start=0.5, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                         PolygonTween(px=[P(0, 50), P(0, 50), P(0, 50), P(0, 50)], start=1.0, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                         PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=1.5, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                     ],
+    #                     loop=True,
+    #                     stop_phases=['close'],
+    #                 ),
+    #             },
+    #         ),
+    #         # Fix desync for always phases
+    #         PolygonDef(
+    #             points=[P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5)],
+    #             px=[P(15, 15), P(35, 15), P(35, 35), P(15, 35)],
+    #             closed=True,
+    #             fill_color=QColor(255, 150, 255, 180),
+    #             phases={
+    #                 'open': Phase([PolygonTween(fill_color=QColor(255, 150, 255, 180), start=0.0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([PolygonTween(fill_color=QColor(255, 150, 255, 0), start=0.0, dur=0.3, ease=QEasingCurve.InQuint)]),
+    #                 'always': Phase(
+    #                     tweens=[
+    #                         PolygonTween(px=[P(-50, 0), P(-50, 0), P(-50, 0), P(-50, 0)], start=0.0, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                         PolygonTween(px=[P(-50, -50), P(-50, -50), P(-50, -50), P(-50, -50)], start=0.5, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                         PolygonTween(px=[P(0, -50), P(0, -50), P(0, -50), P(0, -50)], start=1.0, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                         PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=1.5, dur=0.5, ease=QEasingCurve.OutQuint),
+    #                     ],
+    #                     loop=True,
+    #                     stop_phases=['close'],
+    #                 ),
+    #             },
+    #         ),
+    #     ],
+    #     text_defs=[
+    #         TextDef(x=1.00, y=0.50, px=0, py=10, text='TEST TEST TEST TEST TEST TEST TEST TEST TEST', font_size=30.0, color=QColor(255, 255, 255, 127), bold=True, italic=True, h_align=0, v_align=0,
+    #             phases={
+    #                 'open': Phase([Reset(), TextTween(x=0.00, start=0, dur=1, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([TextTween(x=-2.00, start=0, dur=1, ease=QEasingCurve.InQuint)]),
+    #                 'always': Phase([
+    #                     TextTween(px=-62.2, start=0.0, dur=1, ease=QEasingCurve.InOutQuad),
+    #                     TextTween(px=0, start=1, dur=1, ease=QEasingCurve.InOutQuad),
+    #                 ], loop=True, stop_phases=['close']),
+    #             },
+    #         ),
+    #         # TextDef(x=0.00, y=0.50, px=0, py=10, text='TEST', font_size=30.0, color=QColor(255, 0, 0, 127), bold=True, italic=True, h_align=0, v_align=0,
+    #         # ),
+    #         # TextDef(x=0.30, y=0.00, px=0, py=10, text='LAUNCHING SPEAR_GUI', font_size=30.0, char_display=0.0, sub_char_clip=True, backward=True, color=QColor(255, 255, 255, 127), bold=True, italic=True, h_align=0, v_align=0,
+    #         #     phases={
+    #         #         'open': Phase([TextTween(x=0.00, px=10, char_display=1.0, color=QColor(255, 255, 255, 255), start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)]),
+    #         #         'close': Phase([Reset()]),
+    #         #     },
+    #         # ),
+    #         #'AnimatedText' object has no attribute '_apply_blend'
+    #         # Make text blending, then use this version
+    #         TextDef(x=0.50, y=0.00, px=10, py=10, text='PLACEHOLDER TEXT', font_size=30.0, char_display=0.0, sub_char_clip=True, color=QColor(255, 255, 255, 127), bold=True, italic=True, h_align=0, v_align=0,
+    #             phases={
+    #                 'open': Phase([TextTween(char_display=1.0, color=QColor(255, 255, 255, 255), start=0.0, dur=2.5, ease=QEasingCurve.OutQuint, blend=True),
+    #                                TextTween(x=-0.50, start=0.0, dur=1.5, ease=QEasingCurve.OutQuint)]),
+    #                 'close': Phase([Reset()]),
+    #             },
+    #         ),
+    #     ],
+    # ),
 
     WindowDef(
         p1=P(0.0, 0.0), p2=P(1.0, 1.0),
-        phase_event=_ev['window4_phase'],
-        gradient_defs=[RED_ORANGE],
-        polygon_defs=[
-
-            # BOTTOM LEFT BEVEL CORNER
-            PolygonDef(
-                points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
-                px=[P(0, -90), P(10, -90), P(90, -10), P(90, 0)],
-                fill_color = QColor(255, 255, 255, 0),
-                outline_color = QColor(100, 100, 100, 255),
-                line_width = 2,
-                closed=False,
-                draw_progress=0,
-                d_flip=True,
-                phases={
-                    'open': Phase([PolygonTween(draw_progress=1, start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([Reset()]),
-                },
-            ),
-            PolygonDef(
-                points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
-                px=[P(3, -88), P(8, -88), P(18, -78), P(15, -78), P(7, -85), P(3, -85)],
-                fill_color = QColor(255, 255, 255, 0),
-                phases={
-                    'open': Phase([PolygonTween(fill_color=QColor(255, 255, 255, 255), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([Reset()]),
-                },
-            ),
-            PolygonDef(
-                points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
-                px=[P(88, -3), P(88, -8), P(78, -18), P(78, -15), P(85, -7), P(85, -3)],
-                fill_color = QColor(255, 255, 255, 0),
-                phases={
-                    'open': Phase([PolygonTween(fill_color=QColor(255, 255, 255, 255), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([Reset()]),
-                },
-            ),
-            PolygonDef(
-                points=[P(0, 1), P(0, 1), P(0, 1), P(0, 1)],
-                px=[P(16, -75), P(19, -75), P(75, -19), P(75, -16)],
-                fill_color = QColor(255, 255, 255, 0),
-                phases={
-                    'open': Phase([PolygonTween(fill_color=QColor(255, 255, 255, 255), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([Reset()]),
-                },
-            ),
-            PolygonDef(
-                points=[P(0.0, 1.0), P(0.0, 1.0), P(0.0, 1.0), P(0.0, 1.0)],
-                px=[P(19, -75), P(19, -100), P(100, -19), P(75, -19)],
-                gradient=RED_ORANGE,
-                gradient_p1=P(0.0, 1.0), gradient_px1=P(40, -40),
-                gradient_p2=P(0.0, 1.0), gradient_px2=P(41, -41),
-                phases={
-                    'open': Phase([PolygonTween(gradient_px1=P(49, -49), gradient_px2=P(60, -60), start=1.0, dur=0.5, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([Reset()]),
-                },
-            ),
-
-            # BOTTOM LINE
-            PolygonDef(
-                points=[P(1, 1), P(0, 1), P(0, 1), P(0, 0)],
-                px=[P(0, -15), P(95, -15), P(15, -95), P(15, 100)],
-                fill_color = QColor(255, 255, 255, 0),
-                outline_color = QColor(100, 100, 100, 255),
-                line_width = 2,
-                closed=False,
-                draw_progress=0,
-                d_flip=True,
-                phases={
-                    'open': Phase([PolygonTween(draw_progress=1, start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([Reset()]),
-                },
-            ),
-
-            Rect(P(0.40, 0.40), P(0.60, 0.60), fill_color=QColor(255, 255, 255, 255), phases={
-                'open': Phase([Reset(),
-                    RectTween(P(0.20, 0.40), P(0.40, 0.60), start=0.00, dur=2.00, ease=QEasingCurve.OutSine, blend=True),
-                    RectTween(P(0.00, 0.20), P(0.00, 0.20), start=1.00, dur=0.70, ease=QEasingCurve.OutSine)])}),
-
-
-
-
-
-            # Same gradient, different polygon shape and anchor direction (vertical)
-            PolygonDef(
-                points=[P(0.6, 0.2), P(0.9, 0.2), P(0.9, 0.5), P(0.6, 0.5)],
-                closed=True,
-                gradient=RED_ORANGE,
-                gradient_p1=P(0.6, 0.2), gradient_px1=P(0, 0),
-                gradient_p2=P(0.6, 0.5), gradient_px2=P(0, 0),
-                phases={},
-            ),
-
-            PolygonDef(
-                points=[P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5)],
-                px=[P(-35, -35), P(-15, -35), P(-15, -15), P(-35, -15)],
-                closed=True,
-                fill_color=QColor(100, 150, 255, 180),
-                phases={
-                    'open': Phase([PolygonTween(fill_color=QColor(100, 150, 255, 180), start=0.0, dur=0.4, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([PolygonTween(fill_color=QColor(100, 150, 255, 0), start=0.0, dur=0.3, ease=QEasingCurve.InQuint)]),
-                    'always': Phase(
-                        tweens=[
-                            PolygonTween(px=[P(50, 0), P(50, 0), P(50, 0), P(50, 0)], start=0.0, dur=0.5, ease=QEasingCurve.OutQuint),
-                            PolygonTween(px=[P(50, 50), P(50, 50), P(50, 50), P(50, 50)], start=0.5, dur=0.5, ease=QEasingCurve.OutQuint),
-                            PolygonTween(px=[P(0, 50), P(0, 50), P(0, 50), P(0, 50)], start=1.0, dur=0.5, ease=QEasingCurve.OutQuint),
-                            PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=1.5, dur=0.5, ease=QEasingCurve.OutQuint),
-                        ],
-                        loop=True,
-                        stop_phases=['close'],
-                    ),
-                },
-            ),
-            # Fix desync for always phases
-            PolygonDef(
-                points=[P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5), P(0.5, 0.5)],
-                px=[P(15, 15), P(35, 15), P(35, 35), P(15, 35)],
-                closed=True,
-                fill_color=QColor(255, 150, 255, 180),
-                phases={
-                    'open': Phase([PolygonTween(fill_color=QColor(255, 150, 255, 180), start=0.0, dur=0.4, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([PolygonTween(fill_color=QColor(255, 150, 255, 0), start=0.0, dur=0.3, ease=QEasingCurve.InQuint)]),
-                    'always': Phase(
-                        tweens=[
-                            PolygonTween(px=[P(-50, 0), P(-50, 0), P(-50, 0), P(-50, 0)], start=0.0, dur=0.5, ease=QEasingCurve.OutQuint),
-                            PolygonTween(px=[P(-50, -50), P(-50, -50), P(-50, -50), P(-50, -50)], start=0.5, dur=0.5, ease=QEasingCurve.OutQuint),
-                            PolygonTween(px=[P(0, -50), P(0, -50), P(0, -50), P(0, -50)], start=1.0, dur=0.5, ease=QEasingCurve.OutQuint),
-                            PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=1.5, dur=0.5, ease=QEasingCurve.OutQuint),
-                        ],
-                        loop=True,
-                        stop_phases=['close'],
-                    ),
-                },
-            ),
-        ],
-        text_defs=[
-            TextDef(x=1.00, y=0.50, px=0, py=10, text='TEST TEST TEST TEST TEST TEST TEST TEST TEST', font_size=30.0, color=QColor(255, 255, 255, 127), bold=True, italic=True, h_align=0, v_align=0,
-                phases={
-                    'open': Phase([Reset(), TextTween(x=0.00, start=0, dur=1, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([TextTween(x=-2.00, start=0, dur=1, ease=QEasingCurve.InQuint)]),
-                    'always': Phase([
-                        TextTween(px=-62.2, start=0.0, dur=1, ease=QEasingCurve.InOutQuad),
-                        TextTween(px=0, start=1, dur=1, ease=QEasingCurve.InOutQuad),
-                    ], loop=True, stop_phases=['close']),
-                },
-            ),
-            # TextDef(x=0.00, y=0.50, px=0, py=10, text='TEST', font_size=30.0, color=QColor(255, 0, 0, 127), bold=True, italic=True, h_align=0, v_align=0,
-            # ),
-            # TextDef(x=0.30, y=0.00, px=0, py=10, text='LAUNCHING SPEAR_GUI', font_size=30.0, char_display=0.0, sub_char_clip=True, backward=True, color=QColor(255, 255, 255, 127), bold=True, italic=True, h_align=0, v_align=0,
-            #     phases={
-            #         'open': Phase([TextTween(x=0.00, px=10, char_display=1.0, color=QColor(255, 255, 255, 255), start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)]),
-            #         'close': Phase([Reset()]),
-            #     },
-            # ),
-            #'AnimatedText' object has no attribute '_apply_blend'
-            # Make text blending, then use this version
-            TextDef(x=0.50, y=0.00, px=10, py=10, text='PLACEHOLDER TEXT', font_size=30.0, char_display=0.0, sub_char_clip=True, color=QColor(255, 255, 255, 127), bold=True, italic=True, h_align=0, v_align=0,
-                phases={
-                    'open': Phase([TextTween(char_display=1.0, color=QColor(255, 255, 255, 255), start=0.0, dur=2.5, ease=QEasingCurve.OutQuint, blend=True),
-                                   TextTween(x=-0.50, start=0.0, dur=1.5, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([Reset()]),
-                },
-            ),
-        ],
+        button_defs=[
+            # This assigns actions to keybinds on your keyboard (W/S opens/closes window5, UpArrow/DownArrow changes the subscription topic for one of the events)
+            ButtonDef(key=Qt.Key_W, action='set', event_out=_ev['window5_phase'], event_delta='open'),
+            ButtonDef(key=Qt.Key_S, action='set', event_out=_ev['window5_phase'], event_delta='close'),
+            ButtonDef(key=Qt.Key_Up, action='set', event_out=_ev['test_event'], event_delta='test_value9'),
+            ButtonDef(key=Qt.Key_Down, action='set', event_out=_ev['test_event'], event_delta='test_value1'),
+        ]
     ),
     
     WindowDef(
         p1=P(0.5, 0.5), p2=P(0.5, 0.5),
         phase_event=_ev['window5_phase'],
-        gradient_defs=[RED_ORANGE],
         phases={
             'open':  WindowPhase([WindowTween(p1=P(0.00, 0.00), p2=P(1.00, 1.00), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
             'close': WindowPhase([WindowTween(p1=P(0.50, 0.50), p2=P(0.50, 0.50), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
         },
         polygon_defs=[
             Rect(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(0, 0, 0, 255)),
-
             Rect(p1=P(0, 0), p2=P(0, 1), px2=P(1, 0), fill_color=QColor(255, 255, 255, 255)),
             Rect(p1=P(1, 0), p2=P(1, 1), px1=P(-1, 0), fill_color=QColor(255, 255, 255, 255)),
             Rect(p1=P(0, 0), p2=P(1, 0), px2=P(0, 1), fill_color=QColor(255, 255, 255, 255)),
             Rect(p1=P(0, 1), p2=P(1, 1), px1=P(0, -1), fill_color=QColor(255, 255, 255, 255)),
         ],
         text_defs=[
-            *DataTable(x=0.05, y=0.30, px=0, py=0, value_x=0.30, value_px=0, row_height=18.0, char_display=0.0, sub_char_clip=True, color=QColor(200, 220, 255, 220),
-                value_names=['AMPS', 'VOLTS',   'RPM',  'RPM (REQ)'],
-                values=[
-                    lambda ctx: ctx['test_value1']['latest'],
-                    lambda ctx: ctx['test_value2']['latest'],
-                    lambda ctx: ctx['test_value3']['latest'],
-                    lambda ctx: ctx[_ev['test_event'].value]['latest'],
-                ],
-                value_units=['A', 'V', 'r/m', 'r/m'],
-                formats=['.2f', '.2f', '.1f', '.1f'],
-                phases={
-                    'open': Phase([TextTween(char_display=1.0, color=QColor(200, 220, 255, 220), start=0.6, dur=0.7, ease=QEasingCurve.OutQuint)], line_delay=0.05),
-                    'close': Phase([TextTween(char_display=0.0, color=QColor(200, 220, 255, 0), start=0.0, dur=0.5, ease=QEasingCurve.OutQuint)], line_delay=0.00),
-                },
-            ),
-            TextDef(x=0.05, y=0.30, px=0, py=0, text='FRONT LEFT', font_size=12.0, char_display=0.0, sub_char_clip=True, color=QColor(200, 220, 255, 220), bold=True, italic=True, h_align=0, v_align=1,
-                phases={
-                    'open': Phase([Reset(), TextTween(char_display=1.0, start=0.5, dur=1, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([TextTween(char_display=0.0, start=0, dur=0.5, ease=QEasingCurve.OutQuint)]),
-                },
-            ),
+            # Data tables takes in a list of values, which are a tuple of the following values:
+            # 0 = Name   (string label on the left of the table)
+            # 1 = Value  (the number that will be displayed, this typically is where you take reference of a subscription, such as in these examples)
+            # 2 = Unit   (displayed string directly behind the value number)
+            # 3 = Format (can be used if you want to display a certain number of decimal points)
 
-            *DataTable(x=0.5, y=0.30, px=0, py=0, value_x=0.75, value_px=0, row_height=18.0, char_display=0.0, sub_char_clip=True, color=QColor(200, 220, 255, 220),
-                value_names=['AMPS', 'VOLTS',   'RPM',  'RPM (REQ)'],
-                values=[
-                    lambda ctx: ctx['test_value4']['latest'],
-                    lambda ctx: ctx['test_value5']['latest'],
-                    lambda ctx: ctx['test_value6']['latest'],
-                    lambda ctx: ctx['test_value7']['latest'],
-                ],
-                value_units=['A', 'V', 'r/m', 'r/m'],
-                formats=['.2f', '.2f', '.1f', '.1f'],
-                phases={
-                    'open': Phase([TextTween(char_display=1.0, color=QColor(200, 220, 255, 220), start=0.7, dur=0.7, ease=QEasingCurve.OutQuint)], line_delay=0.05),
-                    'close': Phase([TextTween(char_display=0.0, color=QColor(200, 220, 255, 0), start=0.0, dur=0.5, ease=QEasingCurve.OutQuint)], line_delay=0.00),
-                },
-            ),
-            TextDef(x=0.5, y=0.30, px=0, py=0, text='FRONT RIGHT', font_size=12.0, char_display=0.0, sub_char_clip=True, color=QColor(200, 220, 255, 220), bold=True, italic=True, h_align=0, v_align=1,
-                phases={
-                    'open': Phase([Reset(), TextTween(char_display=1, start=0.6, dur=1, ease=QEasingCurve.OutQuint)]),
-                    'close': Phase([TextTween(char_display=0.0, start=0, dur=0.5, ease=QEasingCurve.OutQuint)]),
-                },
-            ),
+            # Note that you could get away with making the tables in a for loop, as the only difference really is just the x, y, value_x, and values data
+            # Doing this is similar to what i did with assigning each DataTable the same phase
+            # There will be a better way to make similar objects faster in a cleaner way in the future
+
+            *DataTable(x=0, y=0, px=0, py=20, value_x=0.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('STEER DEG ',      lambda ctx: ctx['test_value1']['latest'], 'rad', '.2f'),
+                    ('STEER DEG (REQ)', lambda ctx: ctx['test_value2']['latest'], 'rad', '.2f'),
+            ]),
+            *DataTable(x=3/6, y=0, px=0, py=20, value_x=3.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('STEER DEG ',      lambda ctx: ctx['test_value3']['latest'], 'rad', '.2f'),
+                    ('STEER DEG (REQ)', lambda ctx: ctx['test_value4']['latest'], 'rad', '.2f'),
+            ]),
+            *DataTable(x=0, y=4/6, px=0, py=20, value_x=0.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('STEER DEG ',      lambda ctx: ctx['test_value5']['latest'], 'rad', '.2f'),
+                    ('STEER DEG (REQ)', lambda ctx: ctx['test_value6']['latest'], 'rad', '.2f'),
+            ]),
+            *DataTable(x=3/6, y=4/6, px=0, py=20, value_x=3.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('STEER DEG ',      lambda ctx: ctx['test_value7']['latest'], 'rad', '.2f'),
+                    ('STEER DEG (REQ)', lambda ctx: ctx['test_value8']['latest'], 'rad', '.2f'),
+            ]),
+
+            *DataTable(x=1/6, y=1/6, px=0, py=20, value_x=1.9/6, value_px=0, title='FRONT LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',      lambda ctx: ctx['test_value1']['latest'],           'A',   '.2f'),
+                    ('VOLTS',     lambda ctx: ctx['test_value2']['latest'],           'V',   '.2f'),
+                    ('RPM',       lambda ctx: ctx['test_value3']['latest'],           'r/m', '.1f'),
+                    ('RPM (REQ)', lambda ctx: ctx[_ev['test_event'].value]['latest'], 'r/m', '.1f'), # If you saw the comment next to the ButtonDefs, this is the subscription topic that changes (this is purely just to test changing topics)
+            ]),
+            *DataTable(x=2/6, y=1/6, px=0, py=20, value_x=2.9/6, value_px=0, title='FRONT RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=1/6, y=2/6, px=0, py=20, value_x=1.9/6, value_px=0, title='MIDDLE LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',      lambda ctx: ctx['test_value1']['latest'], 'A',   '.2f'),
+                    ('VOLTS',     lambda ctx: ctx['test_value2']['latest'], 'V',   '.2f'),
+                    ('RPM',       lambda ctx: ctx['test_value3']['latest'], 'r/m', '.1f'),
+                    ('RPM (REQ)', lambda ctx: ctx['test_value4']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=2/6, y=2/6, px=0, py=20, value_x=2.9/6, value_px=0, title='MIDDLE RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=1/6, y=3/6, px=0, py=20, value_x=1.9/6, value_px=0, title='MIDDLE LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',      lambda ctx: ctx['test_value1']['latest'], 'A',   '.2f'),
+                    ('VOLTS',     lambda ctx: ctx['test_value2']['latest'], 'V',   '.2f'),
+                    ('RPM',       lambda ctx: ctx['test_value3']['latest'], 'r/m', '.1f'),
+                    ('RPM (REQ)', lambda ctx: ctx['test_value4']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=2/6, y=3/6, px=0, py=20, value_x=2.9/6, value_px=0, title='MIDDLE RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+            ]),
+
+            *DataTable(x=4/6, y=0/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 0', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+                    ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=4/6, y=1/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 1', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+                    ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=4/6, y=2/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 2', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+                    ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=4/6, y=3/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 3', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+                    ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=4/6, y=4/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 4', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+                    ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=4/6, y=5/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 5', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+                    ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=5/6, y=0, px=0, py=20, value_x=5.9/6, value_px=0, title='MISC DATA', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('INTERNAL TEMP', lambda ctx: ctx['test_value5']['latest'], '°C',   '.2f'),
+                    ('EXTERNAL TEMP', lambda ctx: ctx['test_value5']['latest'], '°C',   '.2f'),
+                    ('CPU',           lambda ctx: ctx['test_value6']['latest'], '%',    '.2f'),
+                    ('RAM',           lambda ctx: ctx['test_value7']['latest'], '%',    '.1f'),
+                    ('BATTERY',       lambda ctx: ctx['test_value8']['latest'], '%',    '.1f'),
+                    ('VOLTAGE',       lambda ctx: ctx['test_value9']['latest'], 'V',    '.1f'),
+                    ('CONNECTION',    lambda ctx: ctx['test_value9']['latest'], 'Mbps', '.1f'),
+                    ('LATENCY',       lambda ctx: ctx['test_value9']['latest'], 'ms',   '.1f'),
+            ]),
         ],
     ),
 
