@@ -1150,138 +1150,145 @@ MAIN_WINDOW_DEFS = [
     #     ]
     # ),
     
-    # WindowDef(
-    #     p1=P(0.5, 0.5), p2=P(0.5, 0.5),
-    #     phase_event=_ev['window5_phase'],
-    #     phases={
-    #         P_OPEN:  Phase([WindowTween(p1=P(0.00, 0.00), p2=P(1.00, 1.00), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-    #         P_CLOSE: Phase([WindowTween(p1=P(0.50, 0.50), p2=P(0.50, 0.50), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
-    #     },
-    #     polygon_defs=[
-    #         RectDef(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(0, 0, 0, 255)),
-    #         RectDef(p1=P(0, 0), p2=P(0, 1), px2=P(1, 0), fill_color=QColor(255, 255, 255, 255)),
-    #         RectDef(p1=P(1, 0), p2=P(1, 1), px1=P(-1, 0), fill_color=QColor(255, 255, 255, 255)),
-    #         RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 1), fill_color=QColor(255, 255, 255, 255)),
-    #         RectDef(p1=P(0, 1), p2=P(1, 1), px1=P(0, -1), fill_color=QColor(255, 255, 255, 255)),
-    #     ],
-    #     text_defs=[
-    #         # Data tables takes in a list of values, which are a tuple of the following values:
-    #         # 0 = Name   (string label on the left of the table)
-    #         # 1 = Value  (the number that will be displayed, this typically is where you take reference of a subscription, such as in these examples)
-    #         # 2 = Unit   (displayed string directly behind the value number)
-    #         # 3 = Format (can be used if you want to display a certain number of decimal points)
+#     WindowDef(
+#         p1=P(0.5, 0.5), p2=P(0.5, 0.5),
+#         phase_event=_ev['window5_phase'],
+#         phases={
+#             'open':  WindowPhase([WindowTween(p1=P(0.00, 0.00), p2=P(1.00, 1.00), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
+#             'close': WindowPhase([WindowTween(p1=P(0.50, 0.50), p2=P(0.50, 0.50), start=0.00, dur=1.00, ease=QEasingCurve.OutQuint)]),
+#         },
+#         polygon_defs=[
+#             Rect(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(0, 0, 0, 255)),
+#             Rect(p1=P(0, 0), p2=P(0, 1), px2=P(1, 0), fill_color=QColor(255, 255, 255, 255)),
+#             Rect(p1=P(1, 0), p2=P(1, 1), px1=P(-1, 0), fill_color=QColor(255, 255, 255, 255)),
+#             Rect(p1=P(0, 0), p2=P(1, 0), px2=P(0, 1), fill_color=QColor(255, 255, 255, 255)),
+#             Rect(p1=P(0, 1), p2=P(1, 1), px1=P(0, -1), fill_color=QColor(255, 255, 255, 255)),
+#         ],
+#         text_defs=[
+#             # Data tables takes in a list of values, which are a tuple of the following values:
+#             # 0 = Name   (string label on the left of the table)
+#             # 1 = Value  (the number that will be displayed, this typically is where you take reference of a subscription, such as in these examples)
+#             # 2 = Unit   (displayed string directly behind the value number)
+#             # 3 = Format (can be used if you want to display a certain number of decimal points)
 
-    #         # Note that you could get away with making the tables in a for loop, as the only difference really is just the x, y, value_x, and values data
-    #         # Doing this is similar to what i did with assigning each DataTable the same phase
-    #         # There will be a better way to make similar objects faster in a cleaner way in the future
+#             # Note that you could get away with making the tables in a for loop, as the only difference really is just the x, y, value_x, and values data
+#             # Doing this is similar to what i did with assigning each DataTable the same phase
+#             # There will be a better way to make similar objects faster in a cleaner way in the future
 
-    #         *DataTable(x=0, y=0, px=0, py=20, value_x=0.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('STEER DEG ',      lambda ctx: ctx['test_value1']['latest'], 'rad', '.2f'),
-    #                 ('STEER DEG (REQ)', lambda ctx: ctx['test_value2']['latest'], 'rad', '.2f'),
-    #         ]),
-    #         *DataTable(x=3/6, y=0, px=0, py=20, value_x=3.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('STEER DEG ',      lambda ctx: ctx['test_value3']['latest'], 'rad', '.2f'),
-    #                 ('STEER DEG (REQ)', lambda ctx: ctx['test_value4']['latest'], 'rad', '.2f'),
-    #         ]),
-    #         *DataTable(x=0, y=4/6, px=0, py=20, value_x=0.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('STEER DEG ',      lambda ctx: ctx['test_value5']['latest'], 'rad', '.2f'),
-    #                 ('STEER DEG (REQ)', lambda ctx: ctx['test_value6']['latest'], 'rad', '.2f'),
-    #         ]),
-    #         *DataTable(x=3/6, y=4/6, px=0, py=20, value_x=3.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('STEER DEG ',      lambda ctx: ctx['test_value7']['latest'], 'rad', '.2f'),
-    #                 ('STEER DEG (REQ)', lambda ctx: ctx['test_value8']['latest'], 'rad', '.2f'),
-    #         ]),
+#             *DataTable(x=0, y=0, px=0, py=20, value_x=0.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('STEER DEG ',      lambda ctx: ctx['test_value1']['latest'], 'rad', '.2f'),
+#                     ('STEER DEG (REQ)', lambda ctx: ctx['test_value2']['latest'], 'rad', '.2f'),
+#             ]),
+#             *DataTable(x=3/6, y=0, px=0, py=20, value_x=3.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('STEER DEG ',      lambda ctx: ctx['test_value3']['latest'], 'rad', '.2f'),
+#                     ('STEER DEG (REQ)', lambda ctx: ctx['test_value4']['latest'], 'rad', '.2f'),
+#             ]),
+#             *DataTable(x=0, y=4/6, px=0, py=20, value_x=0.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('STEER DEG ',      lambda ctx: ctx['test_value5']['latest'], 'rad', '.2f'),
+#                     ('STEER DEG (REQ)', lambda ctx: ctx['test_value6']['latest'], 'rad', '.2f'),
+#             ]),
+#             *DataTable(x=3/6, y=4/6, px=0, py=20, value_x=3.9/6, value_px=0, title='', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('STEER DEG ',      lambda ctx: ctx['test_value7']['latest'], 'rad', '.2f'),
+#                     ('STEER DEG (REQ)', lambda ctx: ctx['test_value8']['latest'], 'rad', '.2f'),
+#             ]),
 
-    #         *DataTable(x=1/6, y=1/6, px=0, py=20, value_x=1.9/6, value_px=0, title='FRONT LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',      lambda ctx: ctx['test_value1']['latest'],           'A',   '.2f'),
-    #                 ('VOLTS',     lambda ctx: ctx['test_value2']['latest'],           'V',   '.2f'),
-    #                 ('RPM',       lambda ctx: ctx['test_value3']['latest'],           'r/m', '.1f'),
-    #                 ('RPM (REQ)', lambda ctx: ctx[_ev['test_event'].value]['latest'], 'r/m', '.1f'), # If you saw the comment next to the ButtonDefs, this is the subscription topic that changes (this is purely just to test changing topics)
-    #         ]),
-    #         *DataTable(x=2/6, y=1/6, px=0, py=20, value_x=2.9/6, value_px=0, title='FRONT RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=1/6, y=2/6, px=0, py=20, value_x=1.9/6, value_px=0, title='MIDDLE LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',      lambda ctx: ctx['test_value1']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',     lambda ctx: ctx['test_value2']['latest'], 'V',   '.2f'),
-    #                 ('RPM',       lambda ctx: ctx['test_value3']['latest'], 'r/m', '.1f'),
-    #                 ('RPM (REQ)', lambda ctx: ctx['test_value4']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=2/6, y=2/6, px=0, py=20, value_x=2.9/6, value_px=0, title='MIDDLE RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=1/6, y=3/6, px=0, py=20, value_x=1.9/6, value_px=0, title='MIDDLE LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',      lambda ctx: ctx['test_value1']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',     lambda ctx: ctx['test_value2']['latest'], 'V',   '.2f'),
-    #                 ('RPM',       lambda ctx: ctx['test_value3']['latest'], 'r/m', '.1f'),
-    #                 ('RPM (REQ)', lambda ctx: ctx['test_value4']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=2/6, y=3/6, px=0, py=20, value_x=2.9/6, value_px=0, title='MIDDLE RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #         ]),
+#             *DataTable(x=1/6, y=1/6, px=0, py=20, value_x=1.9/6, value_px=0, title='FRONT LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',      lambda ctx: ctx['test_value1']['latest'],           'A',   '.2f'),
+#                     ('VOLTS',     lambda ctx: ctx['test_value2']['latest'],           'V',   '.2f'),
+#                     ('RPM',       lambda ctx: ctx['test_value3']['latest'],           'r/m', '.1f'),
+#                     ('RPM (REQ)', lambda ctx: ctx[_ev['test_event'].value]['latest'], 'r/m', '.1f'), # If you saw the comment next to the ButtonDefs, this is the subscription topic that changes (this is purely just to test changing topics)
+#             ]),
+#             *DataTable(x=2/6, y=1/6, px=0, py=20, value_x=2.9/6, value_px=0, title='FRONT RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=1/6, y=2/6, px=0, py=20, value_x=1.9/6, value_px=0, title='MIDDLE LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',      lambda ctx: ctx['test_value1']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',     lambda ctx: ctx['test_value2']['latest'], 'V',   '.2f'),
+#                     ('RPM',       lambda ctx: ctx['test_value3']['latest'], 'r/m', '.1f'),
+#                     ('RPM (REQ)', lambda ctx: ctx['test_value4']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=2/6, y=2/6, px=0, py=20, value_x=2.9/6, value_px=0, title='MIDDLE RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=1/6, y=3/6, px=0, py=20, value_x=1.9/6, value_px=0, title='MIDDLE LEFT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',      lambda ctx: ctx['test_value1']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',     lambda ctx: ctx['test_value2']['latest'], 'V',   '.2f'),
+#                     ('RPM',       lambda ctx: ctx['test_value3']['latest'], 'r/m', '.1f'),
+#                     ('RPM (REQ)', lambda ctx: ctx['test_value4']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=2/6, y=3/6, px=0, py=20, value_x=2.9/6, value_px=0, title='MIDDLE RIGHT', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',      lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',     lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',       lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#             ]),
 
-    #         *DataTable(x=4/6, y=0/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 0', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=4/6, y=1/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 1', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=4/6, y=2/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 2', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=4/6, y=3/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 3', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=4/6, y=4/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 4', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=4/6, y=5/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 5', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
-    #                 ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
-    #                 ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
-    #                 ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
-    #         ]),
-    #         *DataTable(x=5/6, y=0, px=0, py=20, value_x=5.9/6, value_px=0, title='MISC DATA', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
-    #                 ('INTERNAL TEMP', lambda ctx: ctx['test_value5']['latest'], '°C',   '.2f'),
-    #                 ('EXTERNAL TEMP', lambda ctx: ctx['test_value5']['latest'], '°C',   '.2f'),
-    #                 ('CPU',           lambda ctx: ctx['test_value6']['latest'], '%',    '.2f'),
-    #                 ('RAM',           lambda ctx: ctx['test_value7']['latest'], '%',    '.1f'),
-    #                 ('BATTERY',       lambda ctx: ctx['test_value8']['latest'], '%',    '.1f'),
-    #                 ('VOLTAGE',       lambda ctx: ctx['test_value9']['latest'], 'V',    '.1f'),
-    #                 ('CONNECTION',    lambda ctx: ctx['test_value9']['latest'], 'Mbps', '.1f'),
-    #                 ('LATENCY',       lambda ctx: ctx['test_value9']['latest'], 'ms',   '.1f'),
-    #         ]),
-    #     ],
-    # ),
-
+#             *DataTable(x=4/6, y=0/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 0', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=4/6, y=1/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 1', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=4/6, y=2/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 2', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=4/6, y=3/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 3', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=4/6, y=4/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 4', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=4/6, y=5/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 5', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=4/6, y=6/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 6', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+#                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+#                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+#                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+#             ]),
+#             *DataTable(x=5/6, y=0, px=0, py=20, value_x=5.9/6, value_px=0, title='MISC DATA', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+#                     ('INTERNAL TEMP', lambda ctx: ctx['test_value5']['latest'], '°C',   '.2f'),
+#                     ('EXTERNAL TEMP', lambda ctx: ctx['test_value5']['latest'], '°C',   '.2f'),
+#                     ('CPU',           lambda ctx: ctx['test_value6']['latest'], '%',    '.2f'),
+#                     ('RAM',           lambda ctx: ctx['test_value7']['latest'], '%',    '.1f'),
+#                     ('BATTERY',       lambda ctx: ctx['test_value8']['latest'], '%',    '.1f'),
+#                     ('VOLTAGE',       lambda ctx: ctx['test_value9']['latest'], 'V',    '.1f'),
+#                     ('CONNECTION',    lambda ctx: ctx['test_value9']['latest'], 'Mbps', '.1f'),
+#                     ('LATENCY',       lambda ctx: ctx['test_value9']['latest'], 'ms',   '.1f'),
+#             ]),
+#         ],
+#     ),
 ]
+
