@@ -1,3 +1,5 @@
+MONITOR_RESOLUTIONS = [(1920, 1200), (1920, 1080)]
+
 CAMERA_INFO = {
     309256978: {"type": "ZED X One", "source": "zedxonesrc", "camera_id": 0,
                 "name": "ZED X ONE #1", "exposure": 10000, "gain": 30000, "gamma": 2},
