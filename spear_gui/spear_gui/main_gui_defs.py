@@ -503,42 +503,49 @@ MAIN_WINDOW_DEFS = [
                     ('RPM (REQ)', lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
             ]),
 
-            *DataTable(x=4/6, y=0/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 0', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+            *DataTable(x=4/6, y=0/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 0', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
             ]),
-            *DataTable(x=4/6, y=1/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 1', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+            *DataTable(x=4/6, y=1/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 1', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
             ]),
-            *DataTable(x=4/6, y=2/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 2', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+            *DataTable(x=4/6, y=2/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 2', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
             ]),
-            *DataTable(x=4/6, y=3/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 3', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+            *DataTable(x=4/6, y=3/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 3', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
             ]),
-            *DataTable(x=4/6, y=4/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 4', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+            *DataTable(x=4/6, y=4/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 4', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
                     ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
                     ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
             ]),
-            *DataTable(x=4/6, y=5/6, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 5', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+            *DataTable(x=4/6, y=5/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 5', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
+                    ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
+                    ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
+                    ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
+                    ('ENCODER IN',  lambda ctx: ctx['test_value8']['latest'], 'r/m', '.1f'),
+                    ('ENCODER OUT', lambda ctx: ctx['test_value9']['latest'], 'r/m', '.1f'),
+            ]),
+            *DataTable(x=4/6, y=6/7, px=0, py=20, value_x=4.9/6, value_px=0, title='ARM 6', color=QColor(200, 220, 255, 220), row_height=18.0, char_display=0.0, sub_char_clip=True, phases=data_table_phase, values=[
                     ('AMPS',        lambda ctx: ctx['test_value5']['latest'], 'A',   '.2f'),
                     ('VOLTS',       lambda ctx: ctx['test_value6']['latest'], 'V',   '.2f'),
                     ('RPM',         lambda ctx: ctx['test_value7']['latest'], 'r/m', '.1f'),
