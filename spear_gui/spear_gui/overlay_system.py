@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore    import Qt, QTimer, QElapsedTimer, QEasingCurve, QPointF, QRectF, QEvent, QObject
-from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QRegion, QPainterPath, QLinearGradient
+from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QRegion, QPainterPath, QLinearGradient, QRadialGradient
 import time
 import collections
 import statistics
@@ -61,11 +61,11 @@ def RectDef(
     br_r, br_p = _split(br)
     bl_r, bl_p = _split(bl)
 
-    points = [P(p1.x + tl_r.x, p1.y + tl_r.y), P(p2.x + tr_r.x, p1.y + tr_r.y), P(p2.x + br_r.x, p2.y + br_r.y), P(p1.x + bl_r.x, p2.y + bl_r.y)]
+    p  = [P(p1.x + tl_r.x, p1.y + tl_r.y), P(p2.x + tr_r.x, p1.y + tr_r.y), P(p2.x + br_r.x, p2.y + br_r.y), P(p1.x + bl_r.x, p2.y + bl_r.y)]
     px = [P(px1.x + tl_p.x, px1.y + tl_p.y), P(px2.x + tr_p.x, px1.y + tr_p.y), P(px2.x + br_p.x, px2.y + br_p.y), P(px1.x + bl_p.x, px2.y + bl_p.y)]
 
     return PolygonDef(
-        points         = points,
+        p              = p,
         px             = px,
         fill_color     = fill_color    or QColor(0, 0, 0, 0),
         outline_color  = outline_color or QColor(0, 0, 0, 0),
@@ -120,11 +120,11 @@ def RectTween(
     br_r, br_p = _split(br)
     bl_r, bl_p = _split(bl)
 
-    points = [P(p1.x + tl_r.x, p1.y + tl_r.y), P(p2.x + tr_r.x, p1.y + tr_r.y), P(p2.x + br_r.x, p2.y + br_r.y), P(p1.x + bl_r.x, p2.y + bl_r.y)]
+    p  = [P(p1.x + tl_r.x, p1.y + tl_r.y), P(p2.x + tr_r.x, p1.y + tr_r.y), P(p2.x + br_r.x, p2.y + br_r.y), P(p1.x + bl_r.x, p2.y + bl_r.y)]
     px = [P(px1.x + tl_p.x, px1.y + tl_p.y), P(px2.x + tr_p.x, px1.y + tr_p.y), P(px2.x + br_p.x, px2.y + br_p.y), P(px1.x + bl_p.x, px2.y + bl_p.y)]
 
     return PolygonTween(
-        points        = points,
+        p             = p,
         px            = px,
         fill_color    = fill_color,
         outline_color = outline_color,
@@ -147,12 +147,12 @@ def RectTween(
 
 @dataclass
 class PolygonDef:
-    points:         List[P]                               = field(default_factory=lambda: [P(0, 0), P(0, 0)])
+    p:              List[P]                               = field(default_factory=lambda: [P(0, 0), P(0, 0)])
+    px:             Optional[List[P]]                     = None
     phases:         Optional[Dict[str, Phase]]            = None
     closed:         bool                                  = True
     line_width:     float                                 = 0.0
     uniform_scale:  bool                                  = False
-    px:             Optional[List[P]]                     = None
     fill_color:     Optional[QColor]                      = None
     outline_color:  Optional[QColor]                      = None
     draw_progress:  float                                 = 1.0
@@ -171,7 +171,7 @@ class PolygonDef:
 @dataclass
 class PolygonTween:
     # Properties
-    points:        Optional[List[P]]        = None
+    p:             Optional[List[P]]        = None
     px:            Optional[List[P]]        = None
     fill_color:    Optional[QColor]         = None
     outline_color: Optional[QColor]         = None
@@ -190,10 +190,26 @@ class PolygonTween:
     prev_phase:    Optional[str]            = None
     blend:         bool                     = False
 
+
+
+_gradients: Dict[str, GradientDef] = {}
+
+def register_gradient(name: str, defn: GradientDef) -> GradientDef:
+    _gradients[name] = defn
+    return defn
+
 @dataclass
 class GradientDef:
-    stops:  List[GradientStop]
-    phases: Dict[str, Phase] = field(default_factory=dict)
+    name:        str
+    stops:       List[GradientStop]
+    phases:      Dict[str, Phase]   = field(default_factory=dict)
+    p1:          P                  = field(default_factory=P)
+    px1:         P                  = field(default_factory=P)
+    p2:          P                  = field(default_factory=P)
+    px2:         P                  = field(default_factory=P)
+    radial:      bool               = False
+    target:      str                = 'fill'
+    phase_event: Optional[EventDef] = None
 
 @dataclass
 class GradientTween:
@@ -207,19 +223,24 @@ class GradientTween:
 
 @dataclass
 class TextDef:
-    x:              float                          = 0.0
-    y:              float                          = 0.0
-    px:             float                          = 0.0
-    py:             float                          = 0.0
-    color:          QColor                         = QColor(255, 255, 255, 255)
-    h_align:        float                          = 0.5
-    v_align:        float                          = 0.5
-    font_size:      float                          = 10.0
+    p:              P                              = field(default_factory=P)
+    px:             P                              = field(default_factory=P)
     text:           str                            = 'Sample Text'
+    font_size:      float                          = 10.0
+    color:          QColor                         = QColor(255, 255, 255, 255)
+    outline_color:  Optional[QColor]               = None
+    outline_width:  float                          = 0.0
+    gradient:       Optional['GradientDef']        = None
+    gradient_p1:    P                              = field(default_factory=P)
+    gradient_px1:   P                              = field(default_factory=P)
+    gradient_p2:    P                              = field(default_factory=P)
+    gradient_px2:   P                              = field(default_factory=P)
     phases:         Optional[Dict[str, Phase]]     = None
     bold:           bool                           = False
     italic:         bool                           = False
     font_family:    str                            = 'Oxanium SemiBold'
+    h_align:        float                          = 0.5
+    v_align:        float                          = 0.5
     uniform_scale:  bool                           = True
     text_fn:        Optional[Callable[[Any], str]] = None
     char_display:   float                          = 1.0
@@ -233,22 +254,26 @@ class TextDef:
 @dataclass
 class TextTween:
     # Properties
-    x:            Optional[float]      = None
-    y:            Optional[float]      = None
-    px:           Optional[float]      = None
-    py:           Optional[float]      = None
-    color:        Optional[QColor]     = None
-    h_align:      Optional[float]      = None
-    v_align:      Optional[float]      = None
-    font_size:    Optional[float]      = None
-    char_display: Optional[float]      = None
+    p:              Optional[P]          = None
+    px:             Optional[P]          = None
+    color:          Optional[QColor]     = None
+    outline_color:  Optional[QColor]     = None
+    outline_width:  Optional[float]      = None
+    gradient_p1:    Optional[P]          = None
+    gradient_px1:   Optional[P]          = None
+    gradient_p2:    Optional[P]          = None
+    gradient_px2:   Optional[P]          = None
+    h_align:        Optional[float]      = None
+    v_align:        Optional[float]      = None
+    font_size:      Optional[float]      = None
+    char_display:   Optional[float]      = None
     # Tween Values
-    span:         Tuple[float, float]  = (0, 1)
-    start:        float                = 0.0
-    dur:          float                = 0.5
-    ease:         QEasingCurve.Type    = QEasingCurve.OutQuint
-    prev_phase:   Optional[str]        = None
-    blend:        bool                 = False
+    span:           Tuple[float, float]  = (0, 1)
+    start:          float                = 0.0
+    dur:            float                = 0.5
+    ease:           QEasingCurve.Type    = QEasingCurve.OutQuint
+    prev_phase:     Optional[str]        = None
+    blend:          bool                 = False
 
 @dataclass
 class Reset:
@@ -262,8 +287,8 @@ class Phase:
     stop_phases: List[str]  = field(default_factory=lambda: ['close'])
 
 def TextBlock(
-    x:           float                      = 0.0,
-    y:           float                      = 0.0,
+    p:           P                          = field(default_factory=P),
+    px:          P                          = field(default_factory=P),
     text:        str                        = 'Sample Text',
     font_size:   float                      = 10.0,
     color:       QColor                     = QColor(255, 255, 255, 255),
@@ -274,8 +299,6 @@ def TextBlock(
     h_align:     float                      = 0.0,
     v_align:     float                      = 0.0,
     uniform_scale: bool                     = True,
-    px:          float                      = 0.0,
-    py:          float                      = 0.0,
     text_fn:     Optional[Callable]         = None,
     line_offset: Optional[float]            = None,
     pos_fn:      Optional[Callable[[], P]]  = None,
@@ -288,18 +311,17 @@ def TextBlock(
 
     if n == 1:
         return [TextDef(
-            x=x, y=y, text=text, font_size=font_size, color=color,
+            p=p, px=px, text=text, font_size=font_size, color=color,
             phases=phases, bold=bold, italic=italic,
             font_family=font_family, h_align=h_align, v_align=v_align,
-            uniform_scale=uniform_scale, px=px, py=py,
-            text_fn=text_fn,
-            pos_fn=pos_fn,
+            uniform_scale=uniform_scale,
+            text_fn=text_fn, pos_fn=pos_fn,
         )]
 
     result: List[TextDef] = []
 
     for i, line_text in enumerate(lines):
-        line_py = py + effective_line_offset * i
+        line_px = P(px.x, px.y + effective_line_offset * i)
         adjusted_phases: Optional[Dict[str, Phase]] = None
         if phases:
             adjusted_phases = {}
@@ -308,8 +330,8 @@ def TextBlock(
                 for tw in phase.tweens:
                     if isinstance(tw, TextTween):
                         new_tweens.append(TextTween(
-                            x          = tw.x,
-                            y          = tw.y,
+                            p          = tw.p,
+                            px         = P(tw.px.x, tw.px.y + effective_line_offset * i) if tw.px is not None else None,
                             start      = tw.start,
                             dur        = tw.dur,
                             ease       = tw.ease,
@@ -317,8 +339,6 @@ def TextBlock(
                             h_align    = tw.h_align,
                             v_align    = tw.v_align,
                             font_size  = tw.font_size,
-                            px         = tw.px,
-                            py         = tw.py + effective_line_offset * i,
                             prev_phase = tw.prev_phase,
                             span       = tw.span,
                         ))
@@ -343,8 +363,8 @@ def TextBlock(
             resolved_text    = line_text
 
         result.append(TextDef(
-            x             = x,
-            y             = y,
+            p             = p,
+            px            = line_px,
             text          = resolved_text,
             font_size     = font_size,
             color         = color,
@@ -355,8 +375,6 @@ def TextBlock(
             h_align       = h_align,
             v_align       = v_align,
             uniform_scale = uniform_scale,
-            px            = px,
-            py            = line_py,
             text_fn       = resolved_text_fn,
             pos_fn        = pos_fn,
         ))
@@ -549,7 +567,7 @@ class _TweenDriver:
         if canonical not in resolved_phases:
             return
 
-        if canonical == cur_canonical and self._phase != '':
+        if canonical == cur_canonical and self._phase != '' and canonical != 'pulse':
             return
 
         self._prev  = self._phase
@@ -705,22 +723,22 @@ class _TweenDriver:
 _ALWAYS_PHASE_ORIGINS: Dict[str, float] = {}
 
 class _AlwaysDriver:
-    def __init__(self, phase_name: str, phase: Phase, n_points: int) -> None:
+    def __init__(self, phase_name: str, phase: Phase, n_p: int) -> None:
         self._phase_name = phase_name
         self._phase      = phase
-        self._n          = n_points
+        self._n          = n_p
         self._stopped    = False
         self._started    = False
  
-        self.offset_points:       List[P]           = [P(0.0, 0.0)] * n_points
-        self.offset_px:           List[P]           = [P(0.0, 0.0)] * n_points
-        self.offset_fill_color:   Optional[QColor]  = None
-        self.offset_outline_color:Optional[QColor]  = None
+        self.offset_p:             List[P]          = [P(0.0, 0.0)] * n_p
+        self.offset_px:            List[P]          = [P(0.0, 0.0)] * n_p
+        self.offset_fill_color:    Optional[QColor] = None
+        self.offset_outline_color: Optional[QColor] = None
  
-        self._s_pts:    List[P]           = [P(0.0, 0.0)] * n_points
-        self._s_px:     List[P]           = [P(0.0, 0.0)] * n_points
-        self._s_fill:   Optional[QColor]  = None
-        self._s_outline:Optional[QColor]  = None
+        self._s_pts:     List[P]          = [P(0.0, 0.0)] * n_p
+        self._s_px:      List[P]          = [P(0.0, 0.0)] * n_p
+        self._s_fill:    Optional[QColor] = None
+        self._s_outline: Optional[QColor] = None
  
         self._idx:      int   = 0
         self._loop_origin: float = 0.0
@@ -743,7 +761,7 @@ class _AlwaysDriver:
     def _reset(self) -> None:
         self._stopped = False
         self._idx     = 0
-        self.offset_points        = [P(0.0, 0.0)] * self._n
+        self.offset_p             = [P(0.0, 0.0)] * self._n
         self.offset_px            = [P(0.0, 0.0)] * self._n
         self.offset_fill_color    = None
         self.offset_outline_color = None
@@ -798,7 +816,7 @@ class _AlwaysDriver:
         self._idx = n
  
     def _do_reset_offsets(self) -> None:
-        self.offset_points        = [P(0.0, 0.0)] * self._n
+        self.offset_p             = [P(0.0, 0.0)] * self._n
         self.offset_px            = [P(0.0, 0.0)] * self._n
         self.offset_fill_color    = None
         self.offset_outline_color = None
@@ -809,19 +827,19 @@ class _AlwaysDriver:
  
     def _snap_tw(self, tw) -> None:
         if isinstance(tw, PolygonTween):
-            if tw.points        is not None: self.offset_points = [P(p.x, p.y) for p in tw.points]
+            if tw.p             is not None: self.offset_p = [P(p.x, p.y) for p in tw.p]
             if tw.px            is not None: self.offset_px = [P(p.x, p.y) for p in tw.px]
             if tw.fill_color    is not None: self.offset_fill_color    = QColor(tw.fill_color)
             if tw.outline_color is not None: self.offset_outline_color = QColor(tw.outline_color)
         elif isinstance(tw, TextTween):
-            if tw.x     is not None: self.offset_points = [P(tw.x, self.offset_points[0].y)]
-            if tw.y     is not None: self.offset_points = [P(self.offset_points[0].x, tw.y)]
+            if tw.x     is not None: self.offset_p = [P(tw.x, self.offset_p[0].y)]
+            if tw.y     is not None: self.offset_p = [P(self.offset_p[0].x, tw.y)]
             if tw.px    is not None: self.offset_px = [P(tw.px, self.offset_px[0].y)]
             if tw.py    is not None: self.offset_px = [P(self.offset_px[0].x, tw.py)]
             if tw.color is not None: self.offset_fill_color = QColor(tw.color)
  
     def _save_start(self) -> None:
-        self._s_pts     = [P(p.x, p.y) for p in self.offset_points]
+        self._s_pts     = [P(p.x, p.y) for p in self.offset_p]
         self._s_px      = [P(p.x, p.y) for p in self.offset_px]
         self._s_fill    = QColor(self.offset_fill_color) if self.offset_fill_color    else None
         self._s_outline = QColor(self.offset_outline_color) if self.offset_outline_color else None
@@ -897,9 +915,9 @@ class _AlwaysDriver:
  
     def _apply_tw(self, tw, v: float) -> None:
         if isinstance(tw, PolygonTween):
-            if tw.points is not None:
-                for j, (sp, tp) in enumerate(zip(self._s_pts, tw.points)):
-                    self.offset_points[j] = P(sp.x + (tp.x - sp.x) * v, sp.y + (tp.y - sp.y) * v)
+            if tw.p is not None:
+                for j, (sp, tp) in enumerate(zip(self._s_pts, tw.p)):
+                    self.offset_p[j] = P(sp.x + (tp.x - sp.x) * v, sp.y + (tp.y - sp.y) * v)
             if tw.px is not None:
                 for j, (sp, tp) in enumerate(zip(self._s_px, tw.px)):
                     self.offset_px[j] = P(sp.x + (tp.x - sp.x) * v, sp.y + (tp.y - sp.y) * v)
@@ -926,8 +944,8 @@ class _AlwaysDriver:
             new_px = spx  + (tpx  - spx)  * v
             new_py = spy  + (tpy  - spy)   * v
 
-            if tw.x  is not None: self.offset_points = [P(new_x,  self.offset_points[0].y)]
-            if tw.y  is not None: self.offset_points = [P(self.offset_points[0].x, new_y)]
+            if tw.x  is not None: self.offset_p  = [P(new_x, self.offset_p[0].y)]
+            if tw.y  is not None: self.offset_p  = [P(self.offset_p[0].x, new_y)]
             if tw.px is not None: self.offset_px = [P(new_px, self.offset_px[0].y)]
             if tw.py is not None: self.offset_px = [P(self.offset_px[0].x, new_py)]
 
@@ -943,7 +961,8 @@ class _AnimatedGradient(_TweenDriver):
         self.defn      = defn
         self.cur_stops = [GradientStop(s.position, QColor(s.color)) for s in defn.stops]
         self._s_stops  = [GradientStop(s.position, QColor(s.color)) for s in defn.stops]
- 
+        self._cur_phase: str = ''
+
     def _save_start(self) -> None:
         self._s_stops = [GradientStop(s.position, QColor(s.color)) for s in self.cur_stops]
  
@@ -975,12 +994,29 @@ class _AnimatedGradient(_TweenDriver):
     def set_phase(self, phase: str) -> None:
         super().set_phase(phase, self.defn.phases)
  
+    def _poll_phase_event(self) -> None:
+        ev = self.defn.phase_event
+        if ev is None:
+            return
+        val = str(ev.value) if ev.value is not None else ''
+        if val and val != self._cur_phase:
+            self._cur_phase = val
+            self.set_phase(val)
+
     def update(self) -> None:
+        self._poll_phase_event()
         self._drive()
  
-    def build_gradient(self, x1: float, y1: float, x2: float, y2: float) -> QLinearGradient:
-        g = QLinearGradient(x1, y1, x2, y2)
-        g.setSpread(QLinearGradient.PadSpread)
+    def build_gradient(self, x1: float, y1: float, x2: float, y2: float, radial: bool = False):
+        if radial:
+            cx, cy   = x1, y1
+            ex, ey   = x2, y2
+            radius   = _math.sqrt((ex - cx) ** 2 + (ey - cy) ** 2)
+            g = QRadialGradient(cx, cy, radius)
+            g.setSpread(QRadialGradient.PadSpread)
+        else:
+            g = QLinearGradient(x1, y1, x2, y2)
+            g.setSpread(QLinearGradient.PadSpread)
         for stop in self.cur_stops:
             g.setColorAt(max(0.0, min(1.0, stop.position)), stop.color)
         return g
@@ -990,11 +1026,11 @@ class AnimatedPolygon(_TweenDriver):
     def __init__(self, defn: PolygonDef):
         super().__init__()
         self.defn = defn
-        n = len(defn.points)
+        n = len(defn.p)
         _zero_px = [P() for _ in range(n)]
 
         self._screen_offset = P(0.0, 0.0)
-        self.cur_points       = [P(p.x, p.y) for p in defn.points]
+        self.cur_p            = [P(p.x, p.y) for p in defn.p]
         self.cur_px           = [P(p.x, p.y) for p in (defn.px or _zero_px)]
         self.cur_fill_color   = QColor(defn.fill_color)   if defn.fill_color   else QColor(0,0,0,0)
         self.cur_outline_color= QColor(defn.outline_color)if defn.outline_color else QColor(0,0,0,0)
@@ -1005,7 +1041,7 @@ class AnimatedPolygon(_TweenDriver):
         self.cur_gradient_p2  = P(defn.gradient_p2.x,  defn.gradient_p2.y)
         self.cur_gradient_px2 = P(defn.gradient_px2.x, defn.gradient_px2.y)
 
-        self._sp  = [P(p.x, p.y) for p in self.cur_points]
+        self._sp  = [P(p.x, p.y) for p in self.cur_p]
         self._spx = [P(p.x, p.y) for p in self.cur_px]
         self._sf  = QColor(self.cur_fill_color)
         self._so  = QColor(self.cur_outline_color)
@@ -1021,24 +1057,24 @@ class AnimatedPolygon(_TweenDriver):
         self._cached_w   = 0
         self._cached_h   = 0
         self._always_drivers: Dict[str, _AlwaysDriver] = {
-            name: _AlwaysDriver(name, phase, len(defn.points))
+            name: _AlwaysDriver(name, phase, len(defn.p))
             for name, phase in (defn.phases or {}).items()
             if _phase_key_name(name).startswith('always')
         }
-        self._always_offset_points: List[P] = [P(0.0, 0.0)] * len(defn.points)
-        self._always_offset_px:     List[P] = [P(0.0, 0.0)] * len(defn.points)
+        self._always_offset_p:      List[P] = [P(0.0, 0.0)] * len(defn.p)
+        self._always_offset_px:     List[P] = [P(0.0, 0.0)] * len(defn.p)
         self._always_fill_color:    Optional[QColor] = None
         self._always_outline_color: Optional[QColor] = None
         
         self._dynamic_px_w: int = 0
         self._dynamic_px_h: int = 0
-        self._pos_offset: List[P] = [P(0.0, 0.0)] * len(defn.points)
+        self._pos_offset: List[P] = [P(0.0, 0.0)] * len(defn.p)
 
 
     # ── _TweenDriver hooks ───────────────────────────────────────
 
     def _save_start(self):
-        self._sp  = [P(p.x, p.y) for p in self.cur_points]
+        self._sp  = [P(p.x, p.y) for p in self.cur_p]
         self._spx = [P(p.x, p.y) for p in self.cur_px]
         self._sf  = QColor(self.cur_fill_color)
         self._so  = QColor(self.cur_outline_color)
@@ -1050,12 +1086,16 @@ class AnimatedPolygon(_TweenDriver):
         self._sgpx2 = P(self.cur_gradient_px2.x, self.cur_gradient_px2.y)
 
     def _apply(self, tw: PolygonTween, v: float):
-        if tw.points is not None:
-            for i, (sp, tp) in enumerate(zip(self._sp, tw.points)):
-                self.cur_points[i] = P(sp.x + (tp.x - sp.x) * v, sp.y + (tp.y - sp.y) * v)
+        if tw.p is not None:
+            for i, (sp, tp) in enumerate(zip(self._sp, tw.p)):
+                nx = sp.x + (tp.x - sp.x) * v if tp.x is not None else sp.x
+                ny = sp.y + (tp.y - sp.y) * v if tp.y is not None else sp.y
+                self.cur_p[i] = P(nx, ny)
         if tw.px is not None:
             for i, (spx, tpx) in enumerate(zip(self._spx, tw.px)):
-                self.cur_px[i] = P(spx.x + (tpx.x - spx.x) * v, spx.y + (tpx.y - spx.y) * v)
+                nx = spx.x + (tpx.x - spx.x) * v if tpx.x is not None else spx.x
+                ny = spx.y + (tpx.y - spx.y) * v if tpx.y is not None else spx.y
+                self.cur_px[i] = P(nx, ny)
         if tw.fill_color    is not None: self.cur_fill_color    = lerp_color(self._sf, tw.fill_color,    v)
         if tw.outline_color is not None: self.cur_outline_color = lerp_color(self._so, tw.outline_color, v)
         if tw.line_width    is not None: self.cur_line_width    = self._slw + (tw.line_width - self._slw) * v
@@ -1067,10 +1107,10 @@ class AnimatedPolygon(_TweenDriver):
         self._dirty = True
 
     def _apply_blend(self, tw: PolygonTween, v: float):
-        if tw.points is not None:
-            for i, tp in enumerate(tw.points):
-                cp = self.cur_points[i]
-                self.cur_points[i] = P(cp.x + tp.x * v, cp.y + tp.y * v)
+        if tw.p is not None:
+            for i, tp in enumerate(tw.p):
+                cp = self.cur_p[i]
+                self.cur_p[i] = P(cp.x + tp.x * v, cp.y + tp.y * v)
         if tw.px is not None:
             for i, tpx in enumerate(tw.px):
                 cpx = self.cur_px[i]
@@ -1082,8 +1122,8 @@ class AnimatedPolygon(_TweenDriver):
         self._dirty = True
 
     def _snap_to(self, tw: PolygonTween):
-        if tw.points        is not None: self.cur_points        = [P(p.x, p.y) for p in tw.points]
-        if tw.px            is not None: self.cur_px            = [P(p.x, p.y) for p in tw.px]
+        if tw.p             is not None: self.cur_p             = [P(tp.x if tp.x is not None else cp.x, tp.y if tp.y is not None else cp.y) for cp, tp in zip(self.cur_p, tw.p)]
+        if tw.px            is not None: self.cur_px            = [P(tpx.x if tpx.x is not None else cpx.x, tpx.y if tpx.y is not None else cpx.y) for cpx, tpx in zip(self.cur_px, tw.px)]
         if tw.fill_color    is not None: self.cur_fill_color    = QColor(tw.fill_color)
         if tw.outline_color is not None: self.cur_outline_color = QColor(tw.outline_color)
         if tw.line_width    is not None: self.cur_line_width    = tw.line_width
@@ -1096,8 +1136,8 @@ class AnimatedPolygon(_TweenDriver):
 
     def _reset_to_def(self):
         d = self.defn
-        n = len(d.points)
-        self.cur_points        = [P(p.x, p.y) for p in d.points]
+        n = len(d.p)
+        self.cur_p             = [P(p.x, p.y) for p in d.p]
         self.cur_px            = [P(p.x, p.y) for p in (d.px or [P()]*n)]
         self.cur_fill_color    = QColor(d.fill_color)    if d.fill_color    else QColor(0,0,0,0)
         self.cur_outline_color = QColor(d.outline_color) if d.outline_color else QColor(0,0,0,0)
@@ -1121,7 +1161,7 @@ class AnimatedPolygon(_TweenDriver):
             try:
                 result = pos_fn()
                 if result is not None:
-                    n = len(self.defn.points)
+                    n = len(self.defn.p)
                     if isinstance(result, P):
                         self._pos_offset = [result] * n
                     else:
@@ -1131,7 +1171,7 @@ class AnimatedPolygon(_TweenDriver):
                 pass
         self._drive()
 
-        n = len(self.defn.points)
+        n = len(self.defn.p)
         sum_pts = [P(0.0, 0.0)] * n
         sum_px  = [P(0.0, 0.0)] * n
         fill_override    = None
@@ -1143,7 +1183,7 @@ class AnimatedPolygon(_TweenDriver):
             driver.update(self._phase, base_done)
  
             for j in range(n):
-                op = driver.offset_points[j]
+                op = driver.offset_p[j]
                 ox = driver.offset_px[j]
                 sum_pts[j] = P(sum_pts[j].x + op.x, sum_pts[j].y + op.y)
                 sum_px[j]  = P(sum_px[j].x  + ox.x, sum_px[j].y  + ox.y)
@@ -1153,7 +1193,7 @@ class AnimatedPolygon(_TweenDriver):
             if driver.offset_outline_color is not None:
                 outline_override = driver.offset_outline_color
  
-        self._always_offset_points = sum_pts
+        self._always_offset_p      = sum_pts
         self._always_offset_px     = sum_px
         self._always_fill_color    = fill_override
         self._always_outline_color = outline_override
@@ -1168,7 +1208,7 @@ class AnimatedPolygon(_TweenDriver):
 
     def _to_screen_pts(self, w: int, h: int, cam_w=MONITOR_RESOLUTIONS[0][0], cam_h=MONITOR_RESOLUTIONS[0][1]) -> List[QPointF]:
         pts = []
-        for p, px in zip(self.cur_points, self.cur_px):
+        for p, px in zip(self.cur_p, self.cur_px):
             if self.defn.uniform_scale:
                 s  = min(w / cam_w, h / cam_h)
                 cx = s / (w / cam_w)
@@ -1191,7 +1231,7 @@ class AnimatedPolygon(_TweenDriver):
                 self._dynamic_px_h = widget_h
                 self._dirty        = True
 
-        always_pts = self._always_offset_points
+        always_pts = self._always_offset_p
         always_px  = self._always_offset_px
         pos        = self._pos_offset
         has_always = False
@@ -1239,7 +1279,7 @@ class AnimatedPolygon(_TweenDriver):
             s  = min(widget_w / cam_w, widget_h / cam_h)
             cx = s / (widget_w / cam_w)
             cy = s / (widget_h / cam_h)
-            for j, (p, px) in enumerate(zip(self.cur_points, self.cur_px)):
+            for j, (p, px) in enumerate(zip(self.cur_p, self.cur_px)):
                 ap  = always_pts[j]
                 apx = always_px[j]
                 po  = pos[j]
@@ -1249,7 +1289,7 @@ class AnimatedPolygon(_TweenDriver):
                                    sy + ap.y * cy * widget_h + apx.y))
                 base_pts.append(QPointF(sx, sy))
         else:
-            for j, (p, px) in enumerate(zip(self.cur_points, self.cur_px)):
+            for j, (p, px) in enumerate(zip(self.cur_p, self.cur_px)):
                 ap  = always_pts[j]
                 apx = always_px[j]
                 po  = pos[j]
@@ -1297,14 +1337,26 @@ class AnimatedPolygon(_TweenDriver):
             return
 
         def _fill_brush():
+            fill = (self._always_fill_color if self._always_fill_color is not None else self.cur_fill_color)
             gd = self.defn.gradient
             if gd is None:
-                return effective_fill
-            x1 = self.cur_gradient_p1.x  * w + self.cur_gradient_px1.x
-            y1 = self.cur_gradient_p1.y  * h + self.cur_gradient_px1.y
-            x2 = self.cur_gradient_p2.x  * w + self.cur_gradient_px2.x
-            y2 = self.cur_gradient_p2.y  * h + self.cur_gradient_px2.y
-            return gd._animated.build_gradient(x1, y1, x2, y2)
+                return fill
+
+            def _has_point(p, px):
+                return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
+
+            if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
+                x1 = self.cur_gradient_p1.x  * w + self.cur_gradient_px1.x
+                y1 = self.cur_gradient_p1.y  * h + self.cur_gradient_px1.y
+                x2 = self.cur_gradient_p2.x  * w + self.cur_gradient_px2.x
+                y2 = self.cur_gradient_p2.y  * h + self.cur_gradient_px2.y
+            else:
+                x1 = gd.p1.x  * w + gd.px1.x
+                y1 = gd.p1.y  * h + gd.px1.y
+                x2 = gd.p2.x  * w + gd.px2.x
+                y2 = gd.p2.y  * h + gd.px2.y
+
+            return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
 
         poly = QPolygonF(pts)
 
@@ -1338,20 +1390,17 @@ class AnimatedText(_TweenDriver):
         super().__init__()
         self.defn = defn
         d = defn
-        self.cur_x          = d.x
-        self.cur_y          = d.y
-        self.cur_px         = d.px
-        self.cur_py         = d.py
+        self.cur_p:         P      = P(d.p.x, d.p.y)
+        self.cur_px:        P      = P(d.px.x, d.px.y)
+
         self.cur_color      = QColor(d.color)
         self.cur_font_size  = d.font_size
         self.cur_h_align    = d.h_align
         self.cur_v_align    = d.v_align
         self.cur_char_display = d.char_display
  
-        self._sx   = d.x
-        self._sy   = d.y
-        self._spx  = d.px
-        self._spy  = d.py
+        self._sp:           P      = P(d.p.x, d.p.y)
+        self._spx:          P      = P(d.px.x, d.px.y)
         self._sc   = QColor(d.color)
         self._sfs  = d.font_size
         self._sha  = d.h_align
@@ -1384,82 +1433,127 @@ class AnimatedText(_TweenDriver):
 
         self._pos_offset: P = P(0.0, 0.0)
 
+        self.cur_gradient_p1:  P = P(defn.gradient_p1.x,  defn.gradient_p1.y)
+        self.cur_gradient_px1: P = P(defn.gradient_px1.x, defn.gradient_px1.y)
+        self.cur_gradient_p2:  P = P(defn.gradient_p2.x,  defn.gradient_p2.y)
+        self.cur_gradient_px2: P = P(defn.gradient_px2.x, defn.gradient_px2.y)
+        self.cur_outline_color: QColor = QColor(defn.outline_color) if defn.outline_color else QColor(0,0,0,0)
+        self.cur_outline_width: float  = defn.outline_width
+
+        self._so:   QColor = QColor(defn.outline_color) if defn.outline_color else QColor(0,0,0,0)
+        self._slow: float  = defn.outline_width
+        self._sgp1:  P = P(defn.gradient_p1.x,  defn.gradient_p1.y)
+        self._sgpx1: P = P(defn.gradient_px1.x, defn.gradient_px1.y)
+        self._sgp2:  P = P(defn.gradient_p2.x,  defn.gradient_p2.y)
+        self._sgpx2: P = P(defn.gradient_px2.x, defn.gradient_px2.y)
+
     def _save_start(self):
-        self._sx  = self.cur_x
-        self._sy  = self.cur_y
-        self._spx = self.cur_px
-        self._spy = self.cur_py
-        self._sc  = QColor(self.cur_color)
-        self._sfs = self.cur_font_size
-        self._sha = self.cur_h_align
-        self._sva = self.cur_v_align
-        self._scd = self.cur_char_display
+        self._sp    = P(self.cur_p.x,  self.cur_p.y)
+        self._spx   = P(self.cur_px.x, self.cur_px.y)
+        self._sc    = QColor(self.cur_color)
+        self._so    = QColor(self.cur_outline_color)
+        self._slow  = self.cur_outline_width
+        self._sfs   = self.cur_font_size
+        self._sha   = self.cur_h_align
+        self._sva   = self.cur_v_align
+        self._scd   = self.cur_char_display
+        self._sgp1  = P(self.cur_gradient_p1.x,  self.cur_gradient_p1.y)
+        self._sgpx1 = P(self.cur_gradient_px1.x, self.cur_gradient_px1.y)
+        self._sgp2  = P(self.cur_gradient_p2.x,  self.cur_gradient_p2.y)
+        self._sgpx2 = P(self.cur_gradient_px2.x, self.cur_gradient_px2.y)
 
     def _snap_to(self, tw: TextTween):
-        self.cur_x            = self._sx
-        self.cur_y            = self._sy
-        self.cur_px           = self._spx
-        self.cur_py           = self._spy
-        self.cur_h_align      = self._sha
-        self.cur_v_align      = self._sva
-        self.cur_font_size    = self._sfs
-        self.cur_char_display = self._scd
-        self.cur_color        = QColor(self._sc)
-        if tw.x            is not None: self.cur_x            = tw.x
-        if tw.y            is not None: self.cur_y            = tw.y
-        if tw.px           is not None: self.cur_px           = tw.px
-        if tw.py           is not None: self.cur_py           = tw.py
-        if tw.h_align      is not None: self.cur_h_align      = tw.h_align
-        if tw.v_align      is not None: self.cur_v_align      = tw.v_align
-        if tw.font_size    is not None: self.cur_font_size    = tw.font_size
-        if tw.char_display is not None: self.cur_char_display = tw.char_display
-        if tw.color        is not None: self.cur_color        = QColor(tw.color)
+        self.cur_p             = P(self._sp.x,  self._sp.y)
+        self.cur_px            = P(self._spx.x, self._spx.y)
+        self.cur_color         = QColor(self._sc)
+        self.cur_outline_color = QColor(self._so)
+        self.cur_outline_width = self._slow
+        self.cur_h_align       = self._sha
+        self.cur_v_align       = self._sva
+        self.cur_font_size     = self._sfs
+        self.cur_char_display  = self._scd
+        self.cur_gradient_p1   = P(self._sgp1.x,  self._sgp1.y)
+        self.cur_gradient_px1  = P(self._sgpx1.x, self._sgpx1.y)
+        self.cur_gradient_p2   = P(self._sgp2.x,  self._sgp2.y)
+        self.cur_gradient_px2  = P(self._sgpx2.x, self._sgpx2.y)
+        if tw.p is not None:
+            if tw.p.x is not None: self.cur_p  = P(tw.p.x,  self.cur_p.y)
+            if tw.p.y is not None: self.cur_p  = P(self.cur_p.x, tw.p.y)
+        if tw.px is not None:
+            if tw.px.x is not None: self.cur_px = P(tw.px.x, self.cur_px.y)
+            if tw.px.y is not None: self.cur_px = P(self.cur_px.x, tw.px.y)
+        if tw.color         is not None: self.cur_color         = QColor(tw.color)
+        if tw.outline_color is not None: self.cur_outline_color = QColor(tw.outline_color)
+        if tw.outline_width is not None: self.cur_outline_width = tw.outline_width
+        if tw.h_align       is not None: self.cur_h_align       = tw.h_align
+        if tw.v_align       is not None: self.cur_v_align       = tw.v_align
+        if tw.font_size     is not None: self.cur_font_size     = tw.font_size
+        if tw.char_display  is not None: self.cur_char_display  = tw.char_display
+        if tw.gradient_p1   is not None: self.cur_gradient_p1   = tw.gradient_p1
+        if tw.gradient_px1  is not None: self.cur_gradient_px1  = tw.gradient_px1
+        if tw.gradient_p2   is not None: self.cur_gradient_p2   = tw.gradient_p2
+        if tw.gradient_px2  is not None: self.cur_gradient_px2  = tw.gradient_px2
         self._dirty = True
 
     def _reset_to_def(self):
         d = self.defn
-        self.cur_x            = d.x;   
-        self.cur_y            = d.y
-        self.cur_px           = d.px;  
-        self.cur_py           = d.py
-        self.cur_color        = QColor(d.color)
-        self.cur_font_size    = d.font_size
-        self.cur_h_align      = d.h_align
-        self.cur_v_align      = d.v_align
-        self.cur_char_display = d.char_display
+        self.cur_p             = P(d.p.x, d.p.y)
+        self.cur_px            = P(d.px.x, d.px.y)
+        self.cur_color         = QColor(d.color)
+        self.cur_outline_color = QColor(d.outline_color) if d.outline_color else QColor(0,0,0,0)
+        self.cur_outline_width = d.outline_width
+        self.cur_font_size     = d.font_size
+        self.cur_h_align       = d.h_align
+        self.cur_v_align       = d.v_align
+        self.cur_char_display  = d.char_display
+        self.cur_gradient_p1   = P(d.gradient_p1.x,  d.gradient_p1.y)
+        self.cur_gradient_px1  = P(d.gradient_px1.x, d.gradient_px1.y)
+        self.cur_gradient_p2   = P(d.gradient_p2.x,  d.gradient_p2.y)
+        self.cur_gradient_px2  = P(d.gradient_px2.x, d.gradient_px2.y)
         self._dirty = True
 
     def _apply(self, tw: TextTween, v: float):
-        self.cur_x            = self._sx
-        self.cur_y            = self._sy
-        self.cur_px           = self._spx
-        self.cur_py           = self._spy
-        self.cur_h_align      = self._sha
-        self.cur_v_align      = self._sva
-        self.cur_font_size    = self._sfs
-        self.cur_char_display = self._scd
-        self.cur_color        = QColor(self._sc)
-        if tw.x            is not None: self.cur_x            = self._sx  + (tw.x        - self._sx)  * v
-        if tw.y            is not None: self.cur_y            = self._sy  + (tw.y        - self._sy)  * v
-        if tw.px           is not None: self.cur_px           = self._spx + (tw.px       - self._spx) * v
-        if tw.py           is not None: self.cur_py           = self._spy + (tw.py       - self._spy) * v
-        if tw.h_align      is not None: self.cur_h_align      = self._sha + (tw.h_align  - self._sha) * v
-        if tw.v_align      is not None: self.cur_v_align      = self._sva + (tw.v_align  - self._sva) * v
-        if tw.font_size    is not None: self.cur_font_size    = self._sfs + (tw.font_size    - self._sfs) * v
-        if tw.char_display is not None: self.cur_char_display = self._scd + (tw.char_display - self._scd) * v
-        if tw.color        is not None: self.cur_color        = lerp_color(self._sc, tw.color, v)
+        if tw.p is not None:
+            tx = self._sp.x + (tw.p.x - self._sp.x) * v if tw.p.x is not None else self._sp.x
+            ty = self._sp.y + (tw.p.y - self._sp.y) * v if tw.p.y is not None else self._sp.y
+            self.cur_p = P(tx, ty)
+        if tw.px is not None:
+            tx = self._spx.x + (tw.px.x - self._spx.x) * v if tw.px.x is not None else self._spx.x
+            ty = self._spx.y + (tw.px.y - self._spx.y) * v if tw.px.y is not None else self._spx.y
+            self.cur_px = P(tx, ty)
+        if tw.color         is not None: self.cur_color         = lerp_color(self._sc,  tw.color,         v)
+        if tw.outline_color is not None: self.cur_outline_color = lerp_color(self._so,  tw.outline_color, v)
+        if tw.outline_width is not None: self.cur_outline_width = self._slow + (tw.outline_width - self._slow) * v
+        if tw.h_align       is not None: self.cur_h_align       = self._sha  + (tw.h_align       - self._sha)  * v
+        if tw.v_align       is not None: self.cur_v_align       = self._sva  + (tw.v_align       - self._sva)  * v
+        if tw.font_size     is not None: self.cur_font_size     = self._sfs  + (tw.font_size     - self._sfs)  * v
+        if tw.char_display  is not None: self.cur_char_display  = self._scd  + (tw.char_display  - self._scd)  * v
+        if tw.gradient_p1   is not None: self.cur_gradient_p1   = P(self._sgp1.x  + (tw.gradient_p1.x  - self._sgp1.x)  * v, self._sgp1.y  + (tw.gradient_p1.y  - self._sgp1.y)  * v)
+        if tw.gradient_px1  is not None: self.cur_gradient_px1  = P(self._sgpx1.x + (tw.gradient_px1.x - self._sgpx1.x) * v, self._sgpx1.y + (tw.gradient_px1.y - self._sgpx1.y) * v)
+        if tw.gradient_p2   is not None: self.cur_gradient_p2   = P(self._sgp2.x  + (tw.gradient_p2.x  - self._sgp2.x)  * v, self._sgp2.y  + (tw.gradient_p2.y  - self._sgp2.y)  * v)
+        if tw.gradient_px2  is not None: self.cur_gradient_px2  = P(self._sgpx2.x + (tw.gradient_px2.x - self._sgpx2.x) * v, self._sgpx2.y + (tw.gradient_px2.y - self._sgpx2.y) * v)
         self._dirty = True
     
     def _apply_blend(self, tw: TextTween, v: float):
-        if tw.x            is not None: self.cur_x            += tw.x        * v
-        if tw.y            is not None: self.cur_y            += tw.y        * v
-        if tw.px           is not None: self.cur_px           += tw.px       * v
-        if tw.py           is not None: self.cur_py           += tw.py       * v
-        if tw.h_align      is not None: self.cur_h_align      += tw.h_align  * v
-        if tw.v_align      is not None: self.cur_v_align      += tw.v_align  * v
-        if tw.font_size    is not None: self.cur_font_size    += tw.font_size    * v
-        if tw.char_display is not None: self.cur_char_display += tw.char_display * v
-        if tw.color        is not None: self.cur_color         = lerp_color(self.cur_color, tw.color, v)
+        if tw.p is not None:
+            nx = self.cur_p.x  + tw.p.x  * v if tw.p.x  is not None else self.cur_p.x
+            ny = self.cur_p.y  + tw.p.y  * v if tw.p.y  is not None else self.cur_p.y
+            self.cur_p = P(nx, ny)
+        if tw.px is not None:
+            nx = self.cur_px.x + tw.px.x * v if tw.px.x is not None else self.cur_px.x
+            ny = self.cur_px.y + tw.px.y * v if tw.px.y is not None else self.cur_px.y
+            self.cur_px = P(nx, ny)
+        if tw.color         is not None: self.cur_color         = lerp_color(self.cur_color,         tw.color,         v)
+        if tw.outline_color is not None: self.cur_outline_color = lerp_color(self.cur_outline_color, tw.outline_color, v)
+        if tw.outline_width is not None: self.cur_outline_width += tw.outline_width * v
+        if tw.h_align       is not None: self.cur_h_align       += tw.h_align       * v
+        if tw.v_align       is not None: self.cur_v_align       += tw.v_align       * v
+        if tw.font_size     is not None: self.cur_font_size     += tw.font_size     * v
+        if tw.char_display  is not None: self.cur_char_display  += tw.char_display  * v
+        if tw.gradient_p1   is not None: self.cur_gradient_p1   = P(self.cur_gradient_p1.x  + tw.gradient_p1.x  * v, self.cur_gradient_p1.y  + tw.gradient_p1.y  * v)
+        if tw.gradient_px1  is not None: self.cur_gradient_px1  = P(self.cur_gradient_px1.x + tw.gradient_px1.x * v, self.cur_gradient_px1.y + tw.gradient_px1.y * v)
+        if tw.gradient_p2   is not None: self.cur_gradient_p2   = P(self.cur_gradient_p2.x  + tw.gradient_p2.x  * v, self.cur_gradient_p2.y  + tw.gradient_p2.y  * v)
+        if tw.gradient_px2  is not None: self.cur_gradient_px2  = P(self.cur_gradient_px2.x + tw.gradient_px2.x * v, self.cur_gradient_px2.y + tw.gradient_px2.y * v)
         self._dirty = True
 
     def set_phase(self, phase):
@@ -1490,8 +1584,8 @@ class AnimatedText(_TweenDriver):
 
         for driver in self._always_drivers_t.values():
             driver.update(self._phase, base_done)
-            sum_x  += driver.offset_points[0].x
-            sum_y  += driver.offset_points[0].y
+            sum_x  += driver.offset_p[0].x
+            sum_y  += driver.offset_p[0].y
             sum_px += driver.offset_px[0].x
             sum_py += driver.offset_px[0].y
             if driver.offset_fill_color is not None:
@@ -1562,35 +1656,35 @@ class AnimatedText(_TweenDriver):
         if (self._cached_label == label
                 and self._cached_tw == widget_w
                 and self._cached_th == widget_h
-                and self._cached_x  == self.cur_x
-                and self._cached_y  == self.cur_y
-                and self._cached_px == self.cur_px + self._always_px_offset
-                and self._cached_py == self.cur_py + self._always_py_offset):
+                and self._cached_x  == self.cur_p.x
+                and self._cached_y  == self.cur_p.y
+                and self._cached_px == self.cur_px.x + self._always_px_offset
+                and self._cached_py == self.cur_px.y + self._always_py_offset):
             return self._cached_dx, self._cached_dy
         if self._cached_fm is None or self._dirty:
             self._cached_fm = QFontMetrics(font)
         fm = self._cached_fm
         if self.defn.uniform_scale:
             s  = min(widget_w/cam_w, widget_h/cam_h)
-            bx = (0.5+(self.cur_x-0.5)*s/(widget_w/cam_w))*widget_w
-            by = (0.5+(self.cur_y-0.5)*s/(widget_h/cam_h))*widget_h
+            bx = (0.5+(self.cur_p.x-0.5)*s/(widget_w/cam_w))*widget_w
+            by = (0.5+(self.cur_p.y-0.5)*s/(widget_h/cam_h))*widget_h
         else:
-            bx = self.cur_x*widget_w
-            by = self.cur_y*widget_h
-        bx += self.cur_px * scale
-        by += self.cur_py * scale
+            bx = self.cur_p.x*widget_w
+            by = self.cur_p.y*widget_h
+        bx += self.cur_px.x * scale
+        by += self.cur_px.y * scale
         dx = int(bx - self.cur_h_align * fm.horizontalAdvance(label) + self._always_px_offset * scale)
         dy = int(by + fm.ascent() - self.cur_v_align * fm.height()   + self._always_py_offset * scale)
+        self._cached_x  = self.cur_p.x
+        self._cached_y  = self.cur_p.y
+        self._cached_px = self.cur_px.x + self._always_px_offset
+        self._cached_py = self.cur_px.y + self._always_py_offset
         self._cached_dx    = dx
         self._cached_dy    = dy
         self._cached_label = label
         self._cached_tw    = widget_w
         self._cached_th    = widget_h
-        self._cached_x  = self.cur_x
-        self._cached_y  = self.cur_y
-        self._cached_px = self.cur_px + self._always_px_offset
-        self._cached_py = self.cur_py + self._always_py_offset
-        self._dirty = False
+        self._dirty        = False
         return dx, dy
     
     def resolve_display_text(self, full_label: str) -> str:
@@ -1622,66 +1716,117 @@ class AnimatedText(_TweenDriver):
         if cd <= 0.0:
             return
 
-        scale = 1.0 if not self.defn.uniform_scale else scale
-        font = self.build_font(scale)
-        fm   = QFontMetrics(font)
+        scale      = 1.0 if not self.defn.uniform_scale else scale
+        font       = self.build_font(scale)
+        fm         = QFontMetrics(font)
+        use_path   = (self.defn.outline_width > 0.0 or self.defn.outline_color is not None or self.defn.gradient is not None)
 
-        orig_x, orig_y = self.cur_x, self.cur_y
-        self.cur_x += self._always_x_offset
-        self.cur_y += self._always_y_offset
+        orig_p  = self.cur_p
+        orig_px = self.cur_px
+        self.cur_p  = P(self.cur_p.x  + self._always_x_offset, self.cur_p.y  + self._always_y_offset)
+        self.cur_px = P(self.cur_px.x + self._always_px_offset, self.cur_px.y + self._always_py_offset)
         dx, dy = self.resolve_pos(widget_w, widget_h, cam_w, cam_h, full_label, font, scale)
-        self.cur_x, self.cur_y = orig_x, orig_y
-        dx += int(self._always_px_offset * scale) + int(self._pos_offset.x)
-        dy += int(self._always_py_offset * scale) + int(self._pos_offset.y)
+        self.cur_p  = orig_p
+        self.cur_px = orig_px
+
+        dx += int(self._pos_offset.x)
+        dy += int(self._pos_offset.y)
 
         color = self._always_text_color if self._always_text_color is not None else self.cur_color
 
-        painter.setFont(font)
-        painter.setPen(color)
+        # apply char_display clipping
+        if cd < 1.0 and not self.defn.sub_char_clip:
+            display_label = self.resolve_display_text(full_label)
+            if not display_label:
+                return
+            if self.defn.backward:
+                disp_w = fm.horizontalAdvance(display_label)
+                full_w = fm.horizontalAdvance(full_label)
+                dx     = dx + full_w - disp_w
+            full_label = display_label
 
-        if cd >= 1.0:
-            painter.drawText(int(dx), int(dy), full_label)
-            painter.setPen(Qt.NoPen)
+        painter.setFont(font)
+
+        if not use_path:
+            # fast path — solid color text
+            if cd >= 1.0 or self.defn.sub_char_clip:
+                painter.setPen(color)
+                if self.defn.sub_char_clip and cd < 1.0:
+                    full_w  = fm.horizontalAdvance(full_label)
+                    clip_w  = full_w * cd
+                    ascent  = fm.ascent()
+                    descent = fm.descent()
+                    clip_x  = (dx + full_w - clip_w) if self.defn.backward else dx
+                    painter.save()
+                    painter.setClipRect(QRectF(clip_x, dy - ascent, clip_w, ascent + descent))
+                    painter.drawText(int(dx), int(dy), full_label)
+                    painter.restore()
+                else:
+                    painter.drawText(int(dx), int(dy), full_label)
+                painter.setPen(Qt.NoPen)
             return
 
-        if self.defn.sub_char_clip:
+        path = QPainterPath()
+        path.addText(dx, dy, font, full_label)
+
+        if self.defn.sub_char_clip and cd < 1.0:
             full_w  = fm.horizontalAdvance(full_label)
             clip_w  = full_w * cd
             ascent  = fm.ascent()
             descent = fm.descent()
-            height  = ascent + descent
-            if self.defn.backward:
-                clip_x = dx + full_w - clip_w
-                painter.save()
-                painter.setClipRect(QRectF(clip_x, dy - ascent, clip_w, height))
-                painter.drawText(int(dx), int(dy), full_label)
-                painter.restore()
+            clip_x  = (dx + full_w - clip_w) if self.defn.backward else dx
+            painter.save()
+            painter.setClipRect(QRectF(clip_x, dy - ascent, clip_w, ascent + descent))
+
+        gd = self.defn.gradient
+
+        def _gradient_brush():
+            def _has(p, px): return p.x!=0 or p.y!=0 or px.x!=0 or px.y!=0
+            if _has(self.cur_gradient_p1, self.cur_gradient_px1) or \
+            _has(self.cur_gradient_p2, self.cur_gradient_px2):
+                x1 = self.cur_gradient_p1.x  * widget_w + self.cur_gradient_px1.x
+                y1 = self.cur_gradient_p1.y  * widget_h + self.cur_gradient_px1.y
+                x2 = self.cur_gradient_p2.x  * widget_w + self.cur_gradient_px2.x
+                y2 = self.cur_gradient_p2.y  * widget_h + self.cur_gradient_px2.y
             else:
-                painter.save()
-                painter.setClipRect(QRectF(dx, dy - ascent, clip_w, height))
-                painter.drawText(int(dx), int(dy), full_label)
-                painter.restore()
+                x1 = gd.p1.x  * widget_w + gd.px1.x
+                y1 = gd.p1.y  * widget_h + gd.px1.y
+                x2 = gd.p2.x  * widget_w + gd.px2.x
+                y2 = gd.p2.y  * widget_h + gd.px2.y
+            return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
+
+        # fill
+        if gd is not None and gd.target == 'fill':
+            painter.setPen(Qt.NoPen)
+            painter.fillPath(path, _gradient_brush())
         else:
-            display_label = self.resolve_display_text(full_label)
-            if not display_label:
-                painter.setPen(Qt.NoPen)
-                return
-            if self.defn.backward:
-                disp_w  = fm.horizontalAdvance(display_label)
-                full_w  = fm.horizontalAdvance(full_label)
-                dx_disp = dx + full_w - disp_w
-                painter.drawText(int(dx_disp), int(dy), display_label)
+            painter.setPen(Qt.NoPen)
+            painter.fillPath(path, color)
+
+        # outline
+        if self.cur_outline_width > 0.0 or self.cur_outline_color.alpha() > 0:
+            if gd is not None and gd.target == 'outline':
+                pen = QPen(_gradient_brush(), self.cur_outline_width)
             else:
-                painter.drawText(int(dx), int(dy), display_label)
+                oc = self.cur_outline_color if self.cur_outline_color.alpha() > 0 else color
+                pen = QPen(oc, self.cur_outline_width)
+            pen.setJoinStyle(Qt.RoundJoin)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.strokePath(path, pen)
+
+        if self.defn.sub_char_clip and cd < 1.0:
+            painter.restore()
 
         painter.setPen(Qt.NoPen)
-
+    
 # ──────────────────────── SLIDER DEF ────────────────────────
 
 def make_track_def(
-    x: float, y: float, px: float, py: float,
-    lx: float, lpx: float,
-    h_px: float = 4.0,
+    p:         P     = P(),
+    px:        P     = P(),
+    length:    float = 0.0,
+    length_px: float = 0.0,
+    h_px:      float = 4.0,
     fill_color:    QColor = None,
     outline_color: QColor = None,
     phases: Dict[str, Phase] = None,
@@ -1690,15 +1835,14 @@ def make_track_def(
     fc = fill_color    or QColor(255, 255, 255, 40)
     oc = outline_color or QColor(0, 0, 0, 0)
     return PolygonDef(
-        points        = [P(x,      y), P(x + lx, y), P(x + lx, y), P(x,      y)],
-        px            = [P(px, py - half), P(px + lpx, py - half),
-                         P(px + lpx, py + half), P(px, py + half)],
+        p  = [P(p.x, p.y), P(p.x+length, p.y), P(p.x+length, p.y), P(p.x, p.y)],
+        px = [P(px.x, px.y-half), P(px.x+length_px, px.y-half),
+              P(px.x+length_px, px.y+half), P(px.x, px.y+half)],
         fill_color    = fc,
         outline_color = oc,
         closed        = True,
         phases        = phases or {},
     )
-
 
 def make_knob_def(
     fill_color: QColor = None,
@@ -1706,7 +1850,7 @@ def make_knob_def(
 ) -> PolygonDef:
     fc = fill_color or QColor(255, 255, 255)
     return PolygonDef(
-        points        = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
+        p             = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
         px            = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
         fill_color    = fc,
         outline_color = QColor(0, 0, 0, 0),
@@ -1714,30 +1858,30 @@ def make_knob_def(
         phases        = phases or {},
     )
 
-
 def make_mark_fill_def(
-    x: float, y: float, px: float, py: float,
-    h_px: float = 8.0,
+    p:      P     = P(),
+    px:     P     = P(),
+    h_px:   float = 8.0,
     fill_color: QColor = None,
     phases: Dict[str, Phase] = None,
 ) -> PolygonDef:
     half = h_px / 2.0
     fc   = fill_color or QColor(255, 255, 255, 60)
     return PolygonDef(
-        points        = [P(x, y), P(x, y), P(x, y), P(x, y)],
-        px            = [P(px, py - half), P(px, py - half),
-                         P(px, py + half), P(px, py + half)],
+        p  = [P(p.x, p.y)] * 4,
+        px = [P(px.x, px.y-half), P(px.x, px.y-half),
+              P(px.x, px.y+half), P(px.x, px.y+half)],
         fill_color    = fc,
         outline_color = QColor(0, 0, 0, 0),
         closed        = True,
         phases        = phases or {},
     )
 
-
 def make_mark_tick_def(
-    x: float, y: float, px: float, py: float,
-    w_px: float = 3.0,
-    h_px: float = 14.0,
+    p:      P     = P(),
+    px:     P     = P(),
+    w_px:   float = 3.0,
+    h_px:   float = 14.0,
     fill_color: QColor = None,
     phases: Dict[str, Phase] = None,
 ) -> PolygonDef:
@@ -1745,9 +1889,9 @@ def make_mark_tick_def(
     hh = h_px / 2.0
     fc = fill_color or QColor(255, 255, 255, 200)
     return PolygonDef(
-        points        = [P(x, y), P(x, y), P(x, y), P(x, y)],
-        px            = [P(px - hw, py - hh), P(px + hw, py - hh),
-                         P(px + hw, py + hh), P(px - hw, py + hh)],
+        p  = [P(p.x, p.y)] * 4,
+        px = [P(px.x-hw, px.y-hh), P(px.x+hw, px.y-hh),
+              P(px.x+hw, px.y+hh), P(px.x-hw, px.y+hh)],
         fill_color    = fc,
         outline_color = QColor(0, 0, 0, 0),
         closed        = True,
@@ -1764,12 +1908,10 @@ class SliderTextDefs:
 
 @dataclass
 class SliderGroupDef:
-    x:            float                                  = 0.0
-    y:            float                                  = 0.0
-    px:           float                                  = 0.0
-    py:           float                                  = 0.0
-    lx:           float                                  = 0.0
-    lpx:          float                                  = 0.0
+    p:          P                                        = field(default_factory=P)
+    px:         P                                        = field(default_factory=P)
+    length:     float                                    = 0.0
+    length_px:  float                                    = 0.0
     min_val:      float                                  = 0.0
     max_val:      float                                  = 1.0
     event_out:    Optional[EventDef]                     = None
@@ -1791,12 +1933,10 @@ class SliderGroupDef:
 
 
 def SliderDef(
-    x:           float = 0.0,
-    y:           float = 0.0,
-    lx:          float = 0.0,
-    px:          float = 0.0,
-    py:          float = 0.0,
-    lpx:         float = 0.0,
+    p:           P     = P(),
+    px:          P     = P(),
+    length:      float = 0.0,
+    length_px:   float = 0.0,
     event_out:   Optional[EventDef] = None,
     min_val:     float = 0.0,
     max_val:     float = 1.0,
@@ -1827,14 +1967,14 @@ def SliderDef(
     unit_text = unit
 
     def _track_phases():
-        pts_full = [P(x, y), P(x+lx, y), P(x+lx, y), P(x, y)]
-        pts_zero = [P(x, y), P(x,    y), P(x,    y), P(x, y)]
+        pts_full = [P(p.x, p.y), P(p.x+length, p.y), P(p.x+length, p.y), P(p.x, p.y)]
+        pts_zero = [P(p.x, p.y), P(p.x,        p.y), P(p.x,        p.y), P(p.x, p.y)]
         return {
-            'open':     Phase([PolygonTween(points=pts_zero, fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
-                               PolygonTween(points=pts_full, fill_color=track_idle, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint)]),
-            'close':    Phase([PolygonTween(points=pts_zero, fill_color=zero_white,  start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
-            'pressed':  Phase([PolygonTween(points=pts_full, fill_color=track_press, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
-            'released': Phase([PolygonTween(points=pts_full, fill_color=track_idle,  start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
+            'open':     Phase([PolygonTween(p=pts_zero, fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
+                               PolygonTween(p=pts_full, fill_color=track_idle, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint)]),
+            'close':    Phase([PolygonTween(p=pts_zero, fill_color=zero_white,  start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
+            'pressed':  Phase([PolygonTween(p=pts_full, fill_color=track_press, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
+            'released': Phase([PolygonTween(p=pts_full, fill_color=track_idle,  start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
         }
 
     def _knob_phases():
@@ -1844,42 +1984,43 @@ def SliderDef(
         def _px(e): return [P(0, -e), P(e, 0), P(0, e), P(-e, 0)]
         pts = [P(0, 0)] * 4
         return {
-            'open':      Phase([PolygonTween(points=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
-                                PolygonTween(points=pts, px=_px(s),  fill_color=knob_idle,  start=0.10, dur=0.40, ease=QEasingCurve.OutBack)]),
-            'close':     Phase([PolygonTween(points=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
-            'hovered':   Phase([PolygonTween(points=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutQuint)]),
-            'unhovered': Phase([PolygonTween(points=pts, px=_px(s),  fill_color=knob_idle,  start=0.00, dur=0.15, ease=QEasingCurve.OutQuint)]),
-            'pressed':   Phase([PolygonTween(points=pts, px=_px(sp), fill_color=knob_press, start=0.00, dur=0.08, ease=QEasingCurve.OutQuint)]),
-            'released':  Phase([PolygonTween(points=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutBack)]),
+            'open':      Phase([PolygonTween(p=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
+                                PolygonTween(p=pts, px=_px(s),  fill_color=knob_idle,  start=0.10, dur=0.40, ease=QEasingCurve.OutBack)]),
+            'close':     Phase([PolygonTween(p=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
+            'hovered':   Phase([PolygonTween(p=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutQuint)]),
+            'unhovered': Phase([PolygonTween(p=pts, px=_px(s),  fill_color=knob_idle,  start=0.00, dur=0.15, ease=QEasingCurve.OutQuint)]),
+            'pressed':   Phase([PolygonTween(p=pts, px=_px(sp), fill_color=knob_press, start=0.00, dur=0.08, ease=QEasingCurve.OutQuint)]),
+            'released':  Phase([PolygonTween(p=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutBack)]),
         }
 
     def _mark_phases(idle_col, press_col):
         pts = [P(0, 0)] * 4
         return {
-            'open':     Phase([PolygonTween(points=pts, fill_color=zero_color, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
-                               PolygonTween(points=pts, fill_color=idle_col,   start=0.10, dur=0.40, ease=QEasingCurve.OutQuint)]),
-            'close':    Phase([PolygonTween(points=pts, fill_color=zero_color, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
-            'pressed':  Phase([PolygonTween(points=pts, fill_color=press_col,  start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
-            'released': Phase([PolygonTween(points=pts, fill_color=idle_col,   start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
+            'open':     Phase([PolygonTween(p=pts, fill_color=zero_color, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
+                               PolygonTween(p=pts, fill_color=idle_col,   start=0.10, dur=0.40, ease=QEasingCurve.OutQuint)]),
+            'close':    Phase([PolygonTween(p=pts, fill_color=zero_color, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
+            'pressed':  Phase([PolygonTween(p=pts, fill_color=press_col,  start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
+            'released': Phase([PolygonTween(p=pts, fill_color=idle_col,   start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
         }
 
-    def _text_phases(tx, ty, tpx=0.0, tpy=0.0, h_align=0.5, v_align=0.5):
+    def _text_phases(tp, tpx, h_align=0.5, v_align=0.5):
         return {
-            'open':     Phase([TextTween(x=tx, y=ty, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint, color=text_dim,    h_align=h_align, v_align=v_align, px=tpx, py=tpy)]),
-            'close':    Phase([TextTween(x=tx, y=ty, start=0.00, dur=0.20, ease=QEasingCurve.InQuint,  color=zero_color,  h_align=h_align, v_align=v_align, px=tpx, py=tpy)]),
-            'pressed':  Phase([TextTween(x=tx, y=ty, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint, color=text_bright, h_align=h_align, v_align=v_align, px=tpx, py=tpy)]),
-            'released': Phase([TextTween(x=tx, y=ty, start=0.00, dur=0.20, ease=QEasingCurve.OutQuint, color=text_dim,    h_align=h_align, v_align=v_align, px=tpx, py=tpy)]),
+            'open':     Phase([TextTween(p=tp, px=tpx, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint, color=text_dim,    h_align=h_align, v_align=v_align)]),
+            'close':    Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.InQuint,  color=zero_color,  h_align=h_align, v_align=v_align)]),
+            'pressed':  Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint, color=text_bright, h_align=h_align, v_align=v_align)]),
+            'released': Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.OutQuint, color=text_dim,    h_align=h_align, v_align=v_align)]),
         }
 
     def _group_phases():
         return {
-            'open':  Phase([PolygonTween(points=[P(0, 0)], px=[P(0, 0)],  start=0.00, dur=0.40, ease=QEasingCurve.OutQuint)]),
-            'close': Phase([PolygonTween(points=[P(0, 0)], px=[P(0, 20)], start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
+            'open':  Phase([PolygonTween(p=[P(0, 0)], px=[P(0, 0)],  start=0.00, dur=0.40, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([PolygonTween(p=[P(0, 0)], px=[P(0, 20)], start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
         }
 
     return SliderGroupDef(
-        x=x, y=y, px=px, py=py,
-        lx=lx, lpx=lpx,
+        p=p, px=px,
+        length=length,
+        length_px=length_px,
         min_val=min_val,
         max_val=max_val,
         step=step,
@@ -1890,8 +2031,8 @@ def SliderDef(
         knob_hit_px=knob_size,
 
         track=make_track_def(
-            x=x, y=y, px=px, py=py,
-            lx=lx, lpx=lpx,
+            p=p, px=px,
+            length=length, length_px=length_px,
             h_px=track_h,
             fill_color=zero_white,
             phases=_track_phases(),
@@ -1903,33 +2044,33 @@ def SliderDef(
         ),
 
         mark_fill=make_mark_fill_def(
-            x=x, y=y, px=px, py=py,
+            p=p, px=px,
             h_px=mark_h,
             fill_color=zero_color,
             phases=_mark_phases(fill_idle, fill_press),
         ),
 
         mark_tick=make_mark_tick_def(
-            x=x, y=y, px=px, py=py,
+            p=p, px=px,
             w_px=2.0, h_px=tick_h,
             fill_color=zero_white,
             phases=_mark_phases(tick_idle, tick_press),
         ),
 
         text_label=TextDef(
-            x=x, y=y, px=px - 8, py=py,
+            p=P(p.x, p.y), px=P(px.x - 8, px.y),
             text=label, font_size=7.0,
             color=zero_color,
-            phases=_text_phases(x, y, tpx=px - 8, tpy=py, h_align=1.0, v_align=0.5),
+            phases=_text_phases(P(p.x, p.y), P(px.x - 8, px.y), h_align=1.0, v_align=0.5),
             bold=True, italic=False, font_family=fam,
             h_align=1.0, v_align=0.5, uniform_scale=False,
         ) if label else None,
 
         text_min=TextDef(
-            x=0.0, y=0.0, px=0.0, py=14.0,
+            p=P(0.0, 0.0), px=P(0.0, 14.0),
             text='', font_size=9.0,
             color=zero_color,
-            phases=_text_phases(0.0, 0.0, tpy=14.0, h_align=0.0, v_align=0.0),
+            phases=_text_phases(P(p.x, p.y), P(px.x, px.y + 14.0), h_align=0.0, v_align=0.0),
             bold=False, italic=False, font_family=fam,
             h_align=0.0, v_align=0.0, uniform_scale=False,
             text_fn=lambda ctx, u=unit_text, dec=decimals: (
@@ -1940,10 +2081,10 @@ def SliderDef(
         ) if min_val is not None else None,
 
         text_max=TextDef(
-            x=0.0, y=0.0, px=0.0, py=14.0,
+            p=P(0.0, 0.0), px=P(0.0, 14.0),
             text='', font_size=9.0,
             color=zero_color,
-            phases=_text_phases(0.0, 0.0, tpy=14.0, h_align=1.0, v_align=0.0),
+            phases=_text_phases(P(0.0, 0.0), P(0.0, 14.0), h_align=1.0, v_align=0.0),
             bold=False, italic=False, font_family=fam,
             h_align=1.0, v_align=0.0, uniform_scale=False,
             text_fn=lambda ctx, u=unit_text, dec=decimals: (
@@ -1954,10 +2095,10 @@ def SliderDef(
         ) if max_val is not None else None,
 
         text_current=TextDef(
-            x=0.0, y=0.0, px=0.0, py=-12.0,
+            p=P(0.0, 0.0), px=P(0.0, -12.0),
             text='', font_size=10.0,
             color=zero_color,
-            phases=_text_phases(0.0, 0.0, tpy=-12.0, h_align=0.5, v_align=1.0),
+            phases=_text_phases(P(0.0, 0.0), P(0.0, -12.0), h_align=0.5, v_align=1.0),
             bold=False, italic=False, font_family=fam,
             h_align=0.5, v_align=1.0, uniform_scale=False,
             text_fn=lambda ctx, u=unit_text, dec=decimals: (
@@ -1993,13 +2134,7 @@ class SliderGroup:
         self._text_max     = AnimatedText(defn.text_max)     if defn.text_max     else None
         self._text_current = AnimatedText(defn.text_current) if defn.text_current else None
 
-        _group_def = PolygonDef(
-            points=[P(0, 0)], px=[P(0, 30)],
-            fill_color=QColor(0, 0, 0, 0),
-            outline_color=QColor(0, 0, 0, 0),
-            closed=True,
-            phases=defn.phases,
-        )
+        _group_def = PolygonDef(p=[P(0, 0)], px=[P(0, 30)], fill_color=QColor(0, 0, 0, 0), outline_color=QColor(0, 0, 0, 0), closed=True, phases=defn.phases)
         self._group = AnimatedPolygon(_group_def)
 
         self._track_x1: float = 0.0
@@ -2037,11 +2172,10 @@ class SliderGroup:
             self.defn.event_out.value = self._cur_value
  
         self._tick_ease_start_sx = self._tick_display_sx
-        self._tick_target_sx     = self._knob_sx   # knob is already at cur_value
+        self._tick_target_sx     = self._knob_sx
         self._tick_ease_t0       = time.monotonic()
         self._tick_easing        = True
         self._tick_frozen        = False
- 
 
     def revert(self):
         self._cur_value = self._initial_value
@@ -2051,41 +2185,32 @@ class SliderGroup:
         return self._cur_value != self._initial_value
 
     def set_phase(self, phase: str):
-        for comp in (self._track, self._knob, self._mark_fill,
-                    self._mark_tick, self._group):
+        for comp in (self._track, self._knob, self._mark_fill, self._mark_tick, self._group):
             if comp is not None:
                 comp.set_phase(phase)
-        for text in (self._text_label, self._text_min,
-                    self._text_max, self._text_current):
+        for text in (self._text_label, self._text_min, self._text_max, self._text_current):
             if text is not None:
                 text.set_phase(phase)
         if phase == 'open':
             self._snap_knob_to_start = True
         if self._knob is not None:
-            self._knob._spx = [
-                P(p.x - self._last_knob_sx, p.y - self._last_knob_sy)
-                for p in self._knob._spx
-            ]
-        if self._text_min is not None:
-            self._text_min._spx -= self._last_text_min_x
-            self._text_min._spy -= self._last_text_min_y
-        if self._text_max is not None:
-            self._text_max._spx -= self._last_text_max_x
-            self._text_max._spy -= self._last_text_max_y
-        if self._text_current is not None:
-            self._text_current._spx -= self._last_text_cur_x
-            self._text_current._spy -= self._last_text_cur_y
+            self._knob._spx = [P(p.x - self._last_knob_sx, p.y - self._last_knob_sy) for p in self._knob._spx]
+        if self._text_min is not None and (self._last_text_min_x != 0.0 or self._last_text_min_y != 0.0):
+            self._text_min.cur_px = P(self._text_min.cur_px.x - self._last_text_min_x, self._text_min.cur_px.y - self._last_text_min_y)
+            self._text_min._spx   = P(self._text_min._spx.x   - self._last_text_min_x, self._text_min._spx.y   - self._last_text_min_y)
+        if self._text_max is not None and (self._last_text_max_x != 0.0 or self._last_text_max_y != 0.0):
+            self._text_max.cur_px = P(self._text_max.cur_px.x - self._last_text_max_x, self._text_max.cur_px.y - self._last_text_max_y)
+            self._text_max._spx   = P(self._text_max._spx.x   - self._last_text_max_x, self._text_max._spx.y   - self._last_text_max_y)
+        if self._text_current is not None and (self._last_text_cur_x != 0.0 or self._last_text_cur_y != 0.0):
+            self._text_current.cur_px = P(self._text_current.cur_px.x - self._last_text_cur_x, self._text_current.cur_px.y - self._last_text_cur_y)
+            self._text_current._spx   = P(self._text_current._spx.x   - self._last_text_cur_x, self._text_current._spx.y   - self._last_text_cur_y)
 
     def phase_done(self) -> bool:
-        comps = [self._track, self._knob, self._mark_fill,
-                 self._mark_tick, self._group,
-                 self._text_label, self._text_min,
-                 self._text_max,   self._text_current]
+        comps = [self._track, self._knob, self._mark_fill, self._mark_tick, self._group, self._text_label, self._text_min, self._text_max,   self._text_current]
         return all(c.phase_done() for c in comps if c is not None)
 
     def hit_test_knob(self, mx: float, my: float, w: int, h: int) -> bool:
-        return (abs(mx - self._knob_sx) <= self.defn.knob_hit_px and
-                abs(my - self._knob_sy) <= self.defn.knob_hit_px)
+        return (abs(mx - self._knob_sx) <= self.defn.knob_hit_px and abs(my - self._knob_sy) <= self.defn.knob_hit_px)
 
     def drag_to(self, mx, my, w, h):
         span = self._track_x2 - self._track_x1
@@ -2099,7 +2224,6 @@ class SliderGroup:
             raw = round(raw / step) * step
         self._cur_value = max(lo, min(hi, raw))
     
-
     def update(self, widget_w: int, widget_h: int):
         if not self._tick_frozen and not self._tick_easing and self._tick_display_sx == 0.0:
             d = self.defn
@@ -2111,16 +2235,16 @@ class SliderGroup:
             
         # 1. Tick group
         self._group.update()
-        gp  = self._group.cur_points[0]
+        gp  = self._group.cur_p[0]
         gpx = self._group.cur_px[0]
         g_dx = gp.x * widget_w + gpx.x
         g_dy = gp.y * widget_h + gpx.y
 
         # 2. Track End Points
         d = self.defn
-        self._track_x1 = d.x * widget_w + d.px + g_dx
-        self._track_y1 = d.y * widget_h + d.py + g_dy
-        self._track_x2 = (d.x + d.lx) * widget_w + d.px + d.lpx + g_dx
+        self._track_x1 = d.p.x * widget_w + d.px.x + g_dx
+        self._track_y1 = d.p.y * widget_h + d.px.y + g_dy
+        self._track_x2 = (d.p.x + d.length) * widget_w + d.px.x + d.length_px + g_dx
         self._track_y2 = self._track_y1
 
         # 3. Track Screen Position
@@ -2136,11 +2260,7 @@ class SliderGroup:
             self._last_knob_sy = self._track_y1
             self._snap_knob_to_start = False
 
-        if (d.max_val - d.min_val) != 0:
-            ratio = (self._cur_value - d.min_val) / (d.max_val - d.min_val)
-        else:
-            ratio = 0.0
-        ratio = max(0.0, min(1.0, ratio))
+        ratio = 0.0 if d.max_val - d.min_val == 0 else max(0.0, min(1.0, (self._cur_value - d.min_val) / (d.max_val - d.min_val)))
         self._knob_sx = self._track_x1 + ratio * (self._track_x2 - self._track_x1)
         self._knob_sy = self._track_y1
 
@@ -2157,10 +2277,7 @@ class SliderGroup:
                 else:
                     t = elapsed / dur
                     v = 1.0 - (1.0 - t) ** 5
-                    self._tick_display_sx = (
-                        self._tick_ease_start_sx
-                        + (self._tick_target_sx - self._tick_ease_start_sx) * v
-                    )
+                    self._tick_display_sx = (self._tick_ease_start_sx + (self._tick_target_sx - self._tick_ease_start_sx) * v)
             elif not self._tick_frozen:
                 d = self.defn
                 if (d.max_val - d.min_val) != 0:
@@ -2174,15 +2291,9 @@ class SliderGroup:
 
         # 6. Knob
         if self._knob is not None:
-            self._knob.cur_px = [
-                P(p.x - self._last_knob_sx, p.y - self._last_knob_sy)
-                for p in self._knob.cur_px
-            ]
+            self._knob.cur_px = [P(p.x - self._last_knob_sx, p.y - self._last_knob_sy) for p in self._knob.cur_px]
             self._knob.update()
-            self._knob.cur_px = [
-                P(p.x + self._knob_sx, p.y + self._knob_sy)
-                for p in self._knob.cur_px
-            ]
+            self._knob.cur_px = [P(p.x + self._knob_sx, p.y + self._knob_sy) for p in self._knob.cur_px]
             self._last_knob_sx = self._knob_sx
             self._last_knob_sy = self._knob_sy
             self._knob._dirty = True
@@ -2193,7 +2304,7 @@ class SliderGroup:
             left_x  = min(self._knob_sx, self._tick_display_sx)
             right_x = max(self._knob_sx, self._tick_display_sx)
             half = (self.defn.mark_fill.px[2].y - self.defn.mark_fill.px[0].y) / 2
-            self._mark_fill.cur_points = [P(0, 0)] * 4
+            self._mark_fill.cur_p = [P(0, 0)] * 4
             self._mark_fill.cur_px = [
                 P(left_x,  self._knob_sy - half),
                 P(right_x, self._knob_sy - half),
@@ -2207,7 +2318,7 @@ class SliderGroup:
             self._mark_tick.update()
             hw = (self.defn.mark_tick.px[1].x - self.defn.mark_tick.px[0].x) / 2.0
             hh = (self.defn.mark_tick.px[2].y - self.defn.mark_tick.px[0].y) / 2.0
-            self._mark_tick.cur_points = [P(0, 0)] * 4
+            self._mark_tick.cur_p = [P(0, 0)] * 4
             self._mark_tick.cur_px = [
                 P(self._tick_display_sx - hw, self._knob_sy - hh),
                 P(self._tick_display_sx + hw, self._knob_sy - hh),
@@ -2221,41 +2332,31 @@ class SliderGroup:
             self._text_label.update()
 
         if self._text_min is not None:
-            self._text_min.cur_px -= self._last_text_min_x
-            self._text_min.cur_py -= self._last_text_min_y
+            self._text_min.cur_px = P(self._text_min.cur_px.x - self._last_text_min_x, self._text_min.cur_px.y - self._last_text_min_y)
             self._text_min.update()
-            self._text_min.cur_x   = 0.0
-            self._text_min.cur_y   = 0.0
-            self._text_min.cur_px  = self._track_x1 + self._text_min.cur_px
-            self._text_min.cur_py  = self._track_y1 + self._text_min.cur_py
-            self._last_text_min_x  = self._track_x1
-            self._last_text_min_y  = self._track_y1
-            self._text_min._dirty  = True
+            self._text_min.cur_p  = P(0.0, 0.0)
+            self._text_min.cur_px = P(self._track_x1 + self._text_min.cur_px.x, self._track_y1 + self._text_min.cur_px.y)
+            self._last_text_min_x = self._track_x1
+            self._last_text_min_y = self._track_y1
+            self._text_min._dirty = True
 
         if self._text_max is not None:
-            self._text_max.cur_px -= self._last_text_max_x
-            self._text_max.cur_py -= self._last_text_max_y
+            self._text_max.cur_px = P(self._text_max.cur_px.x - self._last_text_max_x, self._text_max.cur_px.y - self._last_text_max_y)
             self._text_max.update()
-            self._text_max.cur_x   = 0.0
-            self._text_max.cur_y   = 0.0
-            self._text_max.cur_px  = self._track_x2 + self._text_max.cur_px
-            self._text_max.cur_py  = self._track_y1 + self._text_max.cur_py
-            self._last_text_max_x  = self._track_x2
-            self._last_text_max_y  = self._track_y1
-            self._text_max._dirty  = True
+            self._text_max.cur_p  = P(0.0, 0.0)
+            self._text_max.cur_px = P(self._track_x2 + self._text_max.cur_px.x, self._track_y1  + self._text_max.cur_px.y)
+            self._last_text_max_x = self._track_x2
+            self._last_text_max_y = self._track_y1
+            self._text_max._dirty = True
 
         if self._text_current is not None:
-            self._text_current.cur_px -= self._last_text_cur_x
-            self._text_current.cur_py -= self._last_text_cur_y
+            self._text_current.cur_px = P(self._text_current.cur_px.x - self._last_text_cur_x, self._text_current.cur_px.y - self._last_text_cur_y)
             self._text_current.update()
-            self._text_current.cur_x   = 0.0
-            self._text_current.cur_y   = 0.0
-            self._text_current.cur_px  = self._knob_sx + self._text_current.cur_px
-            self._text_current.cur_py  = self._knob_sy + self._text_current.cur_py
-            self._last_text_cur_x      = self._knob_sx
-            self._last_text_cur_y      = self._knob_sy
-            self._text_current._dirty  = True
-        
+            self._text_current.cur_p  = P(0.0, 0.0)
+            self._text_current.cur_px = P(self._knob_sx + self._text_current.cur_px.x, self._knob_sy + self._text_current.cur_px.y)
+            self._last_text_cur_x     = self._knob_sx
+            self._last_text_cur_y     = self._knob_sy
+            self._text_current._dirty = True
             
     def draw(self, painter: QPainter, w: int, h: int, scale: float = 1.0):
         cam_w, cam_h = self.cam_w, self.cam_h
@@ -2303,7 +2404,7 @@ class ButtonDef:
         set_outline  = QColor(255, 255, 255, 255)
         hover_fill, click_fill = _derive_button_colors(base_fill)
 
-        pts = self.poly_def.points
+        pts = self.poly_def.p
         px  = self.poly_def.px or [P()] * len(pts)
 
         poly_defaults = {
@@ -2681,7 +2782,7 @@ def SegmentedButtons(
             right_gap = 0.0 if is_last  else -half_gap
 
             if is_first:
-                points = [
+                p = [
                     P(main_n0, top_n),
                     P(main_n1, top_n),
                     P(main_n1, bot_n),
@@ -2697,7 +2798,7 @@ def SegmentedButtons(
                 ]
 
             elif is_last:
-                points = [
+                p = [
                     P(main_n0, top_n),
                     P(main_n1, top_n),
                     P(main_n1, mid_n),
@@ -2712,7 +2813,7 @@ def SegmentedButtons(
                     P(main_px0 + left_gap + s_bot, bot_px),
                 ]
             else:
-                points = [P(main_n0, top_n),  P(main_n1, top_n),  P(main_n1, bot_n),  P(main_n0, bot_n)]
+                p = [P(main_n0, top_n),  P(main_n1, top_n),  P(main_n1, bot_n),  P(main_n0, bot_n)]
                 px_pts = [
                     P(main_px0 + left_gap  + s_top, top_px),
                     P(main_px1 + right_gap + s_top, top_px),
@@ -2734,7 +2835,7 @@ def SegmentedButtons(
             bot_gap  = 0.0 if is_last  else -half_gap
 
             if is_first:
-                points = [
+                p = [
                     P(mid_n,   main_n0),
                     P(right_n, main_n0),
                     P(right_n, main_n1),
@@ -2749,7 +2850,7 @@ def SegmentedButtons(
                     P(left_px,           main_px0 + slant),
                 ]
             elif is_last:
-                points = [
+                p = [
                     P(left_n,  main_n0),
                     P(right_n, main_n0),
                     P(right_n, main_n1),
@@ -2764,7 +2865,7 @@ def SegmentedButtons(
                     P(left_px,           main_px1 - slant),
                 ]
             else:
-                points = [
+                p = [
                     P(left_n,  main_n0),
                     P(right_n, main_n0),
                     P(right_n, main_n1),
@@ -2854,7 +2955,7 @@ def SegmentedButtons(
             return _dynamic
         
         return PolygonDef(
-            points        = points,
+            p             = p,
             px            = px_pts,
             fill_color    = base_col,
             outline_color = outline_color,
@@ -3025,7 +3126,7 @@ def SevenSegmentDisplay(
         hover_fill, click_fill = _derive_button_colors(fill_color)
         active_fill = QColor(220, 60, 60, 255)
 
-        points = [P(0.0, 0.0)] * 6
+        p      = [P(0.0, 0.0)] * 6
         px_pts = [P(0.0, 0.0)] * 6
 
         merged_phases = {
@@ -3041,7 +3142,7 @@ def SevenSegmentDisplay(
         }
 
         return _tw_replace(base_poly,
-            points        = points,
+            p             = p,
             px            = px_pts,
             fill_color    = fill_color,
             outline_color = outline_color,
@@ -3324,11 +3425,12 @@ class AnimatedTextbox:
         self._polygon.draw(painter, w, h, self.cam_w, self.cam_h)
         if self._text is not None and not self._text.hidden:
             display = self._resolve_display_text(w, h)
-            font    = self._text.build_font(scale)
+            text_scale = scale if self._text.defn.uniform_scale else 1.0
+            font    = self._text.build_font(text_scale)
             fm      = QFontMetrics(font)
             painter.setFont(font)
             painter.setPen(self._text.cur_color)
-            dx, dy = self._text.resolve_pos(w, h, self.cam_w, self.cam_h, display, font, scale)
+            dx, dy = self._text.resolve_pos(w, h, self.cam_w, self.cam_h, display, font, text_scale)
             painter.drawText(dx, dy, display)
             if self._active and int(time.monotonic() * 2) % 2 == 0:
                 cursor_x = dx + fm.horizontalAdvance(display)
@@ -3663,8 +3765,7 @@ class AnimatedGraph:
                                 self._push_value(st, float(val), now)
                     st.last_data_fn_result = list(samples)
     
-    def _draw_labels(self, painter: QPainter,
-                     rx: float, ry: float, rw: float, rh: float) -> None:
+    def _draw_labels(self, painter: QPainter, rx: float, ry: float, rw: float, rh: float) -> None:
         d = self.defn
  
         show_minmax = d.show_minmax
@@ -4009,7 +4110,6 @@ class WindowDef:
     pie_defs:               List[PieDef]            = field(default_factory=list)
     slider_defs:            List[SliderGroupDef]    = field(default_factory=list)
     button_defs:            List[ButtonDef]         = field(default_factory=list)
-    gradient_defs:          List[GradientDef]       = field(default_factory=list)
     textbox_defs:           List[TextboxDef]        = field(default_factory=list)
     sub_windows:            List['WindowDef']       = field(default_factory=list)
     use_parent_close_phase: bool                    = True
@@ -4029,8 +4129,8 @@ class WindowDef:
 
 @dataclass
 class WindowTween:
-    p1:   P
-    p2:   P
+    p1:   Optional[P]          = None
+    p2:   Optional[P]          = None
     px1:  P                    = field(default_factory=P)
     px2:  P                    = field(default_factory=P)
     start: float               = 0.0
@@ -4052,8 +4152,6 @@ class AnimatedWindow:
         self._sliders   = [SliderGroup(d, cam_w, cam_h) for d in defn.slider_defs]
         self._buttons   = [AnimatedButton(d, cam_w, cam_h) for d in defn.button_defs]
         self._textboxes = [AnimatedTextbox(d, cam_w, cam_h) for d in defn.textbox_defs]
-        for gd in defn.gradient_defs:
-            gd._animated = _AnimatedGradient(gd)
         self._listeners = list(defn.listener_defs)
 
         self._btn_grid: Dict[tuple, List[int]] = {}
@@ -4171,8 +4269,6 @@ class AnimatedWindow:
     def _broadcast(self, phase: str) -> None:
         prev = self._cur_phase
         self._cur_phase = phase
-        for gd in self.defn.gradient_defs:
-            gd._animated.set_phase(phase)
         for p, pd in zip(self._polygons, self.defn.polygon_defs):
             if pd.phase_override is None:
                 p.set_phase(phase)
@@ -4185,6 +4281,8 @@ class AnimatedWindow:
                 btn._set_phase(phase)
         for tb in self._textboxes:
             tb._set_phase(phase)
+        for gd in _gradients.values():
+            gd._animated.set_phase(phase)
         for sw in self._sub_windows:
             if sw.defn.spawn_event is not None:
                 continue
@@ -4260,8 +4358,10 @@ class AnimatedWindow:
             return
         t = min(1.0, (elapsed - tw.start) / tw.dur) if tw.dur > 0 else 1.0
         v = _ease(t, tw.ease)
-        self._cur_p1  = P(self._s_p1.x  + (tw.p1.x  - self._s_p1.x)  * v, self._s_p1.y  + (tw.p1.y  - self._s_p1.y)  * v)
-        self._cur_p2  = P(self._s_p2.x  + (tw.p2.x  - self._s_p2.x)  * v, self._s_p2.y  + (tw.p2.y  - self._s_p2.y)  * v)
+        if tw.p1 is not None:
+            self._cur_p1  = P(self._s_p1.x  + (tw.p1.x  - self._s_p1.x)  * v, self._s_p1.y  + (tw.p1.y  - self._s_p1.y)  * v)
+        if tw.p2 is not None:
+            self._cur_p2  = P(self._s_p2.x  + (tw.p2.x  - self._s_p2.x)  * v, self._s_p2.y  + (tw.p2.y  - self._s_p2.y)  * v)
         self._cur_px1 = P(self._s_px1.x + (tw.px1.x - self._s_px1.x) * v, self._s_px1.y + (tw.px1.y - self._s_px1.y) * v)
         self._cur_px2 = P(self._s_px2.x + (tw.px2.x - self._s_px2.x) * v, self._s_px2.y + (tw.px2.y - self._s_px2.y) * v)
         if t >= 1.0:
@@ -4294,6 +4394,9 @@ class AnimatedWindow:
 
     def update(self, ctx, widget_w, widget_h, _parent_abs_x=0.0, _parent_abs_y=0.0):
         if self.hidden: return
+        for ev in _pending_pulse_resets:
+            ev.value = 'ignore'
+        _pending_pulse_resets.clear()
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         self._abs_wx = _parent_abs_x + wx
         self._abs_wy = _parent_abs_y + wy
@@ -4307,43 +4410,87 @@ class AnimatedWindow:
                 (mx - wx) / ww,
                 (my - wy) / wh,
             )
+
+        _pulse_resets: List[EventDef] = []
+        
+        # Listeners
+        for gl in self._listeners:
+            for target in gl.targets:
+                if isinstance(target, EventDef) and target.value == 'ignore':
+                    target.value = 'ignore'
         for gl in self._listeners:
             gl.tick(ctx)
-        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
-        for gd in self.defn.gradient_defs:
-            gd._animated.update()
+
+        # Polygons
         for p, pd in zip(self._polygons, self.defn.polygon_defs):
             ov = pd.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
-                if p._phase != phase:
-                    p.set_phase(phase)
+                phase = str(phase) if phase is not None else ''
+                if phase == 'pulse':
+                    if _phase_key_exists(pd.phases or {}, 'pulse'):
+                        p.set_phase('pulse')
+                    if hasattr(ov, 'value') and ov not in _pulse_resets:
+                        _pulse_resets.append(ov)
+                elif phase and phase != p._phase:
+                    if _phase_key_exists(pd.phases or {}, phase):
+                        p.set_phase(phase)
             p.update()
+        
+        # Text
         for t, td in zip(self._texts, self.defn.text_defs):
             ov = td.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
-                if t._phase != phase:
-                    t.set_phase(phase)
+                phase = str(phase) if phase is not None else ''
+                if phase == 'pulse':
+                    if _phase_key_exists(td.phases or {}, 'pulse'):
+                        t.set_phase('pulse')
+                    if hasattr(ov, 'value') and ov not in _pulse_resets:
+                        _pulse_resets.append(ov)
+                elif phase and phase != t._phase:
+                    if _phase_key_exists(td.phases or {}, phase):
+                        t.set_phase(phase)
             t.update()
-        for pie in self._pies:     pie.update(ctx)
+        
+        # Pie
+        for pie in self._pies: pie.update(ctx)
+
+        # Slider        
+        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         for sl  in self._sliders:  sl.update(int(ww), int(wh))
+        
+        # Button
         for btn, bd in zip(self._buttons, self.defn.button_defs):
             ov = bd.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
-                if phase != btn._last_override_phase:
-                    btn._last_override_phase = phase
-                    btn._set_phase(phase)
+                phase = str(phase) if phase is not None else ''
+                if phase == 'pulse':
+                    if _phase_key_exists(bd.poly_def.phases or {}, 'pulse'):
+                        btn._set_phase('pulse')
+                    if hasattr(ov, 'value') and ov not in _pulse_resets:
+                        _pulse_resets.append(ov)
+                elif phase != btn._last_override_phase:
+                    if _phase_key_exists(bd.poly_def.phases or {}, phase):
+                        btn._last_override_phase = phase
+                        btn._set_phase(phase)
             btn.update(int(ww), int(wh))
+        
+        # Textbox
         for tb in self._textboxes:
             tb.update(int(ww), int(wh))
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         ipw, iph = int(ww), int(wh)
+
+        # Gradient
+        for gd in _gradients.values():
+            gd._animated.update()
+
+        # Window
         for sw in self._sub_windows:
             if sw.defn.spawn_event is not None: continue
             sw.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
-
         
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         ipw, iph = int(ww), int(wh)
@@ -4352,6 +4499,12 @@ class AnimatedWindow:
 
         for inst in self._spawned:
             inst.window.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
+
+        
+        # for ev in _pulse_resets:
+        #     print(f'resetting {ev.name}, id={id(ev)}, was={ev.value}')
+        #     ev.value = 'ignore'
+        # _pulse_resets.clear()
 
     def _to_local(self, mx: float, my: float, widget_w: int, widget_h: int) -> Tuple[float, float, float, float]:
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
@@ -4753,15 +4906,15 @@ class AnimatedWindow:
         for poly in sw._polygons:
             d = poly.defn
 
-            new_pts     = [_resolve_p(p) for p in d.points]
+            new_pts     = [_resolve_p(p) for p in d.p]
             new_px      = [_resolve_p(p) for p in d.px] if d.px else None
             new_fill    = _resolve(d.fill_color)
             new_outline = _resolve(d.outline_color)
             new_pos_fn  = _patch_pos_fn(d.pos_fn)
 
             changed = (
-                new_pts != d.points or
-                new_px  != d.px     or
+                new_pts != d.p  or
+                new_px  != d.px or
                 new_fill    is not d.fill_color    or
                 new_outline is not d.outline_color or
                 new_pos_fn  is not d.pos_fn
@@ -4769,13 +4922,13 @@ class AnimatedWindow:
 
             if changed:
                 poly.defn = _tw_replace(poly.defn,
-                    points        = new_pts,
+                    p             = new_pts,
                     px            = new_px,
                     fill_color    = new_fill,
                     outline_color = new_outline,
                     pos_fn        = new_pos_fn,
                 )
-                poly.cur_points = list(new_pts)
+                poly.cur_p      = list(new_pts)
                 poly._sp        = list(new_pts)
                 if new_px:
                     poly.cur_px = list(new_px)
@@ -4806,40 +4959,38 @@ class AnimatedWindow:
                     text_fn=lambda ctx, s=snapped: s)
 
             d      = text.defn
-            new_x  = statics[d.x.index]  if isinstance(d.x,  _StaticRef) else d.x
-            new_y  = statics[d.y.index]  if isinstance(d.y,  _StaticRef) else d.y
-            new_px = statics[d.px.index] if isinstance(d.px, _StaticRef) else d.px
-            new_py = statics[d.py.index] if isinstance(d.py, _StaticRef) else d.py
-            new_color   = _resolve(d.color)
-            new_pos_fn  = _patch_pos_fn(d.pos_fn)
+            new_p  = P(
+                statics[d.p.x.index] if isinstance(d.p.x, _StaticRef) else d.p.x,
+                statics[d.p.y.index] if isinstance(d.p.y, _StaticRef) else d.p.y,
+            )
+            new_px = P(
+                statics[d.px.x.index] if isinstance(d.px.x, _StaticRef) else d.px.x,
+                statics[d.px.y.index] if isinstance(d.px.y, _StaticRef) else d.px.y,
+            )
+            new_color  = _resolve(d.color)
+            new_pos_fn = _patch_pos_fn(d.pos_fn)
 
-            pos_changed = any(isinstance(v, _StaticRef) for v in (d.x, d.y, d.px, d.py))
+            pos_changed = any(isinstance(v, _StaticRef) for v in (d.p.x, d.p.y, d.px.x, d.px.y))
             col_changed = new_color is not d.color
             pfn_changed = new_pos_fn is not d.pos_fn
 
             if pos_changed or col_changed or pfn_changed:
                 text.defn = _tw_replace(text.defn,
-                    x      = new_x,
-                    y      = new_y,
+                    p      = new_p,
                     px     = new_px,
-                    py     = new_py,
                     color  = new_color  if col_changed else d.color,
                     pos_fn = new_pos_fn if pfn_changed else d.pos_fn,
                 )
             if pos_changed:
-                text.cur_x  = new_x
-                text.cur_y  = new_y
+                text.cur_p  = new_p
                 text.cur_px = new_px
-                text.cur_py = new_py
-                text._sx    = new_x
-                text._sy    = new_y
+                text._sp    = new_p
                 text._spx   = new_px
-                text._spy   = new_py
                 text._dirty = True
             if col_changed:
                 text.cur_color = QColor(new_color)
                 text._sc       = QColor(new_color)
-
+                
         for btn in sw._buttons:
             d = btn.defn
 
@@ -4850,14 +5001,14 @@ class AnimatedWindow:
                 new_delta = _resolve(d.event_delta)
 
             pd          = d.poly_def
-            new_pts     = [_resolve_p(p) for p in pd.points]
+            new_pts     = [_resolve_p(p) for p in pd.p]
             new_px      = [_resolve_p(p) for p in pd.px] if pd.px else None
             new_fill    = _resolve(pd.fill_color)
             new_outline = _resolve(pd.outline_color)
             new_pos_fn  = _patch_pos_fn(pd.pos_fn)
 
             new_poly = _tw_replace(pd,
-                points        = new_pts,
+                p             = new_pts,
                 px            = new_px,
                 fill_color    = new_fill    if new_fill    is not pd.fill_color    else pd.fill_color,
                 outline_color = new_outline if new_outline is not pd.outline_color else pd.outline_color,
@@ -5023,6 +5174,8 @@ class AnimatedWindow:
 
 # ──────────────────────── EVENT DEF ────────────────────────
 
+_pending_pulse_resets: List[EventDef] = []
+
 @dataclass
 class EventDef:
     name:      str
@@ -5038,6 +5191,9 @@ class EventDef:
     def __setattr__(self, name, value):
         object.__setattr__(self, name, value)
         if name == 'value':
+            if value == 'pulse':
+                if self not in _pending_pulse_resets:
+                    _pending_pulse_resets.append(self)
             for w in self.__dict__.get('_watchers', []):
                 try: w(value)
                 except: pass
@@ -5066,7 +5222,7 @@ class EventListener:
     transform:        Optional[Callable[[Any], Any]]   = None
     conditions:       List[Callable[[Any], bool]]      = field(default_factory=list)
     values:           List[Any]                        = field(default_factory=list)
-    wait_for_updates: Optional[EventDef]               = None
+    wait_for_updates: Optional[Callable[Any]]          = None
     _last_value:      Any                              = field(default=None, init=False, repr=False, compare=False)
 
     def _validate(self) -> bool:
@@ -5084,13 +5240,30 @@ class EventListener:
             return
 
         if self.wait_for_updates is not None:
-            cur = self.wait_for_updates.value
+            if callable(self.wait_for_updates):
+                try:
+                    cur = self.wait_for_updates(ctx)
+                except Exception:
+                    return
+            elif isinstance(self.wait_for_updates, EventDef):
+                cur = self.wait_for_updates.value
+            else:
+                cur = self.wait_for_updates
             if cur == self._last_value:
                 return
+            if cur == 'ignore':   # skip reset-triggered firings
+                self._last_value = cur
+                return
+            # print(self._last_value, cur)
             self._last_value = cur
 
         if self.passthrough:
-            output = raw if self.transform is None else self.transform(raw)
+            if self.transform is None:
+                output = raw
+            elif callable(self.transform):
+                output = self.transform(raw)
+            else:
+                output = self.transform
         else:
             if not self._validate():
                 return
@@ -5104,8 +5277,8 @@ class EventListener:
                     continue
 
         for target in self.targets:
-            target.value = output
-            
+            # print(output)
+            target.value = output    
 
 
 
@@ -5201,7 +5374,19 @@ def get_spawn_mouse_norm() -> P:
         (SYS_MOUSE_ABS_Y.value - w._abs_wy) / w._abs_wh,
     )
 
-
+def _reset_phase_override_event(ov) -> None:
+    if ov is None:
+        return
+    try:
+        if callable(ov):
+            import inspect
+            src = inspect.getclosurevars(ov)
+            for val in list(src.nonlocals.values()) + list(src.globals.values()):
+                if isinstance(val, EventDef):
+                    val.value = None
+                    return
+    except Exception:
+        pass
 
 
 
@@ -5217,10 +5402,12 @@ class DataChannel:
         self.unit        = unit
         self._lock   = threading.Lock()
         self._buffer: collections.deque[float] = collections.deque(maxlen=max_samples)
+        self._push_count = 0
 
     def push(self, value: float) -> None:
         with self._lock:
             self._buffer.append(value)
+            self._push_count += 1
 
     @property
     def latest(self) -> Optional[float]:
@@ -5294,6 +5481,7 @@ class DataChannel:
             'trend':   slope,
             'samples': data,
             'count':   n,
+            'push_count': self._push_count,
             'unit':    self.unit,
         }
 
@@ -5375,7 +5563,7 @@ def _flip_polygon_def(defn: PolygonDef, h: bool, v: bool) -> PolygonDef:
             return tw
         if isinstance(tw, PolygonTween):
             return PolygonTween(
-                points        = _pts(tw.points, prev_blended) if tw.points is not None else None,
+                p             = _pts(tw.p, prev_blended) if tw.p is not None else None,
                 px            = _pxs(tw.px) if tw.px is not None else None,
                 fill_color    = tw.fill_color,
                 outline_color = tw.outline_color,
@@ -5398,7 +5586,7 @@ def _flip_polygon_def(defn: PolygonDef, h: bool, v: bool) -> PolygonDef:
         return Phase(tweens)
 
     return PolygonDef(
-        points        = _pts(defn.points),
+        p             = _pts(defn.p),
         px            = _pxs(defn.px) if defn.px is not None else None,
         fill_color    = defn.fill_color,
         outline_color = defn.outline_color,
