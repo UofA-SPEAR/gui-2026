@@ -15,7 +15,8 @@ import time
 from typing import Dict, Any
 
 from spear_gui.overlay_system import (
-    AnimatedPolygon, AnimatedText, AnimatedGraph, AnimatedPie, AnimatedWindow, DataChannel
+    AnimatedPolygon, AnimatedText, AnimatedGraph, AnimatedPie, AnimatedWindow, DataChannel,
+    SYS_MOUSE_ABS_X, SYS_MOUSE_ABS_Y
 )
 from spear_gui.main_gui_defs import (
     MAIN_POLYGON_DEFS, MAIN_TEXT_DEFS, MAIN_GRAPH_DEFS,
@@ -104,13 +105,13 @@ class MainOverlayWidget(QWidget):
         super().__init__(parent)
         self._node = node
 
-        self.setMinimumSize(640, 400)
-        self.resize(800, 500)
+        self.setMinimumSize(640, 360)
         self.setStyleSheet('background-color: #0a0c12;')
         self.setWindowTitle('Main Overlay')
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setFocus()
+        self.setWindowFlags(Qt.FramelessWindowHint)
 
         self._polygons = [AnimatedPolygon(d) for d in MAIN_POLYGON_DEFS]
         self._texts    = [AnimatedText(d)    for d in MAIN_TEXT_DEFS]
@@ -120,10 +121,16 @@ class MainOverlayWidget(QWidget):
 
         self._broadcast('open')
 
-        self._tick_timer = QTimer(self)
-        self._tick_timer.setInterval(self.TICK_MS)
-        self._tick_timer.timeout.connect(self._tick)
-        self._tick_timer.start()
+        self._active_timer = QTimer(self)
+        self._active_timer.setInterval(16)
+        self._active_timer.timeout.connect(self._tick)
+        self._active_timer.start()
+
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setInterval(100)
+        self._idle_timer.timeout.connect(self._tick)
+
+        self._needs_repaint = True
 
     def _broadcast(self, phase: str):
         for p in self._polygons: p.set_phase(phase)
@@ -142,9 +149,40 @@ class MainOverlayWidget(QWidget):
         for win in self._windows:
             win.tick(now)
             win.update(ctx, self.width(), self.height())
-        self.update()
+
+        needs = (
+            any(not p.phase_done() or p._dirty for p in self._polygons) or
+            any(not t.phase_done() or t._dirty for t in self._texts)    or
+            any(not win._is_done() for win in self._windows)            or
+            self._needs_repaint
+        )
+        self._needs_repaint = False
+
+        if needs:
+            self._active_timer.start()
+            self._idle_timer.stop()
+            self.update()
+        else:
+            self._active_timer.stop()
+            self._idle_timer.start()
 
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            if self.isFullScreen():
+                self.showNormal()
+                def _resize():
+                    screen = self.screen()
+                    sg = screen.geometry()
+                    w = sg.width() // 2
+                    h = sg.height() // 2
+                    self.resize(w, h)
+                    self.move(sg.center() - self.rect().center())
+                QTimer.singleShot(50, _resize)
+            else:
+                screen = self.screen()
+                self.setGeometry(screen.geometry())
+                self.showFullScreen()
+            return
         if event.isAutoRepeat():
             return
         for win in self._windows:
@@ -165,15 +203,24 @@ class MainOverlayWidget(QWidget):
             if win.mouse_press(mx, my, self.width(), self.height()): break
 
     def mouseMoveEvent(self, event):
+        SYS_MOUSE_ABS_X.value = event.x()
+        SYS_MOUSE_ABS_Y.value = event.y()
         mx, my = event.position().x(), event.position().y()
         for win in self._windows:
             win.mouse_move(mx, my, self.width(), self.height())
+        self._needs_repaint = True
+        self._active_timer.start()
+        self._idle_timer.stop()
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.LeftButton: return
         mx, my = event.position().x(), event.position().y()
         for win in self._windows:
             if win.mouse_release(mx, my, self.width(), self.height()): break
+
+    def resizeEvent(self, event):
+        self._needs_repaint = True
+        super().resizeEvent(event)
 
     def leaveEvent(self, event):
         for win in self._windows: win.mouse_leave()
@@ -183,8 +230,7 @@ class MainOverlayWidget(QWidget):
         if not painter.isActive():
             painter.end()
             return
-        from PySide6.QtCore import Qt
-        painter.setRenderHint(painter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.NoPen)
 
         w, h = self.width(), self.height()
@@ -197,6 +243,8 @@ class MainOverlayWidget(QWidget):
             label = text.resolve_text(ctx)
             if not label: continue
             font = text.build_font()
+            if text._cached_fm is None:
+                text._cached_fm = QFontMetrics(font)
             painter.setFont(font)
             painter.setPen(text.cur_color)
             dx, dy = text.resolve_pos(w, h, 1920, 1080, label, font)
@@ -211,19 +259,35 @@ class MainOverlayWidget(QWidget):
 
         painter.end()
 
-
 def main():
     rclpy.init()
     node = MainNode()
 
     app = QApplication(sys.argv)
 
-    import os
-    font_path = os.path.join(os.path.dirname(__file__), 'Oxanium-VariableFont.ttf')
-    if os.path.exists(font_path):
-        QFontDatabase.addApplicationFont(font_path)
+    from PySide6.QtGui import QFontDatabase
+
+    def load_fonts(font_dir: str = '.'):
+        import os
+        for fname in os.listdir(font_dir):
+            if fname.lower().endswith(('.ttf', '.otf')):
+                path = os.path.join(font_dir, fname)
+                fid  = QFontDatabase.addApplicationFont(path)
+                if fid == -1:
+                    print(f'[load_fonts] failed to load: {fname}')
+                else:
+                    families = QFontDatabase.applicationFontFamilies(fid)
+                    print(f'[load_fonts] loaded: {fname} -> {families}')
+
+    load_fonts('spear_gui')
 
     widget = MainOverlayWidget(node)
+    screen = QApplication.screens()[0]
+    sg = screen.geometry()
+    w = sg.width() // 2
+    h = sg.height() // 2
+    widget.resize(w, h)
+    widget.move(sg.center() - widget.rect().center())
     widget.show()
 
     spin_timer = QTimer()

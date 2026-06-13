@@ -21,8 +21,8 @@ from spear_gui.overlay_system import (
     AttributeDef, SliderGroupDef, SliderDef, SliderGroup,
     make_track_def, make_knob_def, make_mark_fill_def, make_mark_tick_def,
     SliderTextDefs,
-    ButtonDef, AnimatedButton, ButtonDiamond,
-    WindowDef, WindowPhase, WindowTween, AnimatedWindow,
+    ButtonDef, AnimatedButton,
+    WindowDef, WindowTween, AnimatedWindow,
     EventDef, EventListener,
     GradientDef, GradientStop, GradientTween,
 )
@@ -1358,3 +1358,18 @@ class _CSFilter(QObject):
 #             return baseline[i].y() + (baseline[i + 1].y() - baseline[i].y()) * t
 #     return fallback_y
  
+
+
+
+
+
+@dataclass
+class AttributeDef:
+    value_fn: Callable[[Any], float]
+    set_fn:   Callable[[Any, float], None]
+    min_val:  float = 0.0
+    max_val:  float = 0.0
+    step:     float = 0.0
+    label:    str = ''
+    unit:     str = ''
+    delay:    float = 0.0
