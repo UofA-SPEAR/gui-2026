@@ -26,12 +26,9 @@ import spear_gui.defs_03_shared_gradients
 import spear_gui.defs_04_startup
 import spear_gui.defs_05_map
 import spear_gui.defs_06_logger
-import spear_gui.defs_07_arm_visual
-import spear_gui.defs_08_arm_info
-import spear_gui.defs_09_motor_info
-import spear_gui.defs_10_science_info
-import spear_gui.defs_11_jetson_info
-import spear_gui.defs_12_tasks
+import spear_gui.defs_07_info_display
+import spear_gui.defs_08_arm_visual
+import spear_gui.defs_09_tasks
 import spear_gui.defs_99_test
 
 
