@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore    import Qt, QTimer, QElapsedTimer, QEasingCurve, QPointF, QRectF, QEvent, QObject
-from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QRegion, QPainterPath, QLinearGradient, QRadialGradient
+from PySide6.QtGui     import QColor, QPainter, QFont, QFontMetrics, QPolygonF, QPen, QBrush, QRegion, QPainterPath, QLinearGradient, QRadialGradient
 import time
 import collections
 import statistics
@@ -13,6 +13,36 @@ import math as _math
 import uuid
 
 from spear_gui.gui_vars import MONITOR_RESOLUTIONS
+
+_window_layer_registry: List[Tuple[int, List['WindowDef']]] = []
+
+def register_windows(layer: int, windows: List['WindowDef']) -> None:
+    _window_layer_registry.append((layer, windows))
+
+def get_ordered_windows() -> List['WindowDef']:
+    result = []
+    for _, windows in sorted(_window_layer_registry, key=lambda x: x[0]):
+        result.extend(windows)
+    return result
+
+_events: Dict[str, 'EventDef'] = {}
+
+def register_event(defn: 'EventDef') -> 'EventDef':
+    _events[defn.name] = defn
+    return defn
+
+def get_event(name: str) -> 'EventDef':
+    return _events[name]
+
+_gradients: Dict[str, GradientDef] = {}
+
+def register_gradient(defn: GradientDef) -> GradientDef:
+    defn._animated = _AnimatedGradient(defn)
+    _gradients[defn.name] = defn
+    return defn
+
+def get_gradient(name: str) -> GradientDef:
+    return _gradients[name]
 
 @dataclass(frozen=True)
 class P:
@@ -25,31 +55,33 @@ class GradientStop:
     color:    QColor
 
 def RectDef(
-    p1:             P                             = P(), 
-    p2:             P                             = P(), 
-    px1:            P                             = P(), 
-    px2:            P                             = P(),
-    tl:             Optional[Tuple[P, P]]         = None, 
-    tr:             Optional[Tuple[P, P]]         = None,
-    br:             Optional[Tuple[P, P]]         = None, 
-    bl:             Optional[Tuple[P, P]]         = None,
-    fill_color:     Optional[QColor]              = QColor(255, 255, 255, 255), 
-    outline_color:  Optional[QColor]              = None,
-    line_width:     float                         = 0.0, 
-    draw_progress:  Optional[float]               = None,
-    uniform_scale:  bool                          = False,
-    closed:         bool                          = True,
-    h_flip:         bool                          = False, 
-    v_flip:         bool                          = False, 
-    d_flip:         bool                          = False,
-    phases:         Optional[Dict[str, Phase]]    = None,
-    gradient:       Optional['GradientDef']       = None,
-    gradient_p1:    P                             = P(),
-    gradient_px1:   P                             = P(),
-    gradient_p2:    P                             = P(),
-    gradient_px2:   P                             = P(),
-    phase_override: Optional[Any]                 = None,
-    pos_fn:         Optional[Callable[[], Union[P, List[P]]]] = None
+    p1:                  P                             = P(), 
+    p2:                  P                             = P(), 
+    px1:                 P                             = P(), 
+    px2:                 P                             = P(),
+    tl:                  Optional[Tuple[P, P]]         = None, 
+    tr:                  Optional[Tuple[P, P]]         = None,
+    br:                  Optional[Tuple[P, P]]         = None, 
+    bl:                  Optional[Tuple[P, P]]         = None,
+    fill_color:          Optional[QColor]              = QColor(255, 255, 255, 255), 
+    outline_color:       Optional[QColor]              = None,
+    outline_width:          float                         = 0.0, 
+    draw_progress:       Optional[float]               = None,
+    uniform_scale:       bool                          = False,
+    closed:              bool                          = True,
+    h_flip:              bool                          = False, 
+    v_flip:              bool                          = False, 
+    d_flip:              bool                          = False,
+    phases:              Optional[Dict[str, Phase]]    = None,
+    gradient:            Optional['GradientDef']       = None,
+    gradient_p1:         P                             = P(),
+    gradient_px1:        P                             = P(),
+    gradient_p2:         P                             = P(),
+    gradient_px2:        P                             = P(),
+    visible_threshold_x: float                         = 0.0,
+    visible_threshold_y: float                         = 0.0,
+    phase_override:      Optional[Any]                 = None,
+    pos_fn:              Optional[Callable[[], Union[P, List[P]]]] = None
 ) -> 'PolygonDef':
     def _split(offset):
         if offset is None:
@@ -65,25 +97,27 @@ def RectDef(
     px = [P(px1.x + tl_p.x, px1.y + tl_p.y), P(px2.x + tr_p.x, px1.y + tr_p.y), P(px2.x + br_p.x, px2.y + br_p.y), P(px1.x + bl_p.x, px2.y + bl_p.y)]
 
     return PolygonDef(
-        p              = p,
-        px             = px,
-        fill_color     = fill_color    or QColor(0, 0, 0, 0),
-        outline_color  = outline_color or QColor(0, 0, 0, 0),
-        line_width     = line_width,
-        draw_progress  = draw_progress,
-        uniform_scale  = uniform_scale,
-        closed         = closed,
-        phases         = phases or {},
-        h_flip         = h_flip,
-        v_flip         = v_flip,
-        d_flip         = d_flip,
-        gradient       = gradient,
-        gradient_p1    = gradient_p1,
-        gradient_px1   = gradient_px1,
-        gradient_p2    = gradient_p2,
-        gradient_px2   = gradient_px2,
-        phase_override = phase_override,
-        pos_fn         = pos_fn,
+        p                   = p,
+        px                  = px,
+        fill_color          = fill_color    or QColor(0, 0, 0, 0),
+        outline_color       = outline_color or QColor(0, 0, 0, 0),
+        outline_width          = outline_width,
+        draw_progress       = draw_progress,
+        uniform_scale       = uniform_scale,
+        closed              = closed,
+        phases              = phases or {},
+        h_flip              = h_flip,
+        v_flip              = v_flip,
+        d_flip              = d_flip,
+        gradient            = gradient,
+        gradient_p1         = gradient_p1,
+        gradient_px1        = gradient_px1,
+        gradient_p2         = gradient_p2,
+        gradient_px2        = gradient_px2,
+        visible_threshold_x = visible_threshold_x,
+        visible_threshold_y = visible_threshold_y,
+        phase_override      = phase_override,
+        pos_fn              = pos_fn,
     )
 
 def RectTween(
@@ -97,7 +131,7 @@ def RectTween(
     bl:            Optional[Tuple[P, P]] = None,
     fill_color:    Optional[QColor]      = None, 
     outline_color: Optional[QColor]      = None,
-    line_width:    Optional[float]       = None, 
+    outline_width:    Optional[float]       = None, 
     draw_progress: Optional[float]       = None,
     span:          Tuple[float, float]   = (0, 1),
     start:         float                 = 0.0,             
@@ -128,7 +162,7 @@ def RectTween(
         px            = px,
         fill_color    = fill_color,
         outline_color = outline_color,
-        line_width    = line_width,
+        outline_width    = outline_width,
         draw_progress = draw_progress,
         start         = start,
         dur           = dur,
@@ -147,56 +181,62 @@ def RectTween(
 
 @dataclass
 class PolygonDef:
-    p:              List[P]                               = field(default_factory=lambda: [P(0, 0), P(0, 0)])
-    px:             Optional[List[P]]                     = None
-    phases:         Optional[Dict[str, Phase]]            = None
-    closed:         bool                                  = True
-    line_width:     float                                 = 0.0
-    uniform_scale:  bool                                  = False
-    fill_color:     Optional[QColor]                      = None
-    outline_color:  Optional[QColor]                      = None
-    draw_progress:  float                                 = 1.0
-    h_flip:         bool                                  = False
-    v_flip:         bool                                  = False
-    d_flip:         bool                                  = False
-    gradient:       Optional['GradientDef']               = None
-    gradient_p1:    P                                     = P()
-    gradient_px1:   P                                     = P()
-    gradient_p2:    P                                     = P()
-    gradient_px2:   P                                     = P()
-    dynamic_px:     Optional[Callable[[int,int],List[P]]] = None
-    phase_override: Optional[Any]                         = None
-    pos_fn:         Optional[Callable[[], Union[P, List[P]]]] = None
+    p:                   List[P]                               = field(default_factory=lambda: [P(0, 0), P(0, 0)])
+    px:                  Optional[List[P]]                     = None
+    phases:              Optional[Dict[str, Phase]]            = None
+    closed:              bool                                  = True
+    outline_width:          float                                 = 0.0
+    uniform_scale:       bool                                  = False
+    fill_color:          Optional[QColor]                      = None
+    outline_color:       Optional[QColor]                      = None
+    draw_progress:       float                                 = 1.0
+    h_flip:              bool                                  = False
+    v_flip:              bool                                  = False
+    d_flip:              bool                                  = False
+    gradient:            Optional['GradientDef']               = None
+    gradient_p1:         P                                     = P()
+    gradient_px1:        P                                     = P()
+    gradient_p2:         P                                     = P()
+    gradient_px2:        P                                     = P()
+    rot_center_p:        P                                     = field(default_factory=P)
+    rot_center_px:       P                                     = field(default_factory=P)
+    rot_target_p:        P                                     = field(default_factory=P)
+    rot_target_px:       P                                     = field(default_factory=P)
+    rot_angle_initial:   float                                 = 0.0
+    rot_angle:           float                                 = 0.0
+    dynamic_px:          Optional[Callable[[int,int],List[P]]] = None
+    visible_threshold_x: float                                 = 0.0
+    visible_threshold_y: float                                 = 0.0
+    phase_override:      Optional[Any]                         = None
+    pos_fn:              Optional[Callable[[], Union[P, List[P]]]] = None
 
 @dataclass
 class PolygonTween:
     # Properties
-    p:             Optional[List[P]]        = None
-    px:            Optional[List[P]]        = None
-    fill_color:    Optional[QColor]         = None
-    outline_color: Optional[QColor]         = None
-    line_width:    Optional[float]          = None
-    draw_progress: Optional[float]          = None
-    _blend_anchor: Optional[float]          = None
-    gradient_p1:   Optional[P]              = None
-    gradient_px1:  Optional[P]              = None
-    gradient_p2:   Optional[P]              = None
-    gradient_px2:  Optional[P]              = None
+    p:                 Optional[List[P]]   = None
+    px:                Optional[List[P]]   = None
+    fill_color:        Optional[QColor]    = None
+    outline_color:     Optional[QColor]    = None
+    outline_width:        Optional[float]     = None
+    draw_progress:     Optional[float]     = None
+    _blend_anchor:     Optional[float]     = None
+    gradient_p1:       Optional[P]         = None
+    gradient_px1:      Optional[P]         = None
+    gradient_p2:       Optional[P]         = None
+    gradient_px2:      Optional[P]         = None
+    rot_center_p:      Optional[P]         = None
+    rot_center_px:     Optional[P]         = None
+    rot_target_p:      Optional[P]         = None
+    rot_target_px:     Optional[P]         = None
+    rot_angle_initial: Optional[float]     = None
+    rot_angle:         Optional[float]     = None
     # Tween Values
-    span:          Tuple[float, float]      = (0, 1)
-    start:         float                    = 0.0
-    dur:           float                    = 0.5
-    ease:          QEasingCurve.Type        = QEasingCurve.OutQuint
-    prev_phase:    Optional[str]            = None
-    blend:         bool                     = False
-
-
-
-_gradients: Dict[str, GradientDef] = {}
-
-def register_gradient(name: str, defn: GradientDef) -> GradientDef:
-    _gradients[name] = defn
-    return defn
+    span:              Tuple[float, float] = (0, 1)
+    start:             float               = 0.0
+    dur:               float               = 0.5
+    ease:              QEasingCurve.Type   = QEasingCurve.OutQuint
+    prev_phase:        Optional[str]       = None
+    blend:             bool                = False
 
 @dataclass
 class GradientDef:
@@ -223,57 +263,71 @@ class GradientTween:
 
 @dataclass
 class TextDef:
-    p:              P                              = field(default_factory=P)
-    px:             P                              = field(default_factory=P)
-    text:           str                            = 'Sample Text'
-    font_size:      float                          = 10.0
-    color:          QColor                         = QColor(255, 255, 255, 255)
-    outline_color:  Optional[QColor]               = None
-    outline_width:  float                          = 0.0
-    gradient:       Optional['GradientDef']        = None
-    gradient_p1:    P                              = field(default_factory=P)
-    gradient_px1:   P                              = field(default_factory=P)
-    gradient_p2:    P                              = field(default_factory=P)
-    gradient_px2:   P                              = field(default_factory=P)
-    phases:         Optional[Dict[str, Phase]]     = None
-    bold:           bool                           = False
-    italic:         bool                           = False
-    font_family:    str                            = 'Oxanium SemiBold'
-    h_align:        float                          = 0.5
-    v_align:        float                          = 0.5
-    uniform_scale:  bool                           = True
-    text_fn:        Optional[Callable[[Any], str]] = None
-    char_display:   float                          = 1.0
-    sub_char_clip:  bool                           = False
-    backward:       bool                           = False
-    phase_override: Optional[Any]                  = None
-    pos_fn:         Optional[Callable[[], P]]      = None
+    p:                   P                              = field(default_factory=P)
+    px:                  P                              = field(default_factory=P)
+    text:                str                            = 'Sample Text'
+    font_size:           float                          = 10.0
+    fill_color:          QColor                         = QColor(255, 255, 255, 255)
+    outline_color:       Optional[QColor]               = None
+    outline_width:       float                          = 0.0
+    gradient:            Optional['GradientDef']        = None
+    gradient_p1:         P                              = field(default_factory=P)
+    gradient_px1:        P                              = field(default_factory=P)
+    gradient_p2:         P                              = field(default_factory=P)
+    gradient_px2:        P                              = field(default_factory=P)
+    rot_center_p:        P                              = field(default_factory=P)
+    rot_center_px:       P                              = field(default_factory=P)
+    rot_target_p:        P                              = field(default_factory=P)
+    rot_target_px:       P                              = field(default_factory=P)
+    rot_angle_initial:   float                          = 0.0
+    rot_angle:           float                          = 0.0
+    phases:              Optional[Dict[str, Phase]]     = None
+    bold:                bool                           = False
+    italic:              bool                           = False
+    font_family:         str                            = 'Oxanium SemiBold'
+    h_align:             float                          = 0.5
+    v_align:             float                          = 0.5
+    uniform_scale:       bool                           = True
+    text_fn:             Optional[Callable[[Any], str]] = None
+    char_display:        float                          = 1.0
+    sub_char_clip:       bool                           = False
+    backward:            bool                           = False
+    phase_override:      Optional[Any]                  = None
+    pos_fn:              Optional[Callable[[], P]]      = None
+    visible_threshold_x: float                          = 0.0
+    visible_threshold_y: float                          = 0.0
 
 # ──────────────────────── Tween dataclasses ──────────────────────
 
 @dataclass
 class TextTween:
     # Properties
-    p:              Optional[P]          = None
-    px:             Optional[P]          = None
-    color:          Optional[QColor]     = None
-    outline_color:  Optional[QColor]     = None
-    outline_width:  Optional[float]      = None
-    gradient_p1:    Optional[P]          = None
-    gradient_px1:   Optional[P]          = None
-    gradient_p2:    Optional[P]          = None
-    gradient_px2:   Optional[P]          = None
-    h_align:        Optional[float]      = None
-    v_align:        Optional[float]      = None
-    font_size:      Optional[float]      = None
-    char_display:   Optional[float]      = None
+    p:                 Optional[P]         = None
+    px:                Optional[P]         = None
+    fill_color:        Optional[QColor]    = None
+    outline_color:     Optional[QColor]    = None
+    outline_width:     Optional[float]     = None
+    gradient_p1:       Optional[P]         = None
+    gradient_px1:      Optional[P]         = None
+    gradient_p2:       Optional[P]         = None
+    gradient_px2:      Optional[P]         = None
+    h_align:           Optional[float]     = None
+    v_align:           Optional[float]     = None
+    font_size:         Optional[float]     = None
+    char_display:      Optional[float]     = None
+    rot_center_p:      Optional[P]         = None
+    rot_center_px:     Optional[P]         = None
+    rot_target_p:      Optional[P]         = None
+    rot_target_px:     Optional[P]         = None
+    rot_angle_initial: Optional[float]     = None
+    rot_angle:         Optional[float]     = None
     # Tween Values
-    span:           Tuple[float, float]  = (0, 1)
-    start:          float                = 0.0
-    dur:            float                = 0.5
-    ease:           QEasingCurve.Type    = QEasingCurve.OutQuint
-    prev_phase:     Optional[str]        = None
-    blend:          bool                 = False
+    span:              Tuple[float, float] = (0, 1)
+    start:             float               = 0.0
+    dur:               float               = 0.5
+    ease:              QEasingCurve.Type   = QEasingCurve.OutQuint
+    prev_phase:        Optional[str]       = None
+    blend:             bool                = False
 
 @dataclass
 class Reset:
@@ -291,7 +345,7 @@ def TextBlock(
     px:          P                          = field(default_factory=P),
     text:        str                        = 'Sample Text',
     font_size:   float                      = 10.0,
-    color:       QColor                     = QColor(255, 255, 255, 255),
+    fill_color:  QColor                     = QColor(255, 255, 255, 255),
     phases:      Optional[Dict[str, Phase]] = None,
     bold:        bool                       = False,
     italic:      bool                       = False,
@@ -311,7 +365,7 @@ def TextBlock(
 
     if n == 1:
         return [TextDef(
-            p=p, px=px, text=text, font_size=font_size, color=color,
+            p=p, px=px, text=text, font_size=font_size, fill_color=fill_color,
             phases=phases, bold=bold, italic=italic,
             font_family=font_family, h_align=h_align, v_align=v_align,
             uniform_scale=uniform_scale,
@@ -335,7 +389,7 @@ def TextBlock(
                             start      = tw.start,
                             dur        = tw.dur,
                             ease       = tw.ease,
-                            color      = tw.color,
+                            fill_color = tw.fill_color,
                             h_align    = tw.h_align,
                             v_align    = tw.v_align,
                             font_size  = tw.font_size,
@@ -367,7 +421,7 @@ def TextBlock(
             px            = line_px,
             text          = resolved_text,
             font_size     = font_size,
-            color         = color,
+            fill_color    = fill_color,
             phases        = adjusted_phases,
             bold          = bold,
             italic        = italic,
@@ -391,7 +445,7 @@ def DataTable(
     row_height:     float                    = 18.0,
     values:         List[Tuple]              = None,
     unit_gap:       float                    = 4.0,
-    color:          QColor                   = None,
+    fill_color:     QColor                   = None,
     font_size:      float                    = 10.0,
     font_family:    str                      = 'Oxanium SemiBold',
     bold:           bool                     = False,
@@ -424,7 +478,7 @@ def DataTable(
         value_units.append(unit)
         formats.append(fmt)
 
-    col = color or QColor(255, 255, 255, 200)
+    col = fill_color or QColor(255, 255, 255, 200)
     ph  = phases or {}
     result: List[TextDef] = []
 
@@ -446,7 +500,7 @@ def DataTable(
             py            = py,
             text          = title,
             font_size     = title_font_size,
-            color         = QColor(col),
+            fill_color    = QColor(col),
             phases        = title_phases,
             bold          = True,
             italic        = True,
@@ -479,7 +533,7 @@ def DataTable(
 
         common = dict(
             font_size     = font_size,
-            color         = QColor(col),
+            fill_color    = QColor(col),
             phases        = row_phases,
             bold          = bold,
             italic        = italic,
@@ -832,11 +886,11 @@ class _AlwaysDriver:
             if tw.fill_color    is not None: self.offset_fill_color    = QColor(tw.fill_color)
             if tw.outline_color is not None: self.offset_outline_color = QColor(tw.outline_color)
         elif isinstance(tw, TextTween):
-            if tw.x     is not None: self.offset_p = [P(tw.x, self.offset_p[0].y)]
-            if tw.y     is not None: self.offset_p = [P(self.offset_p[0].x, tw.y)]
-            if tw.px    is not None: self.offset_px = [P(tw.px, self.offset_px[0].y)]
-            if tw.py    is not None: self.offset_px = [P(self.offset_px[0].x, tw.py)]
-            if tw.color is not None: self.offset_fill_color = QColor(tw.color)
+            if tw.x          is not None: self.offset_p = [P(tw.x, self.offset_p[0].y)]
+            if tw.y          is not None: self.offset_p = [P(self.offset_p[0].x, tw.y)]
+            if tw.px         is not None: self.offset_px = [P(tw.px, self.offset_px[0].y)]
+            if tw.py         is not None: self.offset_px = [P(self.offset_px[0].x, tw.py)]
+            if tw.fill_color is not None: self.offset_fill_color = QColor(tw.fill_color)
  
     def _save_start(self) -> None:
         self._s_pts     = [P(p.x, p.y) for p in self.offset_p]
@@ -845,12 +899,15 @@ class _AlwaysDriver:
         self._s_outline = QColor(self.offset_outline_color) if self.offset_outline_color else None
  
     def notify_phase(self, phase_name: str, base_phase_done: bool) -> None:
-        in_stop = phase_name in self._phase.stop_phases
+        in_stop = phase_name in self._stop_phases_set
         if in_stop and base_phase_done:
             if not self._stopped:
                 self._stopped = True
                 self._do_reset_offsets()
-        elif not in_stop:
+        elif not in_stop and not self._started:
+            self._reset()
+        elif not in_stop and self._stopped:
+            self._stopped = False
             self._reset()
  
     def update(self, base_phase_name: str, base_phase_done: bool) -> None:
@@ -908,9 +965,9 @@ class _AlwaysDriver:
                 self._loop_origin += loop_dur
             self._idx = 0
             self._do_reset_offsets()
-            self._s_pts     = [P(0.0, 0.0)] * self._n
-            self._s_px      = [P(0.0, 0.0)] * self._n
-            self._s_fill    = None
+            self._s_pts = [P(0.0, 0.0)] * self._n
+            self._s_px = [P(0.0, 0.0)] * self._n
+            self._s_fill = None
             self._s_outline = None
  
     def _apply_tw(self, tw, v: float) -> None:
@@ -949,9 +1006,9 @@ class _AlwaysDriver:
             if tw.px is not None: self.offset_px = [P(new_px, self.offset_px[0].y)]
             if tw.py is not None: self.offset_px = [P(self.offset_px[0].x, new_py)]
 
-            if tw.color is not None:
+            if tw.fill_color is not None:
                 src = self._s_fill or QColor(0, 0, 0, 0)
-                self.offset_fill_color = lerp_color(src, tw.color, v)
+                self.offset_fill_color = lerp_color(src, tw.fill_color, v)
 
  
 
@@ -1034,7 +1091,7 @@ class AnimatedPolygon(_TweenDriver):
         self.cur_px           = [P(p.x, p.y) for p in (defn.px or _zero_px)]
         self.cur_fill_color   = QColor(defn.fill_color)   if defn.fill_color   else QColor(0,0,0,0)
         self.cur_outline_color= QColor(defn.outline_color)if defn.outline_color else QColor(0,0,0,0)
-        self.cur_line_width   = defn.line_width
+        self.cur_line_width   = defn.outline_width
         self.cur_draw_progress= defn.draw_progress
         self.cur_gradient_p1  = P(defn.gradient_p1.x,  defn.gradient_p1.y)
         self.cur_gradient_px1 = P(defn.gradient_px1.x, defn.gradient_px1.y)
@@ -1051,6 +1108,20 @@ class AnimatedPolygon(_TweenDriver):
         self._sgpx1 = P(defn.gradient_px1.x, defn.gradient_px1.y)
         self._sgp2  = P(defn.gradient_p2.x,  defn.gradient_p2.y)
         self._sgpx2 = P(defn.gradient_px2.x, defn.gradient_px2.y)
+
+        self.cur_rot_center_p:      P     = P(defn.rot_center_p.x,  defn.rot_center_p.y)
+        self.cur_rot_center_px:     P     = P(defn.rot_center_px.x, defn.rot_center_px.y)
+        self.cur_rot_target_p:      P     = P(defn.rot_target_p.x,  defn.rot_target_p.y)
+        self.cur_rot_target_px:     P     = P(defn.rot_target_px.x, defn.rot_target_px.y)
+        self.cur_rot_angle_initial: float = defn.rot_angle_initial
+        self.cur_rot_angle:         float = defn.rot_angle
+
+        self._s_rot_center_p:      P     = P(defn.rot_center_p.x,  defn.rot_center_p.y)
+        self._s_rot_center_px:     P     = P(defn.rot_center_px.x, defn.rot_center_px.y)
+        self._s_rot_target_p:      P     = P(defn.rot_target_p.x,  defn.rot_target_p.y)
+        self._s_rot_target_px:     P     = P(defn.rot_target_px.x, defn.rot_target_px.y)
+        self._s_rot_angle_initial: float = defn.rot_angle_initial
+        self._s_rot_angle:         float = defn.rot_angle
 
         self._dirty      = True
         self._cached_poly= QPolygonF()
@@ -1084,6 +1155,12 @@ class AnimatedPolygon(_TweenDriver):
         self._sgpx1 = P(self.cur_gradient_px1.x, self.cur_gradient_px1.y)
         self._sgp2  = P(self.cur_gradient_p2.x,  self.cur_gradient_p2.y)
         self._sgpx2 = P(self.cur_gradient_px2.x, self.cur_gradient_px2.y)
+        self._s_rot_center_p      = P(self.cur_rot_center_p.x,  self.cur_rot_center_p.y)
+        self._s_rot_center_px     = P(self.cur_rot_center_px.x, self.cur_rot_center_px.y)
+        self._s_rot_target_p      = P(self.cur_rot_target_p.x,  self.cur_rot_target_p.y)
+        self._s_rot_target_px     = P(self.cur_rot_target_px.x, self.cur_rot_target_px.y)
+        self._s_rot_angle_initial = self.cur_rot_angle_initial
+        self._s_rot_angle         = self.cur_rot_angle
 
     def _apply(self, tw: PolygonTween, v: float):
         if tw.p is not None:
@@ -1098,12 +1175,18 @@ class AnimatedPolygon(_TweenDriver):
                 self.cur_px[i] = P(nx, ny)
         if tw.fill_color    is not None: self.cur_fill_color    = lerp_color(self._sf, tw.fill_color,    v)
         if tw.outline_color is not None: self.cur_outline_color = lerp_color(self._so, tw.outline_color, v)
-        if tw.line_width    is not None: self.cur_line_width    = self._slw + (tw.line_width - self._slw) * v
+        if tw.outline_width    is not None: self.cur_line_width    = self._slw + (tw.outline_width - self._slw) * v
         if tw.draw_progress is not None: self.cur_draw_progress = self._sdp + (tw.draw_progress - self._sdp) * v
         if tw.gradient_p1   is not None: self.cur_gradient_p1   = P(self._sgp1.x  + (tw.gradient_p1.x  - self._sgp1.x)  * v, self._sgp1.y  + (tw.gradient_p1.y  - self._sgp1.y)  * v)
         if tw.gradient_px1  is not None: self.cur_gradient_px1  = P(self._sgpx1.x + (tw.gradient_px1.x - self._sgpx1.x) * v, self._sgpx1.y + (tw.gradient_px1.y - self._sgpx1.y) * v)
         if tw.gradient_p2   is not None: self.cur_gradient_p2   = P(self._sgp2.x  + (tw.gradient_p2.x  - self._sgp2.x)  * v, self._sgp2.y  + (tw.gradient_p2.y  - self._sgp2.y)  * v)
         if tw.gradient_px2  is not None: self.cur_gradient_px2  = P(self._sgpx2.x + (tw.gradient_px2.x - self._sgpx2.x) * v, self._sgpx2.y + (tw.gradient_px2.y - self._sgpx2.y) * v)
+        if tw.rot_center_p      is not None: self.cur_rot_center_p      = P(self._s_rot_center_p.x  + (tw.rot_center_p.x  - self._s_rot_center_p.x)  * v, self._s_rot_center_p.y  + (tw.rot_center_p.y  - self._s_rot_center_p.y)  * v)
+        if tw.rot_center_px     is not None: self.cur_rot_center_px     = P(self._s_rot_center_px.x + (tw.rot_center_px.x - self._s_rot_center_px.x) * v, self._s_rot_center_px.y + (tw.rot_center_px.y - self._s_rot_center_px.y) * v)
+        if tw.rot_target_p      is not None: self.cur_rot_target_p      = P(self._s_rot_target_p.x  + (tw.rot_target_p.x  - self._s_rot_target_p.x)  * v, self._s_rot_target_p.y  + (tw.rot_target_p.y  - self._s_rot_target_p.y)  * v)
+        if tw.rot_target_px     is not None: self.cur_rot_target_px     = P(self._s_rot_target_px.x + (tw.rot_target_px.x - self._s_rot_target_px.x) * v, self._s_rot_target_px.y + (tw.rot_target_px.y - self._s_rot_target_px.y) * v)
+        if tw.rot_angle_initial is not None: self.cur_rot_angle_initial = self._s_rot_angle_initial + (tw.rot_angle_initial - self._s_rot_angle_initial) * v
+        if tw.rot_angle         is not None: self.cur_rot_angle         = self._s_rot_angle         + (tw.rot_angle         - self._s_rot_angle)         * v
         self._dirty = True
 
     def _apply_blend(self, tw: PolygonTween, v: float):
@@ -1117,7 +1200,7 @@ class AnimatedPolygon(_TweenDriver):
                 self.cur_px[i] = P(cpx.x + tpx.x * v, cpx.y + tpx.y * v)
         if tw.fill_color    is not None: self.cur_fill_color    = lerp_color(self.cur_fill_color,    tw.fill_color,    v)
         if tw.outline_color is not None: self.cur_outline_color = lerp_color(self.cur_outline_color, tw.outline_color, v)
-        if tw.line_width    is not None: self.cur_line_width    = self.cur_line_width + (tw.line_width - self.cur_line_width) * v
+        if tw.outline_width    is not None: self.cur_line_width    = self.cur_line_width + (tw.outline_width - self.cur_line_width) * v
         if tw.draw_progress is not None: self.cur_draw_progress = self.cur_draw_progress + (tw.draw_progress - self.cur_draw_progress) * v
         self._dirty = True
 
@@ -1126,12 +1209,18 @@ class AnimatedPolygon(_TweenDriver):
         if tw.px            is not None: self.cur_px            = [P(tpx.x if tpx.x is not None else cpx.x, tpx.y if tpx.y is not None else cpx.y) for cpx, tpx in zip(self.cur_px, tw.px)]
         if tw.fill_color    is not None: self.cur_fill_color    = QColor(tw.fill_color)
         if tw.outline_color is not None: self.cur_outline_color = QColor(tw.outline_color)
-        if tw.line_width    is not None: self.cur_line_width    = tw.line_width
+        if tw.outline_width    is not None: self.cur_line_width    = tw.outline_width
         if tw.draw_progress is not None: self.cur_draw_progress = tw.draw_progress
         if tw.gradient_p1   is not None: self.cur_gradient_p1   = tw.gradient_p1
         if tw.gradient_px1  is not None: self.cur_gradient_px1  = tw.gradient_px1
         if tw.gradient_p2   is not None: self.cur_gradient_p2   = tw.gradient_p2
         if tw.gradient_px2  is not None: self.cur_gradient_px2  = tw.gradient_px2
+        if tw.rot_center_p      is not None: self.cur_rot_center_p      = tw.rot_center_p
+        if tw.rot_center_px     is not None: self.cur_rot_center_px     = tw.rot_center_px
+        if tw.rot_target_p      is not None: self.cur_rot_target_p      = tw.rot_target_p
+        if tw.rot_target_px     is not None: self.cur_rot_target_px     = tw.rot_target_px
+        if tw.rot_angle_initial is not None: self.cur_rot_angle_initial = tw.rot_angle_initial
+        if tw.rot_angle         is not None: self.cur_rot_angle         = tw.rot_angle
         self._dirty = True
 
     def _reset_to_def(self):
@@ -1141,12 +1230,18 @@ class AnimatedPolygon(_TweenDriver):
         self.cur_px            = [P(p.x, p.y) for p in (d.px or [P()]*n)]
         self.cur_fill_color    = QColor(d.fill_color)    if d.fill_color    else QColor(0,0,0,0)
         self.cur_outline_color = QColor(d.outline_color) if d.outline_color else QColor(0,0,0,0)
-        self.cur_line_width    = d.line_width
+        self.cur_line_width    = d.outline_width
         self.cur_draw_progress = d.draw_progress
         self.cur_gradient_p1  = P(d.gradient_p1.x,  d.gradient_p1.y)
         self.cur_gradient_px1 = P(d.gradient_px1.x, d.gradient_px1.y)
         self.cur_gradient_p2  = P(d.gradient_p2.x,  d.gradient_p2.y)
         self.cur_gradient_px2 = P(d.gradient_px2.x, d.gradient_px2.y)
+        self.cur_rot_center_p      = P(d.rot_center_p.x,  d.rot_center_p.y)
+        self.cur_rot_center_px     = P(d.rot_center_px.x, d.rot_center_px.y)
+        self.cur_rot_target_p      = P(d.rot_target_p.x,  d.rot_target_p.y)
+        self.cur_rot_target_px     = P(d.rot_target_px.x, d.rot_target_px.y)
+        self.cur_rot_angle_initial = d.rot_angle_initial
+        self.cur_rot_angle         = d.rot_angle
         self._dirty = True
 
     def set_phase(self, phase: str):
@@ -1315,16 +1410,32 @@ class AnimatedPolygon(_TweenDriver):
         effective_outline = self._always_outline_color if self._always_outline_color is not None else self.cur_outline_color
         lw         = self.cur_line_width
         has_fill    = self.defn.closed and (effective_fill.alpha() > 0 or self.defn.gradient is not None)
-        has_outline = lw > 0 and effective_outline.alpha() > 0
+        gd = self.defn.gradient
+        has_gradient_outline = gd is not None and gd.target == 'outline'
+        has_outline = lw > 0 and (effective_outline.alpha() > 0 or has_gradient_outline)
         is_open     = not self.defn.closed
 
         if not has_fill and not has_outline:
             return
 
+        rot = _resolve_rotation(
+            self.cur_rot_center_p, self.cur_rot_center_px,
+            self.cur_rot_target_p, self.cur_rot_target_px,
+            self.cur_rot_angle_initial, self.cur_rot_angle,
+            w, h
+        )
+        if rot is not None:
+            cx, cy, angle = rot
+            painter.save()
+            painter.translate(cx, cy)
+            painter.rotate(angle)
+            painter.translate(-cx, -cy)
+
         pts = list(self.get_polygon(w, h, cam_w, cam_h))
 
         if is_open:
             if not has_outline:
+                if rot is not None: painter.restore()
                 return
             pen = QPen(self.cur_outline_color)
             pen.setWidthF(lw)
@@ -1334,6 +1445,7 @@ class AnimatedPolygon(_TweenDriver):
             painter.setBrush(Qt.NoBrush)
             _draw_partial_polyline(painter, pts, self.cur_draw_progress)
             painter.setPen(Qt.NoPen)
+            if rot is not None: painter.restore()
             return
 
         def _fill_brush():
@@ -1341,10 +1453,8 @@ class AnimatedPolygon(_TweenDriver):
             gd = self.defn.gradient
             if gd is None:
                 return fill
-
             def _has_point(p, px):
                 return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
-
             if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
                 x1 = self.cur_gradient_p1.x  * w + self.cur_gradient_px1.x
                 y1 = self.cur_gradient_p1.y  * h + self.cur_gradient_px1.y
@@ -1355,9 +1465,27 @@ class AnimatedPolygon(_TweenDriver):
                 y1 = gd.p1.y  * h + gd.px1.y
                 x2 = gd.p2.x  * w + gd.px2.x
                 y2 = gd.p2.y  * h + gd.px2.y
-
             return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
+        
+        def _outline_brush():
+            gd = self.defn.gradient
+            if gd is not None and gd.target == 'outline':
+                def _has_point(p, px):
+                    return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
+                if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
+                    x1 = self.cur_gradient_p1.x * w + self.cur_gradient_px1.x
+                    y1 = self.cur_gradient_p1.y * h + self.cur_gradient_px1.y
+                    x2 = self.cur_gradient_p2.x * w + self.cur_gradient_px2.x
+                    y2 = self.cur_gradient_p2.y * h + self.cur_gradient_px2.y
+                else:
+                    x1 = gd.p1.x * w + gd.px1.x
+                    y1 = gd.p1.y * h + gd.px1.y
+                    x2 = gd.p2.x * w + gd.px2.x
+                    y2 = gd.p2.y * h + gd.px2.y
+                return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
+            return None
 
+        gradient_outline = _outline_brush()
         poly = QPolygonF(pts)
 
         if has_fill and not has_outline:
@@ -1366,24 +1494,39 @@ class AnimatedPolygon(_TweenDriver):
             painter.drawPolygon(poly)
             painter.setBrush(Qt.NoBrush)
         elif has_outline and not has_fill:
-            pen = QPen(effective_outline)
-            pen.setWidthF(lw)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
+            if gradient_outline is not None:
+                from PySide6.QtGui import QBrush
+                pen = QPen(QBrush(gradient_outline), lw)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+            else:
+                pen = QPen(effective_outline)
+                pen.setWidthF(lw)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawPolygon(poly)
             painter.setPen(Qt.NoPen)
         else:
-            pen = QPen(effective_outline)
-            pen.setWidthF(lw)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
+            if gradient_outline is not None:
+                from PySide6.QtGui import QBrush
+                pen = QPen(QBrush(gradient_outline), lw)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+            else:
+                pen = QPen(effective_outline)
+                pen.setWidthF(lw)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
             painter.setBrush(_fill_brush())
             painter.drawPolygon(poly)
             painter.setPen(Qt.NoPen)
             painter.setBrush(Qt.NoBrush)
+
+        if rot is not None:
+            painter.restore()
 
 class AnimatedText(_TweenDriver):
     def __init__(self, defn: TextDef):
@@ -1393,7 +1536,7 @@ class AnimatedText(_TweenDriver):
         self.cur_p:         P      = P(d.p.x, d.p.y)
         self.cur_px:        P      = P(d.px.x, d.px.y)
 
-        self.cur_color      = QColor(d.color)
+        self.cur_color      = QColor(d.fill_color)
         self.cur_font_size  = d.font_size
         self.cur_h_align    = d.h_align
         self.cur_v_align    = d.v_align
@@ -1401,7 +1544,7 @@ class AnimatedText(_TweenDriver):
  
         self._sp:           P      = P(d.p.x, d.p.y)
         self._spx:          P      = P(d.px.x, d.px.y)
-        self._sc   = QColor(d.color)
+        self._sc   = QColor(d.fill_color)
         self._sfs  = d.font_size
         self._sha  = d.h_align
         self._sva  = d.v_align
@@ -1447,6 +1590,20 @@ class AnimatedText(_TweenDriver):
         self._sgp2:  P = P(defn.gradient_p2.x,  defn.gradient_p2.y)
         self._sgpx2: P = P(defn.gradient_px2.x, defn.gradient_px2.y)
 
+        self.cur_rot_center_p:      P     = P(defn.rot_center_p.x,  defn.rot_center_p.y)
+        self.cur_rot_center_px:     P     = P(defn.rot_center_px.x, defn.rot_center_px.y)
+        self.cur_rot_target_p:      P     = P(defn.rot_target_p.x,  defn.rot_target_p.y)
+        self.cur_rot_target_px:     P     = P(defn.rot_target_px.x, defn.rot_target_px.y)
+        self.cur_rot_angle_initial: float = defn.rot_angle_initial
+        self.cur_rot_angle:         float = defn.rot_angle
+
+        self._s_rot_center_p:      P     = P(defn.rot_center_p.x,  defn.rot_center_p.y)
+        self._s_rot_center_px:     P     = P(defn.rot_center_px.x, defn.rot_center_px.y)
+        self._s_rot_target_p:      P     = P(defn.rot_target_p.x,  defn.rot_target_p.y)
+        self._s_rot_target_px:     P     = P(defn.rot_target_px.x, defn.rot_target_px.y)
+        self._s_rot_angle_initial: float = defn.rot_angle_initial
+        self._s_rot_angle:         float = defn.rot_angle
+
     def _save_start(self):
         self._sp    = P(self.cur_p.x,  self.cur_p.y)
         self._spx   = P(self.cur_px.x, self.cur_px.y)
@@ -1482,7 +1639,7 @@ class AnimatedText(_TweenDriver):
         if tw.px is not None:
             if tw.px.x is not None: self.cur_px = P(tw.px.x, self.cur_px.y)
             if tw.px.y is not None: self.cur_px = P(self.cur_px.x, tw.px.y)
-        if tw.color         is not None: self.cur_color         = QColor(tw.color)
+        if tw.fill_color    is not None: self.cur_color         = QColor(tw.fill_color)
         if tw.outline_color is not None: self.cur_outline_color = QColor(tw.outline_color)
         if tw.outline_width is not None: self.cur_outline_width = tw.outline_width
         if tw.h_align       is not None: self.cur_h_align       = tw.h_align
@@ -1493,13 +1650,19 @@ class AnimatedText(_TweenDriver):
         if tw.gradient_px1  is not None: self.cur_gradient_px1  = tw.gradient_px1
         if tw.gradient_p2   is not None: self.cur_gradient_p2   = tw.gradient_p2
         if tw.gradient_px2  is not None: self.cur_gradient_px2  = tw.gradient_px2
+        if tw.rot_center_p      is not None: self.cur_rot_center_p      = tw.rot_center_p
+        if tw.rot_center_px     is not None: self.cur_rot_center_px     = tw.rot_center_px
+        if tw.rot_target_p      is not None: self.cur_rot_target_p      = tw.rot_target_p
+        if tw.rot_target_px     is not None: self.cur_rot_target_px     = tw.rot_target_px
+        if tw.rot_angle_initial is not None: self.cur_rot_angle_initial = tw.rot_angle_initial
+        if tw.rot_angle         is not None: self.cur_rot_angle         = tw.rot_angle
         self._dirty = True
 
     def _reset_to_def(self):
         d = self.defn
         self.cur_p             = P(d.p.x, d.p.y)
         self.cur_px            = P(d.px.x, d.px.y)
-        self.cur_color         = QColor(d.color)
+        self.cur_color         = QColor(d.fill_color)
         self.cur_outline_color = QColor(d.outline_color) if d.outline_color else QColor(0,0,0,0)
         self.cur_outline_width = d.outline_width
         self.cur_font_size     = d.font_size
@@ -1510,6 +1673,12 @@ class AnimatedText(_TweenDriver):
         self.cur_gradient_px1  = P(d.gradient_px1.x, d.gradient_px1.y)
         self.cur_gradient_p2   = P(d.gradient_p2.x,  d.gradient_p2.y)
         self.cur_gradient_px2  = P(d.gradient_px2.x, d.gradient_px2.y)
+        self.cur_rot_center_p      = P(d.rot_center_p.x,  d.rot_center_p.y)
+        self.cur_rot_center_px     = P(d.rot_center_px.x, d.rot_center_px.y)
+        self.cur_rot_target_p      = P(d.rot_target_p.x,  d.rot_target_p.y)
+        self.cur_rot_target_px     = P(d.rot_target_px.x, d.rot_target_px.y)
+        self.cur_rot_angle_initial = d.rot_angle_initial
+        self.cur_rot_angle         = d.rot_angle
         self._dirty = True
 
     def _apply(self, tw: TextTween, v: float):
@@ -1521,7 +1690,7 @@ class AnimatedText(_TweenDriver):
             tx = self._spx.x + (tw.px.x - self._spx.x) * v if tw.px.x is not None else self._spx.x
             ty = self._spx.y + (tw.px.y - self._spx.y) * v if tw.px.y is not None else self._spx.y
             self.cur_px = P(tx, ty)
-        if tw.color         is not None: self.cur_color         = lerp_color(self._sc,  tw.color,         v)
+        if tw.fill_color    is not None: self.cur_color         = lerp_color(self._sc,  tw.fill_color,    v)
         if tw.outline_color is not None: self.cur_outline_color = lerp_color(self._so,  tw.outline_color, v)
         if tw.outline_width is not None: self.cur_outline_width = self._slow + (tw.outline_width - self._slow) * v
         if tw.h_align       is not None: self.cur_h_align       = self._sha  + (tw.h_align       - self._sha)  * v
@@ -1532,6 +1701,12 @@ class AnimatedText(_TweenDriver):
         if tw.gradient_px1  is not None: self.cur_gradient_px1  = P(self._sgpx1.x + (tw.gradient_px1.x - self._sgpx1.x) * v, self._sgpx1.y + (tw.gradient_px1.y - self._sgpx1.y) * v)
         if tw.gradient_p2   is not None: self.cur_gradient_p2   = P(self._sgp2.x  + (tw.gradient_p2.x  - self._sgp2.x)  * v, self._sgp2.y  + (tw.gradient_p2.y  - self._sgp2.y)  * v)
         if tw.gradient_px2  is not None: self.cur_gradient_px2  = P(self._sgpx2.x + (tw.gradient_px2.x - self._sgpx2.x) * v, self._sgpx2.y + (tw.gradient_px2.y - self._sgpx2.y) * v)
+        if tw.rot_center_p      is not None: self.cur_rot_center_p      = P(self._s_rot_center_p.x  + (tw.rot_center_p.x  - self._s_rot_center_p.x)  * v, self._s_rot_center_p.y  + (tw.rot_center_p.y  - self._s_rot_center_p.y)  * v)
+        if tw.rot_center_px     is not None: self.cur_rot_center_px     = P(self._s_rot_center_px.x + (tw.rot_center_px.x - self._s_rot_center_px.x) * v, self._s_rot_center_px.y + (tw.rot_center_px.y - self._s_rot_center_px.y) * v)
+        if tw.rot_target_p      is not None: self.cur_rot_target_p      = P(self._s_rot_target_p.x  + (tw.rot_target_p.x  - self._s_rot_target_p.x)  * v, self._s_rot_target_p.y  + (tw.rot_target_p.y  - self._s_rot_target_p.y)  * v)
+        if tw.rot_target_px     is not None: self.cur_rot_target_px     = P(self._s_rot_target_px.x + (tw.rot_target_px.x - self._s_rot_target_px.x) * v, self._s_rot_target_px.y + (tw.rot_target_px.y - self._s_rot_target_px.y) * v)
+        if tw.rot_angle_initial is not None: self.cur_rot_angle_initial = self._s_rot_angle_initial + (tw.rot_angle_initial - self._s_rot_angle_initial) * v
+        if tw.rot_angle         is not None: self.cur_rot_angle         = self._s_rot_angle         + (tw.rot_angle         - self._s_rot_angle)         * v
         self._dirty = True
     
     def _apply_blend(self, tw: TextTween, v: float):
@@ -1543,7 +1718,7 @@ class AnimatedText(_TweenDriver):
             nx = self.cur_px.x + tw.px.x * v if tw.px.x is not None else self.cur_px.x
             ny = self.cur_px.y + tw.px.y * v if tw.px.y is not None else self.cur_px.y
             self.cur_px = P(nx, ny)
-        if tw.color         is not None: self.cur_color         = lerp_color(self.cur_color,         tw.color,         v)
+        if tw.fill_color    is not None: self.cur_color         = lerp_color(self.cur_color,         tw.fill_color,    v)
         if tw.outline_color is not None: self.cur_outline_color = lerp_color(self.cur_outline_color, tw.outline_color, v)
         if tw.outline_width is not None: self.cur_outline_width += tw.outline_width * v
         if tw.h_align       is not None: self.cur_h_align       += tw.h_align       * v
@@ -1732,7 +1907,7 @@ class AnimatedText(_TweenDriver):
         dx += int(self._pos_offset.x)
         dy += int(self._pos_offset.y)
 
-        color = self._always_text_color if self._always_text_color is not None else self.cur_color
+        fill_color = self._always_text_color if self._always_text_color is not None else self.cur_color
 
         # apply char_display clipping
         if cd < 1.0 and not self.defn.sub_char_clip:
@@ -1745,12 +1920,25 @@ class AnimatedText(_TweenDriver):
                 dx     = dx + full_w - disp_w
             full_label = display_label
 
+        rot = _resolve_rotation(
+            self.cur_rot_center_p, self.cur_rot_center_px,
+            self.cur_rot_target_p, self.cur_rot_target_px,
+            self.cur_rot_angle_initial, self.cur_rot_angle,
+            widget_w, widget_h
+        )
+        if rot is not None:
+            rcx, rcy, angle = rot
+            painter.save()
+            painter.translate(rcx, rcy)
+            painter.rotate(angle)
+            painter.translate(-rcx, -rcy)
+
         painter.setFont(font)
 
         if not use_path:
             # fast path — solid color text
             if cd >= 1.0 or self.defn.sub_char_clip:
-                painter.setPen(color)
+                painter.setPen(fill_color)
                 if self.defn.sub_char_clip and cd < 1.0:
                     full_w  = fm.horizontalAdvance(full_label)
                     clip_w  = full_w * cd
@@ -1801,14 +1989,14 @@ class AnimatedText(_TweenDriver):
             painter.fillPath(path, _gradient_brush())
         else:
             painter.setPen(Qt.NoPen)
-            painter.fillPath(path, color)
+            painter.fillPath(path, fill_color)
 
         # outline
         if self.cur_outline_width > 0.0 or self.cur_outline_color.alpha() > 0:
             if gd is not None and gd.target == 'outline':
                 pen = QPen(_gradient_brush(), self.cur_outline_width)
             else:
-                oc = self.cur_outline_color if self.cur_outline_color.alpha() > 0 else color
+                oc = self.cur_outline_color if self.cur_outline_color.alpha() > 0 else fill_color
                 pen = QPen(oc, self.cur_outline_width)
             pen.setJoinStyle(Qt.RoundJoin)
             pen.setCapStyle(Qt.RoundCap)
@@ -1816,9 +2004,188 @@ class AnimatedText(_TweenDriver):
 
         if self.defn.sub_char_clip and cd < 1.0:
             painter.restore()
+        
+        if rot is not None:
+            painter.restore()
 
         painter.setPen(Qt.NoPen)
-    
+
+# ──────────────────────── ARC DEF ────────────────────────
+
+@dataclass
+class ArcDef:
+    center_p:            P                = field(default_factory=P)
+    center_px:           P                = field(default_factory=P)
+    outer_p:             P                = field(default_factory=P)
+    outer_px:            P                = field(default_factory=P)
+    inner_p:             Optional[P]      = None
+    inner_px:            Optional[P]      = None
+    angle_start:         Optional[float]  = None
+    angle_end:           Optional[float]  = None
+    circle:              bool             = False
+    fill_color:          QColor           = field(default_factory=lambda: QColor(255, 255, 255, 255))
+    outline_color:       Optional[QColor] = None
+    outline_width:       float            = 0.0
+    rot_center_p:        P                = field(default_factory=P)
+    rot_center_px:       P                = field(default_factory=P)
+    rot_target_p:        P                = field(default_factory=P)
+    rot_target_px:       P                = field(default_factory=P)
+    rot_angle_initial:   float            = 0.0
+    rot_angle:           float            = 0.0
+    hidden:              bool             = False
+    visible_threshold_x: float            = 0.0
+    visible_threshold_y: float            = 0.0
+
+    def __post_init__(self):
+        if not self.circle and self.angle_start is None and self.angle_end is None:
+            self.circle = True
+
+
+class AnimatedArc:
+    def __init__(self, defn: ArcDef) -> None:
+        self.defn   = defn
+        self.hidden = defn.hidden
+
+    def _resolve(self, ww: int, wh: int) -> Tuple[float, float, float, float, Optional[float]]:
+        d  = self.defn
+        cx = d.center_p.x * ww + d.center_px.x
+        cy = d.center_p.y * wh + d.center_px.y
+
+        # outer radius — use distance from center to outer point
+        ox = d.outer_p.x * ww + d.outer_px.x
+        oy = d.outer_p.y * wh + d.outer_px.y
+        outer_r = _math.sqrt((ox - cx) ** 2 + (oy - cy) ** 2)
+
+        # inner radius
+        inner_r = None
+        if d.inner_p is not None:
+            ipx = d.inner_px or P()
+            ix = d.inner_p.x * ww + ipx.x
+            iy = d.inner_p.y * wh + ipx.y
+            r  = _math.sqrt((ix - cx) ** 2 + (iy - cy) ** 2)
+            if r > 0.0 and (d.inner_p.x != d.center_p.x or d.inner_p.y != d.center_p.y or
+                             ipx.x != d.center_px.x or ipx.y != d.center_px.y):
+                inner_r = r
+
+        return cx, cy, outer_r, inner_r
+
+    def draw(self, painter: QPainter, ww: int, wh: int) -> None:
+        if self.hidden:
+            return
+
+        d = self.defn
+        if d.fill_color.alpha() == 0 and (d.outline_width <= 0 or d.outline_color is None or d.outline_color.alpha() == 0):
+            return
+
+        cx, cy, outer_r, inner_r = self._resolve(ww, wh)
+        if outer_r <= 0:
+            return
+
+        rot = _resolve_rotation(
+            d.rot_center_p, d.rot_center_px,
+            d.rot_target_p, d.rot_target_px,
+            d.rot_angle_initial, d.rot_angle,
+            ww, wh
+        )
+        if rot is not None:
+            rcx, rcy, angle = rot
+            painter.save()
+            painter.translate(rcx, rcy)
+            painter.rotate(angle)
+            painter.translate(-rcx, -rcy)
+
+        # determine if full circle
+        is_circle = d.circle
+        if not is_circle:
+            if d.angle_start is None or d.angle_end is None:
+                is_circle = True
+            else:
+                diff = abs(d.angle_end - d.angle_start)
+                if diff == 0.0:
+                    return
+                elif diff >= 360.0:
+                    is_circle = True
+
+        def _build_path() -> QPainterPath:
+            path = QPainterPath()
+            rect_outer = QRectF(cx - outer_r, cy - outer_r, outer_r * 2, outer_r * 2)
+
+            if is_circle:
+                if inner_r is not None and inner_r > 0:
+                    path.addEllipse(rect_outer)
+                    inner_path = QPainterPath()
+                    rect_inner = QRectF(cx - inner_r, cy - inner_r, inner_r * 2, inner_r * 2)
+                    inner_path.addEllipse(rect_inner)
+                    path = path.subtracted(inner_path)
+                else:
+                    path.addEllipse(rect_outer)
+                return path
+
+            # Our convention: 0 = North, clockwise
+            # Qt convention:  0 = East (3 o'clock), counter-clockwise, units = 1/16th degree
+            # Convert: qt_angle = 90 - our_angle
+            start_our = d.angle_start if d.angle_start is not None else 0.0
+            end_our   = d.angle_end   if d.angle_end   is not None else 0.0
+
+            # span is always positive, direction is clockwise in our system
+            # which means negative span in Qt
+            span = end_our - start_our
+            # normalise so span is in (-360, 360), preserve sign
+            span = span % 360.0
+            if span == 0.0:
+                return path  # nothing to draw
+
+            # Convert start to Qt: 0=North,CW -> Qt 0=East,CCW
+            qt_start = 90.0 - start_our
+            qt_span  = -span   # clockwise in our system = negative in Qt
+
+            # Qt works in 1/16th degrees internally via arcTo which takes degrees directly
+            rect_inner = QRectF(cx - inner_r, cy - inner_r, inner_r * 2, inner_r * 2) if (inner_r is not None and inner_r > 0) else None
+
+            if rect_inner is not None:
+                # donut arc
+                start_rad = _math.radians(start_our - 90.0)  # convert to standard math angle
+                end_rad   = _math.radians(end_our   - 90.0)
+
+                # start point on outer arc
+                path.moveTo(cx + outer_r * _math.cos(start_rad),
+                            cy + outer_r * _math.sin(start_rad))
+                path.arcTo(rect_outer, qt_start, qt_span)
+                # connect to inner arc end point
+                path.lineTo(cx + inner_r * _math.cos(end_rad),
+                            cy + inner_r * _math.sin(end_rad))
+                path.arcTo(rect_inner, qt_start + qt_span, -qt_span)
+                path.closeSubpath()
+            else:
+                # pie slice
+                start_rad = _math.radians(start_our - 90.0)
+                path.moveTo(cx, cy)
+                path.lineTo(cx + outer_r * _math.cos(start_rad),
+                            cy + outer_r * _math.sin(start_rad))
+                path.arcTo(rect_outer, qt_start, qt_span)
+                path.closeSubpath()
+
+            return path
+
+        path = _build_path()
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(d.fill_color)
+        painter.drawPath(path)
+        painter.setBrush(Qt.NoBrush)
+
+        if d.outline_width > 0.0 and d.outline_color is not None and d.outline_color.alpha() > 0:
+            pen = QPen(d.outline_color)
+            pen.setWidthF(d.outline_width)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPath(path)
+            painter.setPen(Qt.NoPen)
+        
+        if rot is not None:
+            painter.restore()
+
 # ──────────────────────── SLIDER DEF ────────────────────────
 
 def make_track_def(
@@ -1930,6 +2297,8 @@ class SliderGroupDef:
     phases:       Dict[str, Phase]                       = field(default_factory=dict)
     event_out:    Optional[EventDef]                     = None
     knob_hit_px:  float                                  = 10.0
+    visible_threshold_x: float = 0.0
+    visible_threshold_y: float = 0.0
 
 
 def SliderDef(
@@ -1962,6 +2331,8 @@ def SliderDef(
     text_bright: QColor = QColor(200, 220, 255, 255),
     zero_white:  QColor = QColor(255, 255, 255,   0),
     zero_color:  QColor = QColor(200, 220, 255,   0),
+    visible_threshold_x: float = 0.0,
+    visible_threshold_y: float = 0.0,
 ) -> SliderGroupDef:
     fam       = font_family
     unit_text = unit
@@ -2005,10 +2376,10 @@ def SliderDef(
 
     def _text_phases(tp, tpx, h_align=0.5, v_align=0.5):
         return {
-            'open':     Phase([TextTween(p=tp, px=tpx, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint, color=text_dim,    h_align=h_align, v_align=v_align)]),
-            'close':    Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.InQuint,  color=zero_color,  h_align=h_align, v_align=v_align)]),
-            'pressed':  Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint, color=text_bright, h_align=h_align, v_align=v_align)]),
-            'released': Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.OutQuint, color=text_dim,    h_align=h_align, v_align=v_align)]),
+            'open':     Phase([TextTween(p=tp, px=tpx, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint, fill_color=text_dim,    h_align=h_align, v_align=v_align)]),
+            'close':    Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.InQuint,  fill_color=zero_color,  h_align=h_align, v_align=v_align)]),
+            'pressed':  Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint, fill_color=text_bright, h_align=h_align, v_align=v_align)]),
+            'released': Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.OutQuint, fill_color=text_dim,    h_align=h_align, v_align=v_align)]),
         }
 
     def _group_phases():
@@ -2060,7 +2431,7 @@ def SliderDef(
         text_label=TextDef(
             p=P(p.x, p.y), px=P(px.x - 8, px.y),
             text=label, font_size=7.0,
-            color=zero_color,
+            fill_color=zero_color,
             phases=_text_phases(P(p.x, p.y), P(px.x - 8, px.y), h_align=1.0, v_align=0.5),
             bold=True, italic=False, font_family=fam,
             h_align=1.0, v_align=0.5, uniform_scale=False,
@@ -2069,7 +2440,7 @@ def SliderDef(
         text_min=TextDef(
             p=P(0.0, 0.0), px=P(0.0, 14.0),
             text='', font_size=9.0,
-            color=zero_color,
+            fill_color=zero_color,
             phases=_text_phases(P(p.x, p.y), P(px.x, px.y + 14.0), h_align=0.0, v_align=0.0),
             bold=False, italic=False, font_family=fam,
             h_align=0.0, v_align=0.0, uniform_scale=False,
@@ -2083,7 +2454,7 @@ def SliderDef(
         text_max=TextDef(
             p=P(0.0, 0.0), px=P(0.0, 14.0),
             text='', font_size=9.0,
-            color=zero_color,
+            fill_color=zero_color,
             phases=_text_phases(P(0.0, 0.0), P(0.0, 14.0), h_align=1.0, v_align=0.0),
             bold=False, italic=False, font_family=fam,
             h_align=1.0, v_align=0.0, uniform_scale=False,
@@ -2097,7 +2468,7 @@ def SliderDef(
         text_current=TextDef(
             p=P(0.0, 0.0), px=P(0.0, -12.0),
             text='', font_size=10.0,
-            color=zero_color,
+            fill_color=zero_color,
             phases=_text_phases(P(0.0, 0.0), P(0.0, -12.0), h_align=0.5, v_align=1.0),
             bold=False, italic=False, font_family=fam,
             h_align=0.5, v_align=1.0, uniform_scale=False,
@@ -2161,6 +2532,8 @@ class SliderGroup:
         self._tick_ease_t0:       float = 0.0
         self._tick_easing:        bool  = False
         self._tick_frozen:        bool  = False
+
+        self.hidden: bool = False
 
     def init_value(self, ctx):
         if self.defn.event_out is not None and self.defn.event_out._is_numeric:
@@ -2359,6 +2732,8 @@ class SliderGroup:
             self._text_current._dirty = True
             
     def draw(self, painter: QPainter, w: int, h: int, scale: float = 1.0):
+        if self.hidden:
+            return
         cam_w, cam_h = self.cam_w, self.cam_h
         if self._track     is not None: self._track.draw(painter, w, h, cam_w, cam_h)
         if self._mark_fill is not None: self._mark_fill.draw(painter, w, h, cam_w, cam_h)
@@ -2385,6 +2760,8 @@ class ButtonDef:
     on_fire:           Optional[Callable] = None
     continuous_update: bool               = False
     invisible:         bool               = False
+    visible_threshold_x: float = 0.0
+    visible_threshold_y: float = 0.0
 
     def __post_init__(self):
         if self.action not in ('set', 'cycle'): self.hold_when_set = False
@@ -2398,7 +2775,7 @@ class ButtonDef:
         poly_phases  = dict(self.poly_def.phases or {})
         base_fill    = self.poly_def.fill_color    or QColor(101,  81, 176, 120)
         base_outline = self.poly_def.outline_color or QColor(171, 151, 247, 255)
-        base_lw      = self.poly_def.line_width    if self.poly_def.line_width > 0 else 1.0
+        base_lw      = self.poly_def.outline_width    if self.poly_def.outline_width > 0 else 1.0
         fill_zero    = QColor(base_fill.red(),    base_fill.green(),    base_fill.blue(),    0)
         outline_zero = QColor(base_outline.red(), base_outline.green(), base_outline.blue(), 0)
         set_outline  = QColor(255, 255, 255, 255)
@@ -2409,15 +2786,15 @@ class ButtonDef:
 
         poly_defaults = {
             'open':    Phase([
-                PolygonTween(fill_color=fill_zero,    outline_color=outline_zero, line_width=base_lw, start=0, dur=0,    ease=QEasingCurve.Linear),
-                PolygonTween(fill_color=base_fill,    outline_color=base_outline, line_width=base_lw, start=0, dur=_dur, ease=_ease),
+                PolygonTween(fill_color=fill_zero,    outline_color=outline_zero, outline_width=base_lw, start=0, dur=0,    ease=QEasingCurve.Linear),
+                PolygonTween(fill_color=base_fill,    outline_color=base_outline, outline_width=base_lw, start=0, dur=_dur, ease=_ease),
             ]),
-            'close':   Phase([PolygonTween(fill_color=fill_zero,   outline_color=outline_zero, line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'hover':   Phase([PolygonTween(fill_color=hover_fill,  outline_color=base_outline, line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'unhover': Phase([PolygonTween(fill_color=base_fill,   outline_color=base_outline, line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'click':   Phase([PolygonTween(fill_color=click_fill,  outline_color=base_outline, line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'release': Phase([PolygonTween(fill_color=hover_fill,  outline_color=base_outline, line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'set':     Phase([PolygonTween(fill_color=click_fill,  outline_color=set_outline,  line_width=2.0,     start=0, dur=_dur, ease=_ease)]),
+            'close':   Phase([PolygonTween(fill_color=fill_zero,   outline_color=outline_zero, outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'hover':   Phase([PolygonTween(fill_color=hover_fill,  outline_color=base_outline, outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'unhover': Phase([PolygonTween(fill_color=base_fill,   outline_color=base_outline, outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'click':   Phase([PolygonTween(fill_color=click_fill,  outline_color=base_outline, outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'release': Phase([PolygonTween(fill_color=hover_fill,  outline_color=base_outline, outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'set':     Phase([PolygonTween(fill_color=click_fill,  outline_color=set_outline,  outline_width=2.0,     start=0, dur=_dur, ease=_ease)]),
         }
 
         for phase_name, phase in poly_defaults.items():
@@ -2432,13 +2809,13 @@ class ButtonDef:
 
         if self.text_def is not None:
             text_phases = dict(self.text_def.phases or {})
-            base_color  = self.text_def.color or QColor(255, 255, 255, 255)
+            base_color  = self.text_def.fill_color or QColor(255, 255, 255, 255)
             text_zero   = QColor(base_color.red(), base_color.green(), base_color.blue(), 0)
 
             text_defaults = {
-                'open':  Phase([TextTween(color=text_zero,  start=0, dur=0,    ease=QEasingCurve.Linear),
-                                TextTween(color=base_color, start=0, dur=_dur, ease=_ease)]),
-                'close': Phase([TextTween(color=text_zero,  start=0, dur=_dur, ease=_ease)]),
+                'open':  Phase([TextTween(fill_color=text_zero,  start=0, dur=0,    ease=QEasingCurve.Linear),
+                                TextTween(fill_color=base_color, start=0, dur=_dur, ease=_ease)]),
+                'close': Phase([TextTween(fill_color=text_zero,  start=0, dur=_dur, ease=_ease)]),
             }
 
             for phase_name, phase in text_defaults.items():
@@ -2446,7 +2823,7 @@ class ButtonDef:
                     text_phases[phase_name] = phase
 
             self.text_def = _tw_replace(self.text_def,
-                color  = base_color,
+                fill_color  = base_color,
                 phases = text_phases,
             )
 
@@ -2723,8 +3100,8 @@ def SegmentedButtons(
     p2:             P                    = P(),
     px1:            P                    = P(),
     px2:            P                    = P(),
-    poly_def:       Optional[PolygonDef] = PolygonDef(fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), line_width=1.0),
-    text_def:       Optional[TextDef]    = TextDef(font_size=18.0, color=QColor(255, 255, 255, 255), bold=True),
+    poly_def:       Optional[PolygonDef] = PolygonDef(fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), outline_width=1.0),
+    text_def:       Optional[TextDef]    = TextDef(font_size=18.0, fill_color=QColor(255, 255, 255, 255), bold=True),
     segments:       List[Segment]        = None,
     event_out:      Any                  = None,
     gap_px:         float                = 6.0,
@@ -2743,7 +3120,7 @@ def SegmentedButtons(
     base_poly     = poly_def or PolygonDef()
     fill_color    = base_poly.fill_color    or QColor(101,  81, 176, 120)
     outline_color = base_poly.outline_color or QColor(171, 151, 247, 255)
-    line_width    = base_poly.line_width    if base_poly.line_width > 0 else 1.0
+    outline_width    = base_poly.outline_width    if base_poly.outline_width > 0 else 1.0
 
     total_weight = sum(s.weight for s in segments)
     half_gap     = gap_px / 2.0
@@ -2959,7 +3336,7 @@ def SegmentedButtons(
             px            = px_pts,
             fill_color    = base_col,
             outline_color = outline_color,
-            line_width    = line_width,
+            outline_width    = outline_width,
             closed        = True,
             phases        = {},
             dynamic_px    = _make_dynamic_px(),
@@ -3025,7 +3402,7 @@ def SevenSegmentDisplay(
     base_poly     = poly_def or PolygonDef()
     fill_color    = base_poly.fill_color    or QColor(101,  81, 176, 120)
     outline_color = base_poly.outline_color or QColor(133, 119, 186, 255)
-    line_width    = base_poly.line_width    if base_poly.line_width > 0 else 1.0
+    outline_width    = base_poly.outline_width    if base_poly.outline_width > 0 else 1.0
     fill_zero     = QColor(fill_color.red(),    fill_color.green(),    fill_color.blue(),    0)
     out_zero      = QColor(outline_color.red(), outline_color.green(), outline_color.blue(), 0)
     set_color     = QColor(255, 0, 0, 100)
@@ -3130,14 +3507,14 @@ def SevenSegmentDisplay(
         px_pts = [P(0.0, 0.0)] * 6
 
         merged_phases = {
-            'open':    Phase([PolygonTween(fill_color=fill_zero,   outline_color=out_zero,      line_width=line_width, start=0, dur=0,    ease=QEasingCurve.Linear),
-                              PolygonTween(fill_color=fill_color,  outline_color=outline_color, line_width=line_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
-            'close':   Phase([PolygonTween(fill_color=fill_zero,   outline_color=out_zero,      line_width=line_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
-            'hover':   Phase([PolygonTween(fill_color=hover_fill,  outline_color=outline_color, line_width=line_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
-            'unhover': Phase([PolygonTween(fill_color=fill_color,  outline_color=outline_color, line_width=line_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
-            'click':   Phase([PolygonTween(fill_color=click_fill,  outline_color=outline_color, line_width=line_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
-            'release': Phase([PolygonTween(fill_color=hover_fill,  outline_color=outline_color, line_width=line_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
-            'set':     Phase([PolygonTween(fill_color=set_color,   outline_color=set_outline,   line_width=2.0,        start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
+            'open':    Phase([PolygonTween(fill_color=fill_zero,   outline_color=out_zero,      outline_width=outline_width, start=0, dur=0,    ease=QEasingCurve.Linear),
+                              PolygonTween(fill_color=fill_color,  outline_color=outline_color, outline_width=outline_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
+            'close':   Phase([PolygonTween(fill_color=fill_zero,   outline_color=out_zero,      outline_width=outline_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
+            'hover':   Phase([PolygonTween(fill_color=hover_fill,  outline_color=outline_color, outline_width=outline_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
+            'unhover': Phase([PolygonTween(fill_color=fill_color,  outline_color=outline_color, outline_width=outline_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
+            'click':   Phase([PolygonTween(fill_color=click_fill,  outline_color=outline_color, outline_width=outline_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
+            'release': Phase([PolygonTween(fill_color=hover_fill,  outline_color=outline_color, outline_width=outline_width, start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
+            'set':     Phase([PolygonTween(fill_color=set_color,   outline_color=set_outline,   outline_width=2.0,        start=0, dur=0.25, ease=QEasingCurve.OutQuint)]),
             **(base_poly.phases or {}),
         }
 
@@ -3146,7 +3523,7 @@ def SevenSegmentDisplay(
             px            = px_pts,
             fill_color    = fill_color,
             outline_color = outline_color,
-            line_width    = line_width,
+            outline_width    = outline_width,
             closed        = True,
             phases        = merged_phases,
             dynamic_px    = _make_dynamic(letter),
@@ -3179,6 +3556,8 @@ class TextboxDef:
     clear_when_sent:  bool               = True
     exit_when_sent:   bool               = True
     override_inputs:  bool               = True
+    visible_threshold_x: float = 0.0
+    visible_threshold_y: float = 0.0
 
     def __post_init__(self):
         self._build_phases()
@@ -3190,7 +3569,7 @@ class TextboxDef:
         poly_phases   = dict(self.poly_def.phases or {})
         base_fill     = self.poly_def.fill_color    or QColor(101,  81, 176, 120)
         base_outline  = self.poly_def.outline_color or QColor(171, 151, 247, 255)
-        base_lw       = self.poly_def.line_width    if self.poly_def.line_width > 0 else 1.0
+        base_lw       = self.poly_def.outline_width    if self.poly_def.outline_width > 0 else 1.0
         fill_zero     = QColor(base_fill.red(),    base_fill.green(),    base_fill.blue(),    0)
         outline_zero  = QColor(base_outline.red(), base_outline.green(), base_outline.blue(), 0)
         hover_fill, click_fill = _derive_button_colors(base_fill)
@@ -3198,13 +3577,13 @@ class TextboxDef:
 
         poly_defaults = {
             'open':    Phase([
-                PolygonTween(fill_color=fill_zero,   outline_color=outline_zero,  line_width=base_lw, start=0, dur=0,    ease=QEasingCurve.Linear),
-                PolygonTween(fill_color=base_fill,   outline_color=base_outline,  line_width=base_lw, start=0, dur=_dur, ease=_ease),
+                PolygonTween(fill_color=fill_zero,   outline_color=outline_zero,  outline_width=base_lw, start=0, dur=0,    ease=QEasingCurve.Linear),
+                PolygonTween(fill_color=base_fill,   outline_color=base_outline,  outline_width=base_lw, start=0, dur=_dur, ease=_ease),
             ]),
-            'close':   Phase([PolygonTween(fill_color=fill_zero,   outline_color=outline_zero,  line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'hover':   Phase([PolygonTween(fill_color=hover_fill,  outline_color=base_outline,  line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'unhover': Phase([PolygonTween(fill_color=base_fill,   outline_color=base_outline,  line_width=base_lw, start=0, dur=_dur, ease=_ease)]),
-            'click': Phase([PolygonTween(fill_color=click_fill,  outline_color=click_outline, line_width=2.0,     start=0, dur=_dur, ease=_ease)]),
+            'close':   Phase([PolygonTween(fill_color=fill_zero,   outline_color=outline_zero,  outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'hover':   Phase([PolygonTween(fill_color=hover_fill,  outline_color=base_outline,  outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'unhover': Phase([PolygonTween(fill_color=base_fill,   outline_color=base_outline,  outline_width=base_lw, start=0, dur=_dur, ease=_ease)]),
+            'click': Phase([PolygonTween(fill_color=click_fill,  outline_color=click_outline, outline_width=2.0,     start=0, dur=_dur, ease=_ease)]),
         }
         for phase_name, phase in poly_defaults.items():
             if not _phase_key_exists(poly_phases, phase_name):
@@ -3218,24 +3597,24 @@ class TextboxDef:
 
         if self.text_def is not None:
             text_phases  = dict(self.text_def.phases or {})
-            base_color   = self.text_def.color or QColor(255, 255, 255, 255)
+            base_color   = self.text_def.fill_color or QColor(255, 255, 255, 255)
             text_zero    = QColor(base_color.red(), base_color.green(), base_color.blue(), 0)
             dim_color    = QColor(base_color.red(), base_color.green(), base_color.blue(), 160)
 
             text_defaults = {
-                'open':    Phase([TextTween(color=text_zero,  start=0, dur=0,    ease=QEasingCurve.Linear),
-                                  TextTween(color=dim_color,  start=0, dur=_dur, ease=_ease)]),
-                'close':   Phase([TextTween(color=text_zero,  start=0, dur=_dur, ease=_ease)]),
-                'hover':   Phase([TextTween(color=base_color, start=0, dur=_dur, ease=_ease)]),
-                'unhover': Phase([TextTween(color=dim_color,  start=0, dur=_dur, ease=_ease)]),
-                'click': Phase([TextTween(color=base_color, start=0, dur=_dur, ease=_ease)]),
+                'open':    Phase([TextTween(fill_color=text_zero,  start=0, dur=0,    ease=QEasingCurve.Linear),
+                                  TextTween(fill_color=dim_color,  start=0, dur=_dur, ease=_ease)]),
+                'close':   Phase([TextTween(fill_color=text_zero,  start=0, dur=_dur, ease=_ease)]),
+                'hover':   Phase([TextTween(fill_color=base_color, start=0, dur=_dur, ease=_ease)]),
+                'unhover': Phase([TextTween(fill_color=dim_color,  start=0, dur=_dur, ease=_ease)]),
+                'click': Phase([TextTween(fill_color=base_color, start=0, dur=_dur, ease=_ease)]),
             }
             for phase_name, phase in text_defaults.items():
                 if not _phase_key_exists(text_phases, phase_name):
                     text_phases[phase_name] = phase
 
             self.text_def = _tw_replace(self.text_def,
-                color  = text_zero,
+                fill_color  = text_zero,
                 phases = text_phases,
             )
 
@@ -3280,6 +3659,8 @@ class AnimatedTextbox:
         self._ctrl_held: bool = False
 
         self._set_phase('open')
+
+        self.hidden: bool = False
 
     # ── Phase ────────────────────────────────────────────────────
 
@@ -3422,6 +3803,8 @@ class AnimatedTextbox:
         return self._polygon.phase_done() and text_done
 
     def draw(self, painter: QPainter, w: int, h: int, scale: float = 1.0) -> None:
+        if self.hidden:
+            return
         self._polygon.draw(painter, w, h, self.cam_w, self.cam_h)
         if self._text is not None and not self._text.hidden:
             display = self._resolve_display_text(w, h)
@@ -3457,8 +3840,8 @@ class AnimatedTextbox:
  
 @dataclass
 class GraphDef:
-    p1:              P
-    p2:              P
+    p1:              P                       = field(default_factory=P)
+    p2:              P                       = field(default_factory=P)
     px1:             P                       = field(default_factory=P)
     px2:             P                       = field(default_factory=P)
     series:          List[SeriesDef]         = field(default_factory=list)
@@ -3477,13 +3860,15 @@ class GraphDef:
     stack:           bool                    = False
     update_interval: float                   = 0.0
     hidden:          bool                    = False
+    visible_threshold_x: float = 0.0
+    visible_threshold_y: float = 0.0
  
 @dataclass
 class SeriesDef:
     value_fn:     Optional[Callable[[Any], Optional[float]]] = None
     data_fn:      Optional[Callable[[Any], List[float]]]     = None
     color:        QColor  = field(default_factory=lambda: QColor(255, 255, 255, 255))
-    line_width:   float   = 1.5
+    outline_width:   float   = 1.5
     fill_opacity: float   = 0.0
     smooth:       bool    = False
 
@@ -3881,9 +4266,9 @@ class AnimatedGraph:
                 painter.drawPolygon(fill_poly)
                 painter.setBrush(Qt.NoBrush)
  
-            if sd.line_width > 0.0:
+            if sd.outline_width > 0.0:
                 pen = QPen(sd.color)
-                pen.setWidthF(sd.line_width)
+                pen.setWidthF(sd.outline_width)
                 pen.setCapStyle(Qt.RoundCap)
                 pen.setJoinStyle(Qt.RoundJoin)
                 painter.setPen(pen)
@@ -3899,8 +4284,8 @@ class AnimatedGraph:
 
 @dataclass
 class PieDef:
-    p1:         P
-    p2:         P
+    p1:         P                    = field(default_factory=P)
+    p2:         P                    = field(default_factory=P)
     px1:        P                    = field(default_factory=P)
     px2:        P                    = field(default_factory=P)
     names:      List[str]            = field(default_factory=list)
@@ -3914,6 +4299,8 @@ class PieDef:
     ease_dur:   float                = 0.3
     ease_type:  QEasingCurve.Type    = QEasingCurve.OutQuint
     hidden:     bool                 = False
+    visible_threshold_x: float = 0.0
+    visible_threshold_y: float = 0.0
 
 class AnimatedPie:
     def __init__(self, defn: PieDef) -> None:
@@ -4096,15 +4483,18 @@ class AnimatedPie:
 # ──────────────────────── WINDOW DEF ────────────────────────
 @dataclass
 class WindowDef:
-    p1:                     P
-    p2:                     P
+    p1:                     P                       = field(default_factory=P)
+    p2:                     P                       = field(default_factory=P)
     px1:                    P                       = field(default_factory=P)
     px2:                    P                       = field(default_factory=P)
+    force_open:             bool                    = False
+    force_close:            bool                    = False
     phase_event:            Any                     = None
     phase_fn:               Optional[Callable[str]] = None
     phases:                 Dict[str, Phase]        = field(default_factory=dict)
     listener_defs:          List[EventListener]     = field(default_factory=list)
     polygon_defs:           List[PolygonDef]        = field(default_factory=list)
+    arc_defs:               List[ArcDef]            = field(default_factory=list)
     text_defs:              List[TextDef]           = field(default_factory=list)
     graph_defs:             List[GraphDef]          = field(default_factory=list)
     pie_defs:               List[PieDef]            = field(default_factory=list)
@@ -4120,6 +4510,9 @@ class WindowDef:
     min_scale_w:            float                   = 0.05
     min_scale_h:            float                   = 0.05
     scale_edge_px:          float                   = 8.0
+    grid_snap:              bool                    = True
+    grid_snap_x:            int                     = 19
+    grid_snap_y:            int                     = 11
     spawn_event:            Optional[EventDef]      = None
     spawn_static_values:    List[Any]               = field(default_factory=list)
     spawn_event_group:      Optional[str]           = None
@@ -4146,6 +4539,7 @@ class AnimatedWindow:
 
         self._sub_windows: List[AnimatedWindow] = [AnimatedWindow(d, cam_w, cam_h) for d in defn.sub_windows]
         self._polygons  = [AnimatedPolygon(d) for d in defn.polygon_defs]
+        self._arcs      = [AnimatedArc(d)     for d in defn.arc_defs]
         self._texts     = [AnimatedText(d)    for d in defn.text_defs]
         self._graphs    = [AnimatedGraph(d)   for d in defn.graph_defs]
         self._pies      = [AnimatedPie(d)     for d in defn.pie_defs]
@@ -4232,6 +4626,18 @@ class AnimatedWindow:
         self._scale_start_px2x: float = 0.0
         self._scale_start_px2y: float = 0.0
 
+        self._snap_tween_active:  bool  = False
+        self._snap_tween_t0:      float = 0.0
+        self._snap_tween_dur:     float = 0.5
+        self._snap_from_p1x:      float = 0.0
+        self._snap_from_p1y:      float = 0.0
+        self._snap_from_p2x:      float = 0.0
+        self._snap_from_p2y:      float = 0.0
+        self._snap_to_p1x:        float = 0.0
+        self._snap_to_p1y:        float = 0.0
+        self._snap_to_p2x:        float = 0.0
+        self._snap_to_p2y:        float = 0.0
+
         self._spawned:          List[_SpawnedInstance] = []
         self._last_ipw:         int   = 0
         self._last_iph:         int   = 0
@@ -4253,6 +4659,10 @@ class AnimatedWindow:
         self._last_screen_wy: float = 0.0
         self._last_screen_ww: float = 0.0
         self._last_screen_wh: float = 0.0
+
+        self._force_open_active:  bool = False
+        self._force_close_active: bool = False
+        self._prev_force_phase:   str  = ''
 
         if defn.spawn_event is None:
             self._broadcast('open')
@@ -4282,7 +4692,8 @@ class AnimatedWindow:
         for tb in self._textboxes:
             tb._set_phase(phase)
         for gd in _gradients.values():
-            gd._animated.set_phase(phase)
+            if gd.phase_event is None:
+                gd._animated.set_phase(phase)
         for sw in self._sub_windows:
             if sw.defn.spawn_event is not None:
                 continue
@@ -4347,6 +4758,32 @@ class AnimatedWindow:
             result = str(ev.value) if not isinstance(ev, (list,tuple)) else str(ev[0].value)
         if result != self._cur_phase:
             self._broadcast(result)
+    
+    def _poll_force_phases(self) -> None:
+        d = self.defn
+        phase = self._cur_phase
+
+        if d.force_open and phase == 'open' and not self._force_open_active and self._prev_force_phase != 'open':
+            self._force_open_active = True
+            for p in self._polygons: p.set_phase('open')
+            for t in self._texts:    t.set_phase('open')
+            for a in self._arcs:     a.set_phase('open')
+
+        if d.force_close and phase == 'close' and not self._force_close_active and self._prev_force_phase != 'close':
+            self._force_close_active = True
+            for p in self._polygons: p.set_phase('close')
+            for t in self._texts:    t.set_phase('close')
+            for a in self._arcs:     a.set_phase('close')
+
+        self._prev_force_phase = phase
+
+        if self._force_open_active:
+            if all(p.phase_done() for p in self._polygons) and all(t.phase_done() for t in self._texts):
+                self._force_open_active = False
+
+        if self._force_close_active:
+            if all(p.phase_done() for p in self._polygons) and all(t.phase_done() for t in self._texts):
+                self._force_close_active = False
 
     def _tick_win_tweens(self) -> None:
         tweens = self._win_tweens
@@ -4374,6 +4811,26 @@ class AnimatedWindow:
     def tick(self, now: float) -> None:
         if self.hidden: return
         self._poll_phase_event()
+        if self._snap_tween_active:
+            elapsed = now - self._snap_tween_t0
+            dur     = self._snap_tween_dur
+            if elapsed >= dur:
+                self._cur_p1  = P(self._snap_to_p1x, self._snap_to_p1y)
+                self._cur_p2  = P(self._snap_to_p2x, self._snap_to_p2y)
+                self._snap_tween_active = False
+            else:
+                v = 1.0 - (1.0 - elapsed / dur) ** 5
+                self._cur_p1 = P(
+                    self._snap_from_p1x + (self._snap_to_p1x - self._snap_from_p1x) * v,
+                    self._snap_from_p1y + (self._snap_to_p1y - self._snap_from_p1y) * v,
+                )
+                self._cur_p2 = P(
+                    self._snap_from_p2x + (self._snap_to_p2x - self._snap_from_p2x) * v,
+                    self._snap_from_p2y + (self._snap_to_p2y - self._snap_from_p2y) * v,
+                )
+        if self._cur_phase == 'close' and self._is_done():
+            self._last_frame_time = now
+            return
         self._tick_win_tweens()
         self._tick_spawn(None, 
                         self._last_ipw if self._last_ipw > 0 else self.cam_w,
@@ -4403,6 +4860,12 @@ class AnimatedWindow:
         self._abs_ww = ww
         self._abs_wh = wh
         ipw, iph = int(ww), int(wh)
+        self._last_ipw = ipw
+        self._last_iph = iph
+
+        if self._cur_phase == 'close' and self._is_done():
+            return
+
         if ww > 0 and wh > 0:
             mx = SYS_MOUSE_X.value
             my = SYS_MOUSE_Y.value
@@ -4423,6 +4886,10 @@ class AnimatedWindow:
 
         # Polygons
         for p, pd in zip(self._polygons, self.defn.polygon_defs):
+            visible = _check_visible_threshold(pd, ww, wh, self.cam_w, self.cam_h)
+            p.hidden = not visible
+            if not visible:
+                continue
             ov = pd.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
@@ -4436,9 +4903,17 @@ class AnimatedWindow:
                     if _phase_key_exists(pd.phases or {}, phase):
                         p.set_phase(phase)
             p.update()
+
+        # Arc
+        for arc, ad in zip(self._arcs, self.defn.arc_defs):
+            arc.hidden = not _check_visible_threshold(ad, ww, wh, self.cam_w, self.cam_h)
         
         # Text
         for t, td in zip(self._texts, self.defn.text_defs):
+            visible = _check_visible_threshold(td, ww, wh, self.cam_w, self.cam_h)
+            t.hidden = not visible
+            if not visible:
+                continue
             ov = td.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
@@ -4454,14 +4929,22 @@ class AnimatedWindow:
             t.update()
         
         # Pie
-        for pie in self._pies: pie.update(ctx)
+        for pie, pd in zip(self._pies, self.defn.pie_defs):
+            pie.hidden = not _check_visible_threshold(pd, ww, wh, self.cam_w, self.cam_h)
+
+        # Graphs
+        for g, gd in zip(self._graphs, self.defn.graph_defs):
+            g.hidden = not _check_visible_threshold(gd, ww, wh, self.cam_w, self.cam_h)
 
         # Slider        
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
-        for sl  in self._sliders:  sl.update(int(ww), int(wh))
+        for sl, sd in zip(self._sliders, self.defn.slider_defs):
+            sl.hidden = not _check_visible_threshold(sd, ww, wh, self.cam_w, self.cam_h)
+            sl.update(int(ww), int(wh))
         
         # Button
         for btn, bd in zip(self._buttons, self.defn.button_defs):
+            btn._polygon.hidden = not _check_visible_threshold(bd, ww, wh, self.cam_w, self.cam_h)
             ov = bd.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
@@ -4478,7 +4961,8 @@ class AnimatedWindow:
             btn.update(int(ww), int(wh))
         
         # Textbox
-        for tb in self._textboxes:
+        for tb, tbd in zip(self._textboxes, self.defn.textbox_defs):
+            tb.hidden = not _check_visible_threshold(tbd, ww, wh, self.cam_w, self.cam_h)
             tb.update(int(ww), int(wh))
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         ipw, iph = int(ww), int(wh)
@@ -4505,6 +4989,45 @@ class AnimatedWindow:
         #     print(f'resetting {ev.name}, id={id(ev)}, was={ev.value}')
         #     ev.value = 'ignore'
         # _pulse_resets.clear()
+    
+    def draw(self, painter, widget_w, widget_h, ctx=None):
+        if self._cur_phase == 'close' and self._is_done():
+            return
+        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+        if ww <= 0 or wh <= 0:
+            return
+        scale = min(ww / self.cam_w, wh / self.cam_h)
+        painter.save()
+        painter.translate(wx, wy)
+        painter.setClipRect(QRectF(0, 0, ww, wh))
+        iww, iwh = int(ww), int(wh)
+
+        for poly in self._polygons:
+            poly.draw(painter, iww, iwh, self.cam_w, self.cam_h)
+        for arc in self._arcs:
+            arc.draw(painter, iww, iwh)
+        for text in self._texts:
+            if text.hidden: continue
+            text.draw_text(painter, iww, iwh, self.cam_w, self.cam_h, ctx, scale=scale)
+        for g in self._graphs:
+            g.draw(painter, iww, iwh, ctx, self.cam_w, self.cam_h)
+        for pie in self._pies:
+            pie.draw(painter, iww, iwh, self.cam_w, self.cam_h)
+        for sl in self._sliders:
+            sl.draw(painter, iww, iwh, scale=scale)
+        for btn in self._buttons:
+            btn.draw(painter, iww, iwh, scale=scale)
+        for tb in self._textboxes:
+            tb.draw(painter, iww, iwh, scale=scale)
+
+        for sw in self._sub_windows:
+            if sw.defn.spawn_event is not None:
+                continue
+            sw.draw(painter, iww, iwh, ctx)
+        for inst in self._spawned:
+            inst.window.draw(painter, iww, iwh, ctx)
+
+        painter.restore()
 
     def _to_local(self, mx: float, my: float, widget_w: int, widget_h: int) -> Tuple[float, float, float, float]:
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
@@ -4694,10 +5217,12 @@ class AnimatedWindow:
         if self._scaling_window:
             self._scaling_window = False
             self._scale_edge     = ''
+            self._start_snap_tween(time.monotonic())
             return True
 
         if self._dragging_window:
             self._dragging_window = False
+            self._start_snap_tween(time.monotonic())
             return True
 
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
@@ -4785,6 +5310,37 @@ class AnimatedWindow:
             if btn._hovered:
                 btn._hovered = False
                 btn._set_phase('unhover')
+    
+    def _snap_to_grid(self, p1x: float, p1y: float, p2x: float, p2y: float) -> Tuple[float, float, float, float]:
+        d = self.defn
+        gx, gy = max(1, d.grid_snap_x), max(1, d.grid_snap_y)
+        step_x = 1.0 / gx
+        step_y = 1.0 / gy
+        s_p1x = round(p1x / step_x) * step_x
+        s_p1y = round(p1y / step_y) * step_y
+        s_p2x = round(p2x / step_x) * step_x
+        s_p2y = round(p2y / step_y) * step_y
+        if s_p2x <= s_p1x: s_p2x = s_p1x + step_x
+        if s_p2y <= s_p1y: s_p2y = s_p1y + step_y
+        return s_p1x, s_p1y, s_p2x, s_p2y
+    
+    def _start_snap_tween(self, now: float) -> None:
+        d = self.defn
+        if not d.grid_snap or (d.grid_snap_x <= 1 and d.grid_snap_y <= 1):
+            return
+        s_p1x, s_p1y, s_p2x, s_p2y = self._snap_to_grid(self._cur_p1.x, self._cur_p1.y, self._cur_p2.x, self._cur_p2.y)
+        if (s_p1x == self._cur_p1.x and s_p1y == self._cur_p1.y and s_p2x == self._cur_p2.x and s_p2y == self._cur_p2.y):
+            return
+        self._snap_from_p1x = self._cur_p1.x
+        self._snap_from_p1y = self._cur_p1.y
+        self._snap_from_p2x = self._cur_p2.x
+        self._snap_from_p2y = self._cur_p2.y
+        self._snap_to_p1x   = s_p1x
+        self._snap_to_p1y   = s_p1y
+        self._snap_to_p2x   = s_p2x
+        self._snap_to_p2y   = s_p2y
+        self._snap_tween_t0     = now
+        self._snap_tween_active = True
 
     def _on_spawn_trigger(self, value) -> None:
         pass
@@ -4967,18 +5523,18 @@ class AnimatedWindow:
                 statics[d.px.x.index] if isinstance(d.px.x, _StaticRef) else d.px.x,
                 statics[d.px.y.index] if isinstance(d.px.y, _StaticRef) else d.px.y,
             )
-            new_color  = _resolve(d.color)
+            new_color  = _resolve(d.fill_color)
             new_pos_fn = _patch_pos_fn(d.pos_fn)
 
             pos_changed = any(isinstance(v, _StaticRef) for v in (d.p.x, d.p.y, d.px.x, d.px.y))
-            col_changed = new_color is not d.color
+            col_changed = new_color is not d.fill_color
             pfn_changed = new_pos_fn is not d.pos_fn
 
             if pos_changed or col_changed or pfn_changed:
                 text.defn = _tw_replace(text.defn,
                     p      = new_p,
                     px     = new_px,
-                    color  = new_color  if col_changed else d.color,
+                    fill_color  = new_color  if col_changed else d.fill_color,
                     pos_fn = new_pos_fn if pfn_changed else d.pos_fn,
                 )
             if pos_changed:
@@ -5030,7 +5586,7 @@ class AnimatedWindow:
                 tn_y  = statics[td.y.index]  if isinstance(td.y,  _StaticRef) else td.y
                 tn_px = statics[td.px.index] if isinstance(td.px, _StaticRef) else td.px
                 tn_py = statics[td.py.index] if isinstance(td.py, _StaticRef) else td.py
-                tn_color  = _resolve(td.color)
+                tn_color  = _resolve(td.fill_color)
                 tn_pos_fn = _patch_pos_fn(td.pos_fn)
 
                 if any(isinstance(v, _StaticRef) for v in (td.x, td.y, td.px, td.py)):
@@ -5041,8 +5597,8 @@ class AnimatedWindow:
                     t.cur_px = tn_px; t._spx = tn_px
                     t.cur_py = tn_py; t._spy = tn_py
                     t._dirty = True
-                if tn_color is not td.color:
-                    t.defn     = _tw_replace(t.defn, color=tn_color)
+                if tn_color is not td.fill_color:
+                    t.defn     = _tw_replace(t.defn, fill_color=tn_color)
                     t.cur_color = QColor(tn_color)
                     t._sc       = QColor(tn_color)
                 if tn_pos_fn is not td.pos_fn:
@@ -5076,41 +5632,6 @@ class AnimatedWindow:
         text_done = all(t.phase_done() for t in self._texts)
         btn_done  = all(b.phase_done() for b in self._buttons)
         return poly_done and text_done and btn_done
-
-    def draw(self, painter, widget_w, widget_h, ctx=None):
-        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
-        if ww <= 0 or wh <= 0:
-            return
-        scale = min(ww / self.cam_w, wh / self.cam_h)
-        painter.save()
-        painter.translate(wx, wy)
-        painter.setClipRect(QRectF(0, 0, ww, wh))
-        iww, iwh = int(ww), int(wh)
-
-        for poly in self._polygons:
-            poly.draw(painter, iww, iwh, self.cam_w, self.cam_h)
-        for text in self._texts:
-            if text.hidden: continue
-            text.draw_text(painter, iww, iwh, self.cam_w, self.cam_h, ctx, scale=scale)
-        for g in self._graphs:
-            g.draw(painter, iww, iwh, ctx, self.cam_w, self.cam_h)
-        for pie in self._pies:
-            pie.draw(painter, iww, iwh, self.cam_w, self.cam_h)
-        for sl in self._sliders:
-            sl.draw(painter, iww, iwh, scale=scale)
-        for btn in self._buttons:
-            btn.draw(painter, iww, iwh, scale=scale)
-        for tb in self._textboxes:
-            tb.draw(painter, iww, iwh, scale=scale)
-
-        for sw in self._sub_windows:
-            if sw.defn.spawn_event is not None:
-                continue
-            sw.draw(painter, iww, iwh, ctx)
-        for inst in self._spawned:
-            inst.window.draw(painter, iww, iwh, ctx)
-
-        painter.restore()
 
     def _clamp_to_boundary(self, parent_w: int, parent_h: int) -> None:
         d = self.defn
@@ -5216,7 +5737,7 @@ class EventDef:
 
 @dataclass
 class EventListener:
-    value_fn:         Callable[[Any], Any]
+    value_fn:         Callable[[Any], Any]             = None
     targets:          List[EventDef]                   = field(default_factory=list)
     passthrough:      bool                             = False
     transform:        Optional[Callable[[Any], Any]]   = None
@@ -5387,6 +5908,19 @@ def _reset_phase_override_event(ov) -> None:
                     return
     except Exception:
         pass
+
+def _check_visible_threshold(defn: Any, ww: float, wh: float, cam_w: int, cam_h: int) -> bool:
+    tx = defn.visible_threshold_x
+    ty = defn.visible_threshold_y
+    if tx > 0.0:
+        px_thresh = tx * cam_w if tx <= 1.0 else tx
+        if ww < px_thresh:
+            return False
+    if ty > 0.0:
+        py_thresh = ty * cam_h if ty <= 1.0 else ty
+        if wh < py_thresh:
+            return False
+    return True
 
 
 
@@ -5567,7 +6101,7 @@ def _flip_polygon_def(defn: PolygonDef, h: bool, v: bool) -> PolygonDef:
                 px            = _pxs(tw.px) if tw.px is not None else None,
                 fill_color    = tw.fill_color,
                 outline_color = tw.outline_color,
-                line_width    = tw.line_width,
+                outline_width    = tw.outline_width,
                 draw_progress = tw.draw_progress,
                 start         = tw.start,
                 dur           = tw.dur,
@@ -5590,7 +6124,7 @@ def _flip_polygon_def(defn: PolygonDef, h: bool, v: bool) -> PolygonDef:
         px            = _pxs(defn.px) if defn.px is not None else None,
         fill_color    = defn.fill_color,
         outline_color = defn.outline_color,
-        line_width    = defn.line_width,
+        outline_width    = defn.outline_width,
         uniform_scale = defn.uniform_scale,
         closed        = defn.closed,
         draw_progress = defn.draw_progress,
@@ -5634,6 +6168,16 @@ def _draw_partial_polyline(painter: QPainter, pts: List[QPointF], t: float) -> N
             painter.drawLine(pts[i], QPointF(pts[i].x() + (pts[i+1].x() - pts[i].x()) * frac, pts[i].y() + (pts[i+1].y() - pts[i].y()) * frac))
             break
 
+
+def _resolve_rotation(cur_rot_center_p, cur_rot_center_px, cur_rot_target_p, cur_rot_target_px, cur_rot_angle_initial, cur_rot_angle, ww: int, wh: int) -> Optional[Tuple[float, float, float]]:
+    net = cur_rot_angle - cur_rot_angle_initial
+    if net == 0.0:
+        return None
+
+    cx = cur_rot_center_p.x * ww + cur_rot_center_px.x
+    cy = cur_rot_center_p.y * wh + cur_rot_center_px.y
+
+    return cx, cy, net
 
 
 # ──────────────────────── PHASE KEYS ────────────────────────
