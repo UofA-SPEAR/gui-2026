@@ -15,14 +15,26 @@ import time
 from typing import Dict, Any
 
 from spear_gui.overlay_system import (
+    expand_defs,
     AnimatedPolygon, AnimatedText, AnimatedGraph, AnimatedPie, AnimatedWindow, DataChannel,
-    SYS_MOUSE_ABS_X, SYS_MOUSE_ABS_Y
-)
-from spear_gui.main_gui_defs import (
-    MAIN_POLYGON_DEFS, MAIN_TEXT_DEFS, MAIN_GRAPH_DEFS,
-    MAIN_PIE_DEFS, MAIN_WINDOW_DEFS,
+    SYS_MOUSE_ABS_X, SYS_MOUSE_ABS_Y,
 )
 
+# main_gui_defs imports
+import spear_gui.defs_02_shared_events
+import spear_gui.defs_03_shared_gradients
+import spear_gui.defs_04_startup
+import spear_gui.defs_05_map
+import spear_gui.defs_06_logger
+import spear_gui.defs_07_info_display
+import spear_gui.defs_08_arm_visual
+import spear_gui.defs_09_tasks
+import spear_gui.defs_99_test
+
+
+from spear_gui.overlay_system import get_ordered_windows
+
+MAIN_WINDOW_DEFS = get_ordered_windows()
 
 
 
@@ -113,28 +125,16 @@ class MainOverlayWidget(QWidget):
         self.setFocus()
         self.setWindowFlags(Qt.FramelessWindowHint)
 
-        self._polygons = [AnimatedPolygon(d) for d in MAIN_POLYGON_DEFS]
-        self._texts    = [AnimatedText(d)    for d in MAIN_TEXT_DEFS]
-        self._graphs   = [AnimatedGraph(d)   for d in MAIN_GRAPH_DEFS]
-        self._pies     = [AnimatedPie(d)     for d in MAIN_PIE_DEFS]
-        self._windows  = [AnimatedWindow(d)  for d in MAIN_WINDOW_DEFS]
+        self._windows  = [AnimatedWindow(d) for d in MAIN_WINDOW_DEFS]
+        self._win_cache: Dict[int, QPixmap] = {}
 
-        self._broadcast('open')
+        for win in self._windows:
+            win._broadcast('open')
 
-        self._active_timer = QTimer(self)
-        self._active_timer.setInterval(16)
-        self._active_timer.timeout.connect(self._tick)
-        self._active_timer.start()
-
-        self._idle_timer = QTimer(self)
-        self._idle_timer.setInterval(100)
-        self._idle_timer.timeout.connect(self._tick)
-
-        self._needs_repaint = True
-
-    def _broadcast(self, phase: str):
-        for p in self._polygons: p.set_phase(phase)
-        for t in self._texts:    t.set_phase(phase)
+        self._tick_timer = QTimer(self)
+        self._tick_timer.setInterval(self.TICK_MS)
+        self._tick_timer.timeout.connect(self._tick)
+        self._tick_timer.start()
 
     def _context(self) -> Dict[str, Any]:
         return self._node.sub_manager.context()
@@ -142,29 +142,33 @@ class MainOverlayWidget(QWidget):
     def _tick(self):
         ctx = self._context()
         now = time.monotonic()
-        for p in self._polygons: p.update()
-        for t in self._texts:    t.update()
-        for g in self._graphs:   g.tick(now)
-        for pie in self._pies:   pie.update(ctx)
         for win in self._windows:
             win.tick(now)
             win.update(ctx, self.width(), self.height())
+        self.update()
 
-        needs = (
-            any(not p.phase_done() or p._dirty for p in self._polygons) or
-            any(not t.phase_done() or t._dirty for t in self._texts)    or
-            any(not win._is_done() for win in self._windows)            or
-            self._needs_repaint
-        )
-        self._needs_repaint = False
+    def _is_fully_static(self, win) -> bool:
+        return (win._cur_phase not in ('', 'close') and
+                win._is_done() and
+                not win._graphs and
+                not win._spawned)
 
-        if needs:
-            self._active_timer.start()
-            self._idle_timer.stop()
-            self.update()
+    def _draw_with_cache(self, painter, win, w, h, ctx):
+        from PySide6.QtGui import QPixmap
+        wid = id(win.defn)
+        if self._is_fully_static(win):
+            if wid not in self._win_cache:
+                pix = QPixmap(w, h)
+                pix.fill(Qt.transparent)
+                p2 = QPainter(pix)
+                p2.setRenderHint(QPainter.RenderHint.Antialiasing)
+                win.draw(p2, w, h, ctx)
+                p2.end()
+                self._win_cache[wid] = pix
+            painter.drawPixmap(0, 0, self._win_cache[wid])
         else:
-            self._active_timer.stop()
-            self._idle_timer.start()
+            self._win_cache.pop(wid, None)
+            win.draw(painter, w, h, ctx)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
@@ -203,14 +207,9 @@ class MainOverlayWidget(QWidget):
             if win.mouse_press(mx, my, self.width(), self.height()): break
 
     def mouseMoveEvent(self, event):
-        SYS_MOUSE_ABS_X.value = event.x()
-        SYS_MOUSE_ABS_Y.value = event.y()
         mx, my = event.position().x(), event.position().y()
         for win in self._windows:
             win.mouse_move(mx, my, self.width(), self.height())
-        self._needs_repaint = True
-        self._active_timer.start()
-        self._idle_timer.stop()
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.LeftButton: return
@@ -218,44 +217,27 @@ class MainOverlayWidget(QWidget):
         for win in self._windows:
             if win.mouse_release(mx, my, self.width(), self.height()): break
 
-    def resizeEvent(self, event):
-        self._needs_repaint = True
-        super().resizeEvent(event)
-
     def leaveEvent(self, event):
         for win in self._windows: win.mouse_leave()
+
+    def resizeEvent(self, event):
+        self._win_cache.clear()
+        super().resizeEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         if not painter.isActive():
             painter.end()
             return
+        painter.setClipRegion(event.region())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.NoPen)
 
         w, h = self.width(), self.height()
         ctx  = self._context()
 
-        for poly in self._polygons:
-            poly.draw(painter, w, h, cam_w=1920, cam_h=1080)
-        for text in self._texts:
-            if text.hidden: continue
-            label = text.resolve_text(ctx)
-            if not label: continue
-            font = text.build_font()
-            if text._cached_fm is None:
-                text._cached_fm = QFontMetrics(font)
-            painter.setFont(font)
-            painter.setPen(text.cur_color)
-            dx, dy = text.resolve_pos(w, h, 1920, 1080, label, font)
-            painter.drawText(dx, dy, label)
-            painter.setPen(Qt.NoPen)
-        for g in self._graphs:
-            g.draw(painter, w, h, ctx)
-        for pie in self._pies:
-            pie.draw(painter, w, h)
         for win in self._windows:
-            win.draw(painter, w, h, ctx)
+            self._draw_with_cache(painter, win, w, h, ctx)
 
         painter.end()
 

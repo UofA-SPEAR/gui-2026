@@ -1,3 +1,6 @@
+# This file is kept as a reference from testing objects to work.
+# Note that this file will not be maintained, so most objects in here may not work correctly.
+
 from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -7,6 +10,7 @@ from PySide6.QtGui  import QColor
 from spear_gui.overlay_system import (
     P, Reset, Phase, expand_defs,
     PolygonDef, PolygonTween, RectDef, RectTween, # PolygonDef
+    ArcDef, # ArcDef
     TextDef, TextTween, TextBlock, DataTable, # TextDef
     SliderDef, # SliderDef
     ButtonDef, SegmentedButtons, Segment, SevenSegmentDisplay, # ButtonDef
@@ -181,10 +185,13 @@ MAIN_WINDOW_DEFS = [
 
     WindowDef(
         p1=P(0.0, 0.0), p2=P(1.0, 1.0),
-        # polygon_defs=[
-        #     PolygonDef(p=[P(0, 0), P(0, 0), P(0, 1), P(0, 1)], px=[P(0, 0), P(50, 50), P(50, -50), P(0, 0)], fill_color=QColor(255, 255, 255, 255),
-        #     pos_fn=lambda: [P(0, 0), P(SYS_MOUSE_X.value / 10, SYS_MOUSE_Y.value / 10), P(SYS_MOUSE_X.value / 10, SYS_MOUSE_Y.value / 10), P(0, 0)]),
-        # ],
+        polygon_defs=[
+            # PolygonDef(p=[P(0, 0), P(0, 0), P(0, 1), P(0, 1)], px=[P(0, 0), P(50, 50), P(50, -50), P(0, 0)], fill_color=QColor(255, 255, 255, 255),
+            # pos_fn=lambda: [P(0, 0), P(SYS_MOUSE_X.value / 10, SYS_MOUSE_Y.value / 10), P(SYS_MOUSE_X.value / 10, SYS_MOUSE_Y.value / 10), P(0, 0)]),
+            PolygonDef(p=[P(0.5, 0.5)]*4, px=[P(-100, -5), P(100, -5), P(100, 5), P(-100, 5)], fill_color=QColor(255, 255, 255, 255), rot_center_p=P(0.5, 0.5), rot_target_p=P(0.5, 0.5), rot_angle_initial=0, phases={
+                'open': Phase([PolygonTween(rot_angle=700, start=0, dur=5.0, ease=QEasingCurve.OutQuint)])
+            }),
+        ],
         text_defs=[
             # TextDef(
             #     p=P(0.5, 0.5), px=P(-100, -150), text='LAUNCHING', bold=True, italic=True, v_align=1, font_size=100, color=QColor(255,255,255,0), outline_width=2,
@@ -364,6 +371,9 @@ MAIN_WINDOW_DEFS = [
                 }
             )
         ],
+        arc_defs=[
+            ArcDef(center_p=P(0.5, 0.5), inner_p=P(0.55, 0.5), outer_p=P(0.6, 0.5), angle_start=0, angle_end=45/4)
+        ],
         text_defs=[
             TextDef(p=P(0.9, 0.5), px=P(7, 0), h_align=0, text = 'test_value1', uniform_scale=False),
             TextDef(p=P(0.9, 0.5), px=P(-7, 0), h_align=1, text_fn = lambda ctx: ctx['test_value1']['push_count'], uniform_scale=False),
@@ -381,7 +391,6 @@ MAIN_WINDOW_DEFS = [
         polygon_defs=[
             RectDef(p1=P(0.0, 0.0), p2=P(1.0, 1.0), fill_color=QColor(255, 255, 255, 10), outline_color=QColor(255, 255, 255, 255), line_width=1),
             PolygonDef(p=[P(0.5, 0.5)]*4, px=[P(-10, 0), P(0, -10), P(10, 0), P(0, 10)], fill_color=QColor(200, 200, 255, 255)),
-           
         ],
         text_defs=[
             TextDef(p=P(0.5, 0), px=P(0, 2), font_size=20, v_align=0, text='N', uniform_scale=False),
@@ -891,15 +900,15 @@ MAIN_WINDOW_DEFS = [
             # ButtonDef(key=Qt.Key_A, action='increment', continuous_update=True, event_out=_ev['square_x'], event_delta=-100),
             # ButtonDef(key=Qt.Key_D, action='increment', continuous_update=True, event_out=_ev['square_x'], event_delta=100),
             # # Row 1
-            # *SevenSegmentDisplay(p1=P(0.20, 0.19), p2=P(0.32, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte1-1']),
-            # *SevenSegmentDisplay(p1=P(0.36, 0.19), p2=P(0.48, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte2-1']),
-            # *SevenSegmentDisplay(p1=P(0.52, 0.19), p2=P(0.64, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte3-1']),
-            # *SevenSegmentDisplay(p1=P(0.68, 0.19), p2=P(0.80, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte4-1']),
-            # # Row 2
-            # *SevenSegmentDisplay(p1=P(0.20, 0.49), p2=P(0.32, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte1-2']),
-            # *SevenSegmentDisplay(p1=P(0.36, 0.49), p2=P(0.48, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte2-2']),
-            # *SevenSegmentDisplay(p1=P(0.52, 0.49), p2=P(0.64, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte3-2']),
-            # *SevenSegmentDisplay(p1=P(0.68, 0.49), p2=P(0.80, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte4-2']),
+            *SevenSegmentDisplay(p1=P(0.20, 0.19), p2=P(0.32, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte1-1']),
+            *SevenSegmentDisplay(p1=P(0.36, 0.19), p2=P(0.48, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte2-1']),
+            *SevenSegmentDisplay(p1=P(0.52, 0.19), p2=P(0.64, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte3-1']),
+            *SevenSegmentDisplay(p1=P(0.68, 0.19), p2=P(0.80, 0.21), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte4-1']),
+            # Row 2
+            *SevenSegmentDisplay(p1=P(0.20, 0.49), p2=P(0.32, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte1-2']),
+            *SevenSegmentDisplay(p1=P(0.36, 0.49), p2=P(0.48, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte2-2']),
+            *SevenSegmentDisplay(p1=P(0.52, 0.49), p2=P(0.64, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte3-2']),
+            *SevenSegmentDisplay(p1=P(0.68, 0.49), p2=P(0.80, 0.51), px1=P(0, 0), px2=P(0, 0), event_out=_ev['hardware_fault_byte4-2']),
 
 
             # ButtonDef(key=Qt.Key_W, action='set', event_out=_ev['new_log'], event_delta=True),
