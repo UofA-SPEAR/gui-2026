@@ -8,6 +8,7 @@ from std_msgs.msg import Float64
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPainter, QFontDatabase
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from dataclasses import dataclass, field
 
@@ -110,7 +111,7 @@ class MainNode(Node):
             pub.publish(msg)
 
 
-class MainOverlayWidget(QWidget):
+class MainOverlayWidget(QOpenGLWidget):
     TICK_MS = 16
 
     def __init__(self, node: MainNode, parent=None):
@@ -161,7 +162,9 @@ class MainOverlayWidget(QWidget):
                 pix = QPixmap(w, h)
                 pix.fill(Qt.transparent)
                 p2 = QPainter(pix)
-                p2.setRenderHint(QPainter.RenderHint.Antialiasing)
+                # p2.setRenderHint(QPainter.RenderHint.Antialiasing)
+                p2.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                p2.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
                 win.draw(p2, w, h, ctx)
                 p2.end()
                 self._win_cache[wid] = pix

@@ -1141,6 +1141,8 @@ class AnimatedPolygon(_TweenDriver):
         self._dynamic_px_h: int = 0
         self._pos_offset: List[P] = [P(0.0, 0.0)] * len(defn.p)
 
+        self._cur_phase = ''
+
 
     # ── _TweenDriver hooks ───────────────────────────────────────
 
@@ -1297,7 +1299,19 @@ class AnimatedPolygon(_TweenDriver):
             self._dirty = True
 
     def phase_done(self) -> bool:
-        return self._is_done()
+        if self._cur_phase == 'close' and self._is_done():
+            has_always = any(
+                not d._stopped
+                for p in self._polygons
+                for d in p._always_drivers.values()
+            )
+            if not has_always:
+                return
+            # still running if any always driver is active
+            for driver in self._always_drivers.values():
+                if not driver._stopped:
+                    return False
+            return True
 
     # ── Geometry ─────────────────────────────────────────────────
 
@@ -1409,8 +1423,8 @@ class AnimatedPolygon(_TweenDriver):
         effective_fill    = self._always_fill_color    if self._always_fill_color    is not None else self.cur_fill_color
         effective_outline = self._always_outline_color if self._always_outline_color is not None else self.cur_outline_color
         lw         = self.cur_line_width
-        has_fill    = self.defn.closed and (effective_fill.alpha() > 0 or self.defn.gradient is not None)
         gd = self.defn.gradient
+        has_fill    = self.defn.closed and (effective_fill.alpha() > 0 or (gd is not None and gd.target == 'fill'))
         has_gradient_outline = gd is not None and gd.target == 'outline'
         has_outline = lw > 0 and (effective_outline.alpha() > 0 or has_gradient_outline)
         is_open     = not self.defn.closed
@@ -4662,10 +4676,20 @@ class AnimatedWindow:
 
         self._force_open_active:  bool = False
         self._force_close_active: bool = False
+        self._force_open_done:    bool = False
         self._prev_force_phase:   str  = ''
+        self._force_open_pending: bool = defn.force_open
 
         if defn.spawn_event is None:
-            self._broadcast('open')
+            initial_phase = 'open'
+            if defn.phase_event is not None and defn.phase_event is not GROUP_EVENT:
+                ev = defn.phase_event
+                if isinstance(ev, (list, tuple)):
+                    val = str(ev[0].value) if ev[0].value else 'open'
+                else:
+                    val = str(ev.value) if ev.value else 'open'
+                initial_phase = val
+            self._broadcast(initial_phase)
         else:
             self.hidden = True
 
@@ -4761,25 +4785,25 @@ class AnimatedWindow:
     
     def _poll_force_phases(self) -> None:
         d = self.defn
-        phase = self._cur_phase
 
-        if d.force_open and phase == 'open' and not self._force_open_active and self._prev_force_phase != 'open':
+        if d.force_open and not self._force_open_active and not self._force_open_done:
             self._force_open_active = True
             for p in self._polygons: p.set_phase('open')
             for t in self._texts:    t.set_phase('open')
             for a in self._arcs:     a.set_phase('open')
 
-        if d.force_close and phase == 'close' and not self._force_close_active and self._prev_force_phase != 'close':
+        if d.force_close and self._cur_phase == 'close' and self._prev_force_phase != 'close' and not self._force_close_active:
             self._force_close_active = True
             for p in self._polygons: p.set_phase('close')
             for t in self._texts:    t.set_phase('close')
             for a in self._arcs:     a.set_phase('close')
 
-        self._prev_force_phase = phase
+        self._prev_force_phase = self._cur_phase
 
         if self._force_open_active:
             if all(p.phase_done() for p in self._polygons) and all(t.phase_done() for t in self._texts):
                 self._force_open_active = False
+                self._force_open_done   = True
 
         if self._force_close_active:
             if all(p.phase_done() for p in self._polygons) and all(t.phase_done() for t in self._texts):
@@ -4829,8 +4853,14 @@ class AnimatedWindow:
                     self._snap_from_p2y + (self._snap_to_p2y - self._snap_from_p2y) * v,
                 )
         if self._cur_phase == 'close' and self._is_done():
-            self._last_frame_time = now
-            return
+            has_always = any(
+                not d._stopped
+                for p in self._polygons
+                for d in p._always_drivers.values()
+            )
+            if not has_always:
+                self._last_frame_time = now
+                return
         self._tick_win_tweens()
         self._tick_spawn(None, 
                         self._last_ipw if self._last_ipw > 0 else self.cam_w,
@@ -4865,6 +4895,18 @@ class AnimatedWindow:
 
         if self._cur_phase == 'close' and self._is_done():
             return
+        
+        if self._force_open_pending:
+            # first frame: trigger open on all polygons/texts/arcs
+            if not hasattr(self, '_force_open_triggered'):
+                self._force_open_triggered = True
+                for p in self._polygons: p.set_phase('open')
+                for t in self._texts:    t.set_phase('open')
+                for a in self._arcs:     a.set_phase('open')
+            # wait until all done
+            if all(p.phase_done() for p in self._polygons) and \
+            all(t.phase_done() for t in self._texts):
+                self._force_open_pending = False
 
         if ww > 0 and wh > 0:
             mx = SYS_MOUSE_X.value
@@ -4886,10 +4928,21 @@ class AnimatedWindow:
 
         # Polygons
         for p, pd in zip(self._polygons, self.defn.polygon_defs):
+            has_active_always = any(
+                not d._stopped for d in p._always_drivers.values()
+            ) if p._always_drivers else False
+
+            if self._force_open_pending or self._force_close_active:
+                p.update()
+                continue
+
             visible = _check_visible_threshold(pd, ww, wh, self.cam_w, self.cam_h)
             p.hidden = not visible
             if not visible:
+                if has_active_always:
+                    p.update()  # must still update always drivers even if hidden
                 continue
+
             ov = pd.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
