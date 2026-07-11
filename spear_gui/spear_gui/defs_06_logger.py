@@ -24,8 +24,13 @@ from spear_gui.overlay_system import (
     get_spawn_event, GROUP_EVENT, STATIC, get_spawn_mouse_norm
 )
 
+register_event(EventDef(name="bobby", value=2))
+
 WINDOW_LAYER = 0
 
 WINDOW_DEFS = []
 
 register_windows(WINDOW_LAYER, WINDOW_DEFS)
+
+# pretend all subscriptions exist already
+# to get a value from subscription: lambda ctx: ctx['test_value5']['latest']

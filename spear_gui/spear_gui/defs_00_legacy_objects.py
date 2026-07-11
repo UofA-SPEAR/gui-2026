@@ -382,6 +382,7 @@ MAIN_WINDOW_DEFS = [
         ]
     ),
 
+    # Map
     WindowDef(
         p1=P(0.0, 0.0), p2=P(0.0, 0.0), px1=P(0, 0), px2=P(400, 400),
         listener_defs=[
