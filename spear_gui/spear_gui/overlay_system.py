@@ -1423,8 +1423,8 @@ class AnimatedPolygon(_TweenDriver):
         effective_fill    = self._always_fill_color    if self._always_fill_color    is not None else self.cur_fill_color
         effective_outline = self._always_outline_color if self._always_outline_color is not None else self.cur_outline_color
         lw         = self.cur_line_width
-        has_fill    = self.defn.closed and (effective_fill.alpha() > 0 or self.defn.gradient is not None)
         gd = self.defn.gradient
+        has_fill    = self.defn.closed and (effective_fill.alpha() > 0 or (gd is not None and gd.target == 'fill'))
         has_gradient_outline = gd is not None and gd.target == 'outline'
         has_outline = lw > 0 and (effective_outline.alpha() > 0 or has_gradient_outline)
         is_open     = not self.defn.closed

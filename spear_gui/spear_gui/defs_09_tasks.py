@@ -26,6 +26,21 @@ from spear_gui.overlay_system import (
 
 WINDOW_LAYER = 0
 
-WINDOW_DEFS = []
+WINDOW_DEFS = [
+    WindowDef(
+        p1=P(1.1, 0.0), p2=P(1.6, 1.0),
+        phase_event=get_event('main_page'),
+        phases={
+            'open': Phase([WindowTween(p1=P(0.5, 0.0), p2=P(1.0, 1.0), start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)])
+        },
+        polygon_defs=[
+            # RectDef(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(255, 255, 255, 0), outline_width=5, gradient=get_gradient('alt_color_outline'))
+            PolygonDef(p=[P(0, 0), P(0, 0), P(0, 0), P(0, 1), P(0, 1), P(0, 1)], px=[P(0, 50), P(5, 50 - 5), P(10, 50), P(10, -50), P(5, -50 + 5), P(0, -50)], gradient=get_gradient('alt_color_fill'))
+        ],
+        text_defs=[
+            TextDef(p=P(0, 0), px=P(1, 1), text='TASKS', font_size=100, bold=True, italic=True, h_align=0.0, v_align=0.0, fill_color=QColor(255, 255, 255, 150), outline_color=QColor(255, 255, 255, 255), outline_width=2, uniform_scale=False)
+        ]
+    )
+]
 
 register_windows(WINDOW_LAYER, WINDOW_DEFS)

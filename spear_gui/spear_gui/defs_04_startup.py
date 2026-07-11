@@ -77,7 +77,7 @@ for i in range(len(subscription_list)):
     name = f'sub_sample_pulse{i}'
     name_solid = f'sub_sample_pulse{i}_solid'
     delay = 0.05 * i
-    register_event(EventDef(name=name, value=None))
+    register_event(EventDef(name=name, value=0))
     register_gradient(GradientDef(
         name=name, p1=P(target_x, target_y), p2=P(target_x, target_y), px1=P(0, 0), px2=P(-60, 0), target='fill', phase_event=get_event(name),
         stops=[GradientStop(0.0, QColor(100, 0, 0, 255)), GradientStop(1.0, QColor(255, 0, 0, 0))], 
@@ -121,9 +121,15 @@ for i in range(len(subscription_list)):
     ]
 subscription_window = WindowDef(p1=P(0.0, 0.0), p2=P(1.0, 1.0), force_open=True, phase_event=get_event('startup_subscription_phase'), listener_defs = subscription_listeners, polygon_defs = subscription_polygons, text_defs = subscription_texts)
 
-# ──────────────────────── SUBSCRIPTION VALUES ────────────────────────
+def count_data_received():
+    num = 0
+    for i in range(len(subscription_list)):
+        name = f'sub_sample_pulse{i}'
+        if get_event(name).value > 0:
+            num += 1
+    return num
 
-#
+# ──────────────────────── SUBSCRIPTION VALUES ────────────────────────
 
 register_event(EventDef(name='startup_phase', value='close'))
 register_event(EventDef(name='startup_phase_flip', value='open'))
@@ -292,24 +298,24 @@ startup_window = WindowDef(
 
         PolygonDef(p=[P(0, 5)]*4, px=[P(5, -71), P(15, -61), P(15, -60), P(5, -70)], gradient=get_gradient('alt_color_fill_translucent'), phase_override=get_event('startup_phase'), phases={
             'open': Phase([PolygonTween(p=[P(0, 1)]*4, start=0, dur=0.0, ease=QEasingCurve.OutQuint)]),
-            'always': Phase([PolygonTween(px=[P(0, -200), P(0, -200), P(0, 0), P(0, 0)], start=0.0, dur=5.0, ease=QEasingCurve.InOutSine),
-                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=5.0, dur=5.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
+            'always': Phase([PolygonTween(px=[P(0, -200), P(0, -200), P(0, 0), P(0, 0)], start=0.0, dur=20.0, ease=QEasingCurve.InOutSine),
+                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=20.0, dur=20.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
         }),
         PolygonDef(p=[P(0, 1)]*4, px=[P(5, -70), P(15, -60), P(15, -60), P(5, -70)], gradient=get_gradient('alt_color_fill'), phase_override=get_event('startup_phase'), phases={
             'open': Phase([PolygonTween(px=[P(5, -110), P(15, -100), P(15, -60), P(5, -70)], start=0, dur=1.0, ease=QEasingCurve.OutQuint)]),
-            'always': Phase([PolygonTween(px=[P(0, -200), P(0, -200), P(0, -200), P(0, -200)], start=0.0, dur=5.0, ease=QEasingCurve.InOutSine),
-                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=5.0, dur=5.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
+            'always': Phase([PolygonTween(px=[P(0, -200), P(0, -200), P(0, -200), P(0, -200)], start=0.0, dur=20.0, ease=QEasingCurve.InOutSine),
+                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=20.0, dur=20.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
         }),
 
         PolygonDef(p=[P(1, 5)]*4, px=[P(-5, 71), P(-15, 61), P(-15, 60), P(-5, 70)], gradient=get_gradient('alt_color_fill_translucent'), phase_override=get_event('startup_phase'), phases={
             'open': Phase([PolygonTween(p=[P(1, 0)]*4, start=0, dur=0.0, ease=QEasingCurve.OutQuint)]),
-            'always': Phase([PolygonTween(px=[P(0, 200), P(0, 200), P(0, 0), P(0, 0)], start=0.0, dur=5.0, ease=QEasingCurve.InOutSine),
-                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=5.0, dur=5.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
+            'always': Phase([PolygonTween(px=[P(0, 200), P(0, 200), P(0, 0), P(0, 0)], start=0.0, dur=20.0, ease=QEasingCurve.InOutSine),
+                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=20.0, dur=20.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
         }),
         PolygonDef(p=[P(1, 0)]*4, px=[P(-5, 70), P(-15, 60), P(-15, 60), P(-5, 70)], gradient=get_gradient('alt_color_fill'), phase_override=get_event('startup_phase'), phases={
             'open': Phase([PolygonTween(px=[P(-5, 110), P(-15, 100), P(-15, 60), P(-5, 70)], start=0, dur=1.0, ease=QEasingCurve.OutQuint)]),
-            'always': Phase([PolygonTween(px=[P(0, 200), P(0, 200), P(0, 200), P(0, 200)], start=0.0, dur=5.0, ease=QEasingCurve.InOutSine),
-                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=5.0, dur=5.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
+            'always': Phase([PolygonTween(px=[P(0, 200), P(0, 200), P(0, 200), P(0, 200)], start=0.0, dur=20.0, ease=QEasingCurve.InOutSine),
+                             PolygonTween(px=[P(0, 0), P(0, 0), P(0, 0), P(0, 0)], start=20.0, dur=20.0, ease=QEasingCurve.InOutSine)], loop=True, stop_phases=['close']),
         }),
 
 
@@ -345,7 +351,8 @@ startup_window = WindowDef(
             }
         ),
         TextDef(
-            p=P(1, 0.5), px=P(-100, 12), text='0/10', font_size=20, h_align=1.0, v_align=0.0, char_display=0, sub_char_clip=True, backward=True, fill_color=QColor(255,255,255,255),
+            p=P(1, 0.5), px=P(-100, 12), text='<#>/<#>', font_size=20, h_align=1.0, v_align=0.0, char_display=0, sub_char_clip=True, backward=True, fill_color=QColor(255,255,255,255),
+            text_fn=lambda ctx: [10, count_data_received()],
             phase_override=get_event('startup_phase'), phases={
                 'open': Phase([TextTween(char_display=1, start=0.9, dur=1.0, ease=QEasingCurve.OutQuint)])
             }
@@ -353,6 +360,12 @@ startup_window = WindowDef(
         # Time
         TextDef(
             p=P(0.5, 0), px=P(0, 1), text='- <#> -', font_size=15, h_align=0.5, v_align=0.0, fill_color=QColor(0,0,0,0), text_fn=lambda ctx: datetime.now(ZoneInfo('America/Edmonton')).time().replace(microsecond=0),
+            phase_override=get_event('startup_phase'), phases={
+                'open': Phase([TextTween(fill_color=QColor(0, 0, 0, 255), start=0.5, dur=1.0, ease=QEasingCurve.OutQuint)])
+            }
+        ),
+        TextDef(
+            p=P(0.5, 1), px=P(0, 0), text='SPEAR', font_size=15, h_align=0.5, v_align=1.0, fill_color=QColor(0,0,0,0),
             phase_override=get_event('startup_phase'), phases={
                 'open': Phase([TextTween(fill_color=QColor(0, 0, 0, 255), start=0.5, dur=1.0, ease=QEasingCurve.OutQuint)])
             }
@@ -378,7 +391,13 @@ startup_window = WindowDef(
             }
         ),
         TextDef(
-            p=P(1, 0.5), px=P(-495, 30), text='FORCE PROCEED', font_size=13, h_align=0.0, v_align=1.0, char_display=0, sub_char_clip=True, fill_color=QColor(100,100,100,255),
+            p=P(1, 0.5), px=P(-495, 30), text='FORCE PROCEED ➡', font_size=13, h_align=0.0, v_align=1.0, char_display=0, sub_char_clip=True, fill_color=QColor(100,100,100,255),
+            phase_override=get_event('startup_phase'), phases={
+                'open': Phase([TextTween(char_display=1, start=1.0, dur=1.0, ease=QEasingCurve.OutQuint)])
+            }
+        ),
+        TextDef(
+            p=P(1, 0.5), px=P(-300, 11), text='SHIFT + SPACE', italic=True, font_size=8, h_align=0.0, v_align=0, char_display=0, sub_char_clip=True, fill_color=QColor(100,100,100,255),
             phase_override=get_event('startup_phase'), phases={
                 'open': Phase([TextTween(char_display=1, start=1.0, dur=1.0, ease=QEasingCurve.OutQuint)])
             }
@@ -388,6 +407,7 @@ startup_window = WindowDef(
         ButtonDef(key=Qt.Key_Space, event_out=get_event('startup_phase_flip'), event_delta='close'),
         ButtonDef(key=Qt.Key_Space, event_out=get_event('startup_phase'), event_delta='open'),
         ButtonDef(key=Qt.Key_Space, event_out=get_event('startup_subscription_phase'), event_delta='open'),
+        ButtonDef(key=Qt.Key_Space, mandatory_keys=Qt.Key_Shift, event_out=get_event('main_page'), event_delta='open'),
         ButtonDef(poly_def=PolygonDef(p=[P(1, 0.5)]*4, px=[P(-500, 5), P(-300, 5), P(-320, 25), P(-500, 25)], fill_color=QColor(255, 255, 255, 255), phases={
             'open': Phase([PolygonTween(px=[P(-500, 5), P(-300, 5), P(-320, 25), P(-500, 25)], start=0, dur=1.0, ease=QEasingCurve.OutQuint)])
         }),
