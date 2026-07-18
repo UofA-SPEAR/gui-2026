@@ -24,7 +24,7 @@ from spear_gui.overlay_system import (
     get_spawn_event, GROUP_EVENT, STATIC, get_spawn_mouse_norm
 )
 
-WINDOW_LAYER = 2
+WINDOW_LAYER = -1
 
 register_event(EventDef(name='pos_x',     value=-112.710534))
 register_event(EventDef(name='pos_y',     value=51.465185))

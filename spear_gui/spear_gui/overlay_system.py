@@ -121,22 +121,22 @@ def RectDef(
     )
 
 def RectTween(
-    p1:            P                     = P(), 
-    p2:            P                     = P(), 
-    px1:           P                     = P(), 
-    px2:           P                     = P(),
+    p1:            P                     = None, 
+    p2:            P                     = None, 
+    px1:           P                     = None, 
+    px2:           P                     = None,
     tl:            Optional[Tuple[P, P]] = None, 
     tr:            Optional[Tuple[P, P]] = None,
     br:            Optional[Tuple[P, P]] = None, 
     bl:            Optional[Tuple[P, P]] = None,
     fill_color:    Optional[QColor]      = None, 
     outline_color: Optional[QColor]      = None,
-    outline_width:    Optional[float]       = None, 
+    outline_width:    Optional[float]    = None, 
     draw_progress: Optional[float]       = None,
     span:          Tuple[float, float]   = (0, 1),
     start:         float                 = 0.0,             
     dur:           float                 = 0.5,
-    ease:          QEasingCurve.Type     = QEasingCurve.OutQuint,
+    ease:          QEasingCurve.Type     = None,
     blend:         bool                  = False,
     prev_phase:    Optional[str]         = None,
     gradient_p1:   Optional[P]           = None,
@@ -144,25 +144,58 @@ def RectTween(
     gradient_p2:   Optional[P]           = None,
     gradient_px2:  Optional[P]           = None
 ) -> PolygonTween:
+    from PySide6.QtCore import QEasingCurve as _QEC
+    if ease is None:
+        ease = QEasingCurve.OutQuint
+ 
     def _split(offset):
         if offset is None:
-            return P(), P()
+            return None, None
         return offset[0], offset[1]
-
+ 
     tl_r, tl_p = _split(tl)
     tr_r, tr_p = _split(tr)
     br_r, br_p = _split(br)
     bl_r, bl_p = _split(bl)
-
-    p  = [P(p1.x + tl_r.x, p1.y + tl_r.y), P(p2.x + tr_r.x, p1.y + tr_r.y), P(p2.x + br_r.x, p2.y + br_r.y), P(p1.x + bl_r.x, p2.y + bl_r.y)]
-    px = [P(px1.x + tl_p.x, px1.y + tl_p.y), P(px2.x + tr_p.x, px1.y + tr_p.y), P(px2.x + br_p.x, px2.y + br_p.y), P(px1.x + bl_p.x, px2.y + bl_p.y)]
-
+ 
+    def _make_p(base1, base2):
+        if base1 is None and base2 is None and tl_r is None and tr_r is None and br_r is None and bl_r is None:
+            return None
+        _p1  = base1  or P()
+        _p2  = base2  or P()
+        _tlr = tl_r   or P()
+        _trr = tr_r   or P()
+        _brr = br_r   or P()
+        _blr = bl_r   or P()
+        return [
+            P(_p1.x + _tlr.x, _p1.y + _tlr.y),
+            P(_p2.x + _trr.x, _p1.y + _trr.y),
+            P(_p2.x + _brr.x, _p2.y + _brr.y),
+            P(_p1.x + _blr.x, _p2.y + _blr.y),
+        ]
+ 
+    def _make_px(base1, base2):
+        if base1 is None and base2 is None and tl_p is None and tr_p is None and br_p is None and bl_p is None:
+            return None
+        _px1 = base1 or P()
+        _px2 = base2 or P()
+        _tlp = tl_p  or P()
+        _trp = tr_p  or P()
+        _brp = br_p  or P()
+        _blp = bl_p  or P()
+        return [
+            P(_px1.x + _tlp.x, _px1.y + _tlp.y),
+            P(_px2.x + _trp.x, _px1.y + _trp.y),
+            P(_px2.x + _brp.x, _px2.y + _brp.y),
+            P(_px1.x + _blp.x, _px2.y + _blp.y),
+        ]
+ 
     return PolygonTween(
-        p             = p,
-        px            = px,
+        p             = _make_p(p1, p2),
+        px            = _make_px(px1, px2),
         fill_color    = fill_color,
         outline_color = outline_color,
-        outline_width    = outline_width,
+        outline_width = outline_width,
         draw_progress = draw_progress,
         start         = start,
         dur           = dur,
@@ -173,7 +206,7 @@ def RectTween(
         gradient_p1   = gradient_p1,
         gradient_px1  = gradient_px1,
         gradient_p2   = gradient_p2,
-        gradient_px2  = gradient_px2
+        gradient_px2  = gradient_px2,
     )
 
         
@@ -287,7 +320,7 @@ class TextDef:
     font_family:         str                            = 'Oxanium SemiBold'
     h_align:             float                          = 0.5
     v_align:             float                          = 0.5
-    uniform_scale:       bool                           = True
+    uniform_scale:       bool                           = False
     text_fn:             Optional[Callable[[Any], str]] = None
     char_display:        float                          = 1.0
     sub_char_clip:       bool                           = False
@@ -339,6 +372,7 @@ class Phase:
     line_delay:  float      = 0.0
     loop:        bool       = False
     stop_phases: List[str]  = field(default_factory=lambda: ['close'])
+    pulse_event: Optional[Any] = None
 
 def TextBlock(
     p:           P                          = field(default_factory=P),
@@ -352,7 +386,7 @@ def TextBlock(
     font_family: str                        = '',
     h_align:     float                      = 0.0,
     v_align:     float                      = 0.0,
-    uniform_scale: bool                     = True,
+    uniform_scale: bool                     = False,
     text_fn:     Optional[Callable]         = None,
     line_offset: Optional[float]            = None,
     pos_fn:      Optional[Callable[[], P]]  = None,
@@ -587,6 +621,9 @@ class _TweenDriver:
         self._idx:   int     = 0
         self._tweens: list   = []
         self._timer          = QElapsedTimer()
+        self._pulse_last_value: Any  = None
+        self._pulse_checked:    bool = False
+        self._resolved_cache: Dict[int, tuple] = {}
 
     def _active_tweens(self, phase, prev, phases: dict) -> list:
         if phase in phases:
@@ -604,18 +641,26 @@ class _TweenDriver:
         if not phases:
             self.hidden = False
             return
-        resolved_phases = {}
-        phase_groups = {}
-        for key, val in phases.items():
-            if isinstance(key, tuple):
-                canonical = key[0]
-                for k in key:
-                    phase_groups[k] = canonical
-                    resolved_phases[canonical] = val
-            else:
-                phase_groups[key] = key
-                resolved_phases[key] = val
-        canonical = phase_groups.get(phase, phase)
+
+        key = id(phases)
+        cached = self._resolved_cache.get(key)
+        if cached is None:
+            resolved_phases = {}
+            phase_groups = {}
+            for pkey, val in phases.items():
+                if isinstance(pkey, tuple):
+                    canonical = pkey[0]
+                    for k in pkey:
+                        phase_groups[k] = canonical
+                        resolved_phases[canonical] = val
+                else:
+                    phase_groups[pkey] = pkey
+                    resolved_phases[pkey] = val
+            cached = (resolved_phases, phase_groups)
+            self._resolved_cache[key] = cached
+
+        resolved_phases, phase_groups = cached
+        canonical     = phase_groups.get(phase, phase)
         cur_canonical = phase_groups.get(self._phase, self._phase)
 
         if canonical not in resolved_phases:
@@ -636,6 +681,9 @@ class _TweenDriver:
         self._save_start()
         self._timer.restart()
 
+        if phase in ('open', 'close'):
+            self._pulse_checked = False
+
     def _is_done(self): return self._idx >= len(self._tweens)
     def phase_done(self): return self._is_done()
 
@@ -651,25 +699,6 @@ class _TweenDriver:
 
         if n > 0 and elapsed < tweens[self._idx].start if not isinstance(tweens[self._idx], Reset) else False:
             return
-
-        def _ease_inverse(y: float, curve) -> float:
-            if y <= 0.0: return 0.0
-            if y >= 1.0: return 1.0
-            if curve == QEasingCurve.Linear:    return y
-            if curve == QEasingCurve.OutQuint:  return 1.0 - (1.0 - y) ** 0.2
-            if curve == QEasingCurve.InQuint:   return y ** 0.2
-            if curve == QEasingCurve.OutCubic:  return 1.0 - (1.0 - y) ** (1/3)
-            if curve == QEasingCurve.InCubic:   return y ** (1/3)
-            if curve == QEasingCurve.OutQuad:   return 1.0 - _math.sqrt(1.0 - y)
-            if curve == QEasingCurve.InQuad:    return _math.sqrt(y)
-            if curve == QEasingCurve.OutCirc:   return _math.sqrt(1.0 - (1.0 - y)**2)
-            if curve == QEasingCurve.InCirc:    return _math.sqrt(1.0 - (1.0 - y*y))
-            lo, hi = 0.0, 1.0
-            for _ in range(24):
-                mid = (lo + hi) * 0.5
-                if _ease(mid, curve) < y: lo = mid
-                else: hi = mid
-            return (lo + hi) * 0.5
 
         i = self._idx
         while i < n:
@@ -774,6 +803,56 @@ class _TweenDriver:
     def _reset_to_def(self): pass
     def _apply(self, tw, v): pass
 
+    def _check_pulse(self, phases: dict) -> None:
+        if not phases:
+            return
+        pulse_phase = None
+        for key, p in phases.items():
+            name = _phase_key_name(key)
+            if name == 'pulse' and p.pulse_event is not None:
+                pulse_phase = p
+                break
+        if pulse_phase is None:
+            return
+    
+        # Don't pulse while closing or while open animation is still playing
+        if self._phase in ('close',):
+            return
+        if self._phase == 'open' and not self._is_done():
+            return
+    
+        ev = pulse_phase.pulse_event
+        if isinstance(ev, EventDef):
+            cur_val = ev.value
+        elif callable(ev):
+            try:    cur_val = ev()
+            except: return
+        else:
+            cur_val = ev
+    
+        # Seed on first check — don't pulse immediately
+        if not self._pulse_checked:
+            self._pulse_last_value = cur_val
+            self._pulse_checked    = True
+            return
+    
+        # Only fire when the value is literally 'pulse' — ignore the 'ignore' reset
+        if cur_val == 'pulse' and self._pulse_last_value != 'pulse':
+            self._pulse_last_value = cur_val
+            if self._phase not in ('open', 'close'):
+                self._prev  = self._phase
+                self._phase = 'pulse'
+                self._idx   = 0
+                self._tweens = self._active_tweens(
+                    'pulse', self._prev,
+                    {_phase_key_name(k): v for k, v in phases.items()}
+                )
+                self._save_start()
+                self._timer.restart()
+        elif cur_val != 'pulse':
+            # Track any non-pulse value so we correctly detect the NEXT 'pulse' edge
+            self._pulse_last_value = cur_val
+    
 _ALWAYS_PHASE_ORIGINS: Dict[str, float] = {}
 
 class _AlwaysDriver:
@@ -1056,13 +1135,26 @@ class _AnimatedGradient(_TweenDriver):
         if ev is None:
             return
         val = str(ev.value) if ev.value is not None else ''
-        if val and val != self._cur_phase:
-            self._cur_phase = val
-            self.set_phase(val)
+        if not val or val == self._cur_phase:
+            return
+        # Skip 'ignore' (pulse reset sentinel) and unknown phases
+        if val == 'ignore':
+            return
+        # For 'pulse': only set_phase if the gradient has a pulse phase.
+        # The pulse fires via _check_pulse on the polygon/text, not here.
+        if val == 'pulse':
+            if 'pulse' in self.defn.phases:
+                # Already handled by _check_pulse path on owning polygon.
+                # Gradient's own pulse is driven by pulse_event, not phase_event.
+                pass
+            return
+        self._cur_phase = val
+        self.set_phase(val)
 
     def update(self) -> None:
         self._poll_phase_event()
         self._drive()
+        self._check_pulse(self.defn.phases)
  
     def build_gradient(self, x1: float, y1: float, x2: float, y2: float, radial: bool = False):
         if radial:
@@ -1267,6 +1359,7 @@ class AnimatedPolygon(_TweenDriver):
             except Exception:
                 pass
         self._drive()
+        self._check_pulse(self.defn.phases or {})
 
         n = len(self.defn.p)
         sum_pts = [P(0.0, 0.0)] * n
@@ -1299,19 +1392,13 @@ class AnimatedPolygon(_TweenDriver):
             self._dirty = True
 
     def phase_done(self) -> bool:
-        if self._cur_phase == 'close' and self._is_done():
-            has_always = any(
-                not d._stopped
-                for p in self._polygons
-                for d in p._always_drivers.values()
-            )
-            if not has_always:
-                return
-            # still running if any always driver is active
+        if not self._is_done():
+            return False
+        if self._phase == 'close':
             for driver in self._always_drivers.values():
                 if not driver._stopped:
                     return False
-            return True
+        return True
 
     # ── Geometry ─────────────────────────────────────────────────
 
@@ -1445,14 +1532,46 @@ class AnimatedPolygon(_TweenDriver):
             painter.rotate(angle)
             painter.translate(-cx, -cy)
 
+        def _outline_brush():
+            gd = self.defn.gradient
+            if gd is not None and gd.target == 'outline':
+                def _has_point(p, px):
+                    return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
+                if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
+                    x1 = self.cur_gradient_p1.x * w + self.cur_gradient_px1.x
+                    y1 = self.cur_gradient_p1.y * h + self.cur_gradient_px1.y
+                    x2 = self.cur_gradient_p2.x * w + self.cur_gradient_px2.x
+                    y2 = self.cur_gradient_p2.y * h + self.cur_gradient_px2.y
+                else:
+                    x1 = gd.p1.x * w + gd.px1.x
+                    y1 = gd.p1.y * h + gd.px1.y
+                    x2 = gd.p2.x * w + gd.px2.x
+                    y2 = gd.p2.y * h + gd.px2.y
+                return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
+            return None
+
         pts = list(self.get_polygon(w, h, cam_w, cam_h))
 
+        # dedupe consecutive duplicate points — prevents zero-length segments
+        # from reaching Qt's gradient-brushed stroker, which can crash under GL
+        if len(pts) >= 2:
+            deduped = [pts[0]]
+            for pt in pts[1:]:
+                prev = deduped[-1]
+                if abs(pt.x() - prev.x()) > 1e-6 or abs(pt.y() - prev.y()) > 1e-6:
+                    deduped.append(pt)
+            pts = deduped
+
         if is_open:
-            if not has_outline:
+            if not has_outline or len(pts) < 2:
                 if rot is not None: painter.restore()
                 return
-            pen = QPen(self.cur_outline_color)
-            pen.setWidthF(lw)
+            gradient_outline = _outline_brush()
+            if gradient_outline is not None:
+                pen = QPen(QBrush(gradient_outline), lw)
+            else:
+                pen = QPen(effective_outline)
+                pen.setWidthF(lw)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
@@ -1480,24 +1599,6 @@ class AnimatedPolygon(_TweenDriver):
                 x2 = gd.p2.x  * w + gd.px2.x
                 y2 = gd.p2.y  * h + gd.px2.y
             return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
-        
-        def _outline_brush():
-            gd = self.defn.gradient
-            if gd is not None and gd.target == 'outline':
-                def _has_point(p, px):
-                    return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
-                if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
-                    x1 = self.cur_gradient_p1.x * w + self.cur_gradient_px1.x
-                    y1 = self.cur_gradient_p1.y * h + self.cur_gradient_px1.y
-                    x2 = self.cur_gradient_p2.x * w + self.cur_gradient_px2.x
-                    y2 = self.cur_gradient_p2.y * h + self.cur_gradient_px2.y
-                else:
-                    x1 = gd.p1.x * w + gd.px1.x
-                    y1 = gd.p1.y * h + gd.px1.y
-                    x2 = gd.p2.x * w + gd.px2.x
-                    y2 = gd.p2.y * h + gd.px2.y
-                return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
-            return None
 
         gradient_outline = _outline_brush()
         poly = QPolygonF(pts)
@@ -1508,36 +1609,41 @@ class AnimatedPolygon(_TweenDriver):
             painter.drawPolygon(poly)
             painter.setBrush(Qt.NoBrush)
         elif has_outline and not has_fill:
-            if gradient_outline is not None:
-                from PySide6.QtGui import QBrush
-                pen = QPen(QBrush(gradient_outline), lw)
-                pen.setCapStyle(Qt.RoundCap)
-                pen.setJoinStyle(Qt.RoundJoin)
-            else:
-                pen = QPen(effective_outline)
-                pen.setWidthF(lw)
-                pen.setCapStyle(Qt.RoundCap)
-                pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPolygon(poly)
-            painter.setPen(Qt.NoPen)
+            if len(pts) >= 2:
+                if gradient_outline is not None:
+                    pen = QPen(QBrush(gradient_outline), lw)
+                    pen.setCapStyle(Qt.RoundCap)
+                    pen.setJoinStyle(Qt.RoundJoin)
+                else:
+                    pen = QPen(effective_outline)
+                    pen.setWidthF(lw)
+                    pen.setCapStyle(Qt.RoundCap)
+                    pen.setJoinStyle(Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawPolygon(poly)
+                painter.setPen(Qt.NoPen)
         else:
-            if gradient_outline is not None:
-                from PySide6.QtGui import QBrush
-                pen = QPen(QBrush(gradient_outline), lw)
-                pen.setCapStyle(Qt.RoundCap)
-                pen.setJoinStyle(Qt.RoundJoin)
+            if len(pts) >= 2:
+                if gradient_outline is not None:
+                    pen = QPen(QBrush(gradient_outline), lw)
+                    pen.setCapStyle(Qt.RoundCap)
+                    pen.setJoinStyle(Qt.RoundJoin)
+                else:
+                    pen = QPen(effective_outline)
+                    pen.setWidthF(lw)
+                    pen.setCapStyle(Qt.RoundCap)
+                    pen.setJoinStyle(Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(_fill_brush())
+                painter.drawPolygon(poly)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(Qt.NoBrush)
             else:
-                pen = QPen(effective_outline)
-                pen.setWidthF(lw)
-                pen.setCapStyle(Qt.RoundCap)
-                pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.setBrush(_fill_brush())
-            painter.drawPolygon(poly)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(Qt.NoBrush)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(_fill_brush())
+                painter.drawPolygon(poly)
+                painter.setBrush(Qt.NoBrush)
 
         if rot is not None:
             painter.restore()
@@ -1763,6 +1869,7 @@ class AnimatedText(_TweenDriver):
             except Exception:
                 pass
         self._drive()
+        self._check_pulse(self.defn.phases or {})
  
         sum_px         = 0.0
         sum_py         = 0.0
@@ -1907,7 +2014,7 @@ class AnimatedText(_TweenDriver):
 
         scale      = 1.0 if not self.defn.uniform_scale else scale
         font       = self.build_font(scale)
-        fm         = QFontMetrics(font)
+        fm         = self._cached_fm if self._cached_fm is not None else QFontMetrics(font)
         use_path   = (self.defn.outline_width > 0.0 or self.defn.outline_color is not None or self.defn.gradient is not None)
 
         orig_p  = self.cur_p
@@ -2923,6 +3030,10 @@ class AnimatedButton:
             outline_alpha = self._polygon.cur_outline_color.alpha()
             if fill_alpha == 0 and outline_alpha == 0:
                 return False
+        if self._last_bounds is not None:
+            x1, y1, x2, y2 = self._last_bounds
+            if not (x1 <= mx <= x2 and y1 <= my <= y2):
+                return False
         poly = self._last_poly if not self._last_poly.isEmpty() else self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
         return poly.containsPoint(QPointF(mx, my), Qt.OddEvenFill)
 
@@ -3024,12 +3135,23 @@ class AnimatedButton:
 
         w, h = max(0, widget_w), max(0, widget_h)
         if w > 0 and h > 0:
-            if (self._polygon._dirty
-                    or w != self._last_w
-                    or h != self._last_h
-                    or self._cur_phase != self._last_phase):
+            if (self._polygon._dirty or w != self._last_w or h != self._last_h or self._cur_phase != self._last_phase):
                 self._polygon._dirty = True
                 self._last_poly  = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
+                if self._last_poly.isEmpty():
+                    self._last_bounds = None
+                else:
+                    it = iter(self._last_poly)
+                    first = next(it)
+                    x1 = x2 = first.x()
+                    y1 = y2 = first.y()
+                    for pt in it:
+                        px, py = pt.x(), pt.y()
+                        if px < x1: x1 = px
+                        elif px > x2: x2 = px
+                        if py < y1: y1 = py
+                        elif py > y2: y2 = py
+                    self._last_bounds = (x1, y1, x2, y2)
                 self._last_w     = w
                 self._last_h     = h
                 self._last_phase = self._cur_phase
@@ -3373,12 +3495,11 @@ def SegmentedButtons(
             cy_px = px1.y + (px2.y - px1.y) * r_center
 
         base  = text_def if text_def is not None else TextDef()
-        label = seg.label or (text_def.text if text_def else '')
+        label = seg.label or (base.text if base else '')
+
         return _tw_replace(base,
-            x       = cx_n,
-            y       = cy_n,
-            px      = cx_px + base.px,
-            py      = cy_px + base.py,
+            p       = P(cx_n,  cy_n),
+            px      = P(cx_px + base.px.x, cy_px + base.px.y),
             text    = label,
             h_align = 0.5,
             v_align = 0.5,
@@ -4538,8 +4659,8 @@ class WindowDef:
 class WindowTween:
     p1:   Optional[P]          = None
     p2:   Optional[P]          = None
-    px1:  P                    = field(default_factory=P)
-    px2:  P                    = field(default_factory=P)
+    px1:  P                    = None
+    px2:  P                    = None
     start: float               = 0.0
     dur:   float               = 0.5
     ease:  QEasingCurve.Type   = QEasingCurve.OutQuint
@@ -4679,6 +4800,7 @@ class AnimatedWindow:
         self._force_open_done:    bool = False
         self._prev_force_phase:   str  = ''
         self._force_open_pending: bool = defn.force_open
+        self._force_open_triggered: bool = False
 
         if defn.spawn_event is None:
             initial_phase = 'open'
@@ -4711,7 +4833,7 @@ class AnimatedWindow:
                 t.set_phase(phase)
         for sl  in self._sliders:  sl.set_phase(phase)
         for btn, bd in zip(self._buttons, self.defn.button_defs):
-            if bd.phase_override is None:
+            if bd.phase_override is None and phase in ('open', 'close'):
                 btn._set_phase(phase)
         for tb in self._textboxes:
             tb._set_phase(phase)
@@ -4819,12 +4941,27 @@ class AnimatedWindow:
             return
         t = min(1.0, (elapsed - tw.start) / tw.dur) if tw.dur > 0 else 1.0
         v = _ease(t, tw.ease)
+
         if tw.p1 is not None:
-            self._cur_p1  = P(self._s_p1.x  + (tw.p1.x  - self._s_p1.x)  * v, self._s_p1.y  + (tw.p1.y  - self._s_p1.y)  * v)
+            nx = self._s_p1.x + (tw.p1.x - self._s_p1.x) * v if tw.p1.x is not None else self._s_p1.x
+            ny = self._s_p1.y + (tw.p1.y - self._s_p1.y) * v if tw.p1.y is not None else self._s_p1.y
+            self._cur_p1 = P(nx, ny)
+
         if tw.p2 is not None:
-            self._cur_p2  = P(self._s_p2.x  + (tw.p2.x  - self._s_p2.x)  * v, self._s_p2.y  + (tw.p2.y  - self._s_p2.y)  * v)
-        self._cur_px1 = P(self._s_px1.x + (tw.px1.x - self._s_px1.x) * v, self._s_px1.y + (tw.px1.y - self._s_px1.y) * v)
-        self._cur_px2 = P(self._s_px2.x + (tw.px2.x - self._s_px2.x) * v, self._s_px2.y + (tw.px2.y - self._s_px2.y) * v)
+            nx = self._s_p2.x + (tw.p2.x - self._s_p2.x) * v if tw.p2.x is not None else self._s_p2.x
+            ny = self._s_p2.y + (tw.p2.y - self._s_p2.y) * v if tw.p2.y is not None else self._s_p2.y
+            self._cur_p2 = P(nx, ny)
+
+        if tw.px1 is not None:
+            nx = self._s_px1.x + (tw.px1.x - self._s_px1.x) * v if tw.px1.x is not None else self._s_px1.x
+            ny = self._s_px1.y + (tw.px1.y - self._s_px1.y) * v if tw.px1.y is not None else self._s_px1.y
+            self._cur_px1 = P(nx, ny)
+
+        if tw.px2 is not None:
+            nx = self._s_px2.x + (tw.px2.x - self._s_px2.x) * v if tw.px2.x is not None else self._s_px2.x
+            ny = self._s_px2.y + (tw.px2.y - self._s_px2.y) * v if tw.px2.y is not None else self._s_px2.y
+            self._cur_px2 = P(nx, ny)
+
         if t >= 1.0:
             self._s_p1  = self._cur_p1
             self._s_p2  = self._cur_p2
@@ -4881,9 +5018,6 @@ class AnimatedWindow:
 
     def update(self, ctx, widget_w, widget_h, _parent_abs_x=0.0, _parent_abs_y=0.0):
         if self.hidden: return
-        for ev in _pending_pulse_resets:
-            ev.value = 'ignore'
-        _pending_pulse_resets.clear()
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         self._abs_wx = _parent_abs_x + wx
         self._abs_wy = _parent_abs_y + wy
@@ -4894,19 +5028,13 @@ class AnimatedWindow:
         self._last_iph = iph
 
         if self._cur_phase == 'close' and self._is_done():
-            return
-        
-        if self._force_open_pending:
-            # first frame: trigger open on all polygons/texts/arcs
-            if not hasattr(self, '_force_open_triggered'):
-                self._force_open_triggered = True
-                for p in self._polygons: p.set_phase('open')
-                for t in self._texts:    t.set_phase('open')
-                for a in self._arcs:     a.set_phase('open')
-            # wait until all done
-            if all(p.phase_done() for p in self._polygons) and \
-            all(t.phase_done() for t in self._texts):
-                self._force_open_pending = False
+            has_always = any(
+                not d._stopped
+                for p in self._polygons
+                for d in p._always_drivers.values()
+            )
+            if not has_always:
+                return
 
         if ww > 0 and wh > 0:
             mx = SYS_MOUSE_X.value
@@ -4916,13 +5044,33 @@ class AnimatedWindow:
                 (my - wy) / wh,
             )
 
+        # force open/close
+        if self._force_open_pending:
+            # Only trigger once the window's own phase has reached 'open'.
+            # This prevents force_open from firing while phase_event == 'waiting'.
+            if not self._force_open_triggered and self._cur_phase == 'open':
+                self._force_open_triggered = True
+                for p in self._polygons: p.set_phase('open')
+                for t in self._texts:    t.set_phase('open')
+                for a in self._arcs:     a.set_phase('open')
+            if self._force_open_triggered:
+                if all(p.phase_done() for p in self._polygons) and \
+                   all(t.phase_done() for t in self._texts):
+                    self._force_open_pending = False
+
+        if self._force_close_active:
+            if self._cur_phase == 'close' and self._prev_force_phase != 'close':
+                for p in self._polygons: p.set_phase('close')
+                for t in self._texts:    t.set_phase('close')
+                for a in self._arcs:     a.set_phase('close')
+            if all(p.phase_done() for p in self._polygons) and \
+            all(t.phase_done() for t in self._texts):
+                self._force_close_active = False
+        self._prev_force_phase = self._cur_phase
+
         _pulse_resets: List[EventDef] = []
-        
+
         # Listeners
-        for gl in self._listeners:
-            for target in gl.targets:
-                if isinstance(target, EventDef) and target.value == 'ignore':
-                    target.value = 'ignore'
         for gl in self._listeners:
             gl.tick(ctx)
 
@@ -4940,96 +5088,74 @@ class AnimatedWindow:
             p.hidden = not visible
             if not visible:
                 if has_active_always:
-                    p.update()  # must still update always drivers even if hidden
+                    p.update()
                 continue
 
             ov = pd.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
                 phase = str(phase) if phase is not None else ''
-                if phase == 'pulse':
-                    if _phase_key_exists(pd.phases or {}, 'pulse'):
-                        p.set_phase('pulse')
-                    if hasattr(ov, 'value') and ov not in _pulse_resets:
-                        _pulse_resets.append(ov)
-                elif phase and phase != p._phase:
+                if phase and phase != p._phase:
                     if _phase_key_exists(pd.phases or {}, phase):
                         p.set_phase(phase)
             p.update()
 
-        # Arc
-        for arc, ad in zip(self._arcs, self.defn.arc_defs):
-            arc.hidden = not _check_visible_threshold(ad, ww, wh, self.cam_w, self.cam_h)
-        
-        # Text
+        # Texts
         for t, td in zip(self._texts, self.defn.text_defs):
+            has_active_always = any(
+                not d._stopped for d in t._always_drivers_t.values()
+            ) if t._always_drivers_t else False
+
+            if self._force_open_pending or self._force_close_active:
+                t.update()
+                continue
+
             visible = _check_visible_threshold(td, ww, wh, self.cam_w, self.cam_h)
             t.hidden = not visible
             if not visible:
+                if has_active_always:
+                    t.update()
                 continue
+
             ov = td.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
                 phase = str(phase) if phase is not None else ''
-                if phase == 'pulse':
-                    if _phase_key_exists(td.phases or {}, 'pulse'):
-                        t.set_phase('pulse')
-                    if hasattr(ov, 'value') and ov not in _pulse_resets:
-                        _pulse_resets.append(ov)
-                elif phase and phase != t._phase:
+                if phase and phase != t._phase:
                     if _phase_key_exists(td.phases or {}, phase):
                         t.set_phase(phase)
             t.update()
-        
-        # Pie
-        for pie, pd in zip(self._pies, self.defn.pie_defs):
-            pie.hidden = not _check_visible_threshold(pd, ww, wh, self.cam_w, self.cam_h)
 
-        # Graphs
-        for g, gd in zip(self._graphs, self.defn.graph_defs):
-            g.hidden = not _check_visible_threshold(gd, ww, wh, self.cam_w, self.cam_h)
+        # Pies
+        for pie in self._pies: pie.update(ctx)
 
-        # Slider        
-        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
-        for sl, sd in zip(self._sliders, self.defn.slider_defs):
-            sl.hidden = not _check_visible_threshold(sd, ww, wh, self.cam_w, self.cam_h)
-            sl.update(int(ww), int(wh))
-        
-        # Button
+        # Sliders
+        for sl in self._sliders: sl.update(int(ww), int(wh))
+
+        # Buttons
         for btn, bd in zip(self._buttons, self.defn.button_defs):
-            btn._polygon.hidden = not _check_visible_threshold(bd, ww, wh, self.cam_w, self.cam_h)
             ov = bd.phase_override
             if ov is not None:
                 phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
                 phase = str(phase) if phase is not None else ''
-                if phase == 'pulse':
-                    if _phase_key_exists(bd.poly_def.phases or {}, 'pulse'):
-                        btn._set_phase('pulse')
-                    if hasattr(ov, 'value') and ov not in _pulse_resets:
-                        _pulse_resets.append(ov)
-                elif phase != btn._last_override_phase:
-                    if _phase_key_exists(bd.poly_def.phases or {}, phase):
-                        btn._last_override_phase = phase
+                if phase and phase != btn._last_override_phase:
+                    btn._last_override_phase = phase
+                    # Only set open/close — don't override hover/click/set/release
+                    if phase in ('open', 'close'):
                         btn._set_phase(phase)
             btn.update(int(ww), int(wh))
-        
-        # Textbox
-        for tb, tbd in zip(self._textboxes, self.defn.textbox_defs):
-            tb.hidden = not _check_visible_threshold(tbd, ww, wh, self.cam_w, self.cam_h)
+
+        # Textboxes
+        for tb in self._textboxes:
             tb.update(int(ww), int(wh))
-        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+
         ipw, iph = int(ww), int(wh)
 
-        # Gradient
-        for gd in _gradients.values():
-            gd._animated.update()
-
-        # Window
+        # Sub windows
         for sw in self._sub_windows:
             if sw.defn.spawn_event is not None: continue
             sw.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
-        
-        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+
         ipw, iph = int(ww), int(wh)
         self._last_ipw = ipw
         self._last_iph = iph
@@ -5037,12 +5163,6 @@ class AnimatedWindow:
         for inst in self._spawned:
             inst.window.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
 
-        
-        # for ev in _pulse_resets:
-        #     print(f'resetting {ev.name}, id={id(ev)}, was={ev.value}')
-        #     ev.value = 'ignore'
-        # _pulse_resets.clear()
-    
     def draw(self, painter, widget_w, widget_h, ctx=None):
         if self._cur_phase == 'close' and self._is_done():
             return
@@ -5102,19 +5222,26 @@ class AnimatedWindow:
         lx = mx - wx
         ly = my - wy
 
-        hit_interactive = False
+        hit_tb = None
         for tb in self._textboxes:
-            if tb.hit_test(lx, ly, ipw, iph):
-                hit_interactive = True; break
-        if not hit_interactive:
+            if hit_tb is None and tb.hit_test(lx, ly, ipw, iph):
+                hit_tb = tb
+
+        hit_sl = None
+        if hit_tb is None:
             for sl in self._sliders:
                 if sl.hit_test_knob(lx, ly, ipw, iph):
-                    hit_interactive = True; break
-        if not hit_interactive:
-            for btn in self._buttons:
-                if btn.hit_test(lx, ly, ipw, iph):
-                    hit_interactive = True; break
+                    hit_sl = sl
+                    break
 
+        hit_btn = None
+        if hit_tb is None and hit_sl is None:
+            for btn in self._buttons:
+                if btn.hit_test(lx, ly, ipw, iph) and btn._mandatory_keys_held(self._held_keys):
+                    hit_btn = btn
+                    break
+
+        hit_interactive = hit_tb is not None or hit_sl is not None or hit_btn is not None
         inside = (0 <= lx <= ipw and 0 <= ly <= iph)
 
         if self.defn.scalable and not hit_interactive and inside:
@@ -5151,23 +5278,27 @@ class AnimatedWindow:
             return True
 
         for tb in self._textboxes:
-            tb.mouse_press(lx, ly, ipw, iph)
-        for sl in self._sliders:
-            if sl.hit_test_knob(lx, ly, ipw, iph):
-                self._dragging_slider = sl
-                sl._dragging = True
-                sl.drag_to(lx, ly, ipw, iph)
-                sl.commit(None)
-                sl.set_phase('pressed')
-                return True
-        for btn in self._buttons:
-            if btn.hit_test(lx, ly, ipw, iph):
-                if not btn._mandatory_keys_held(self._held_keys):
-                    continue
-                btn._pressed    = True
-                btn._press_poly = QPolygonF(btn._last_poly)
-                btn._set_phase('click')
-                return True
+            if tb is hit_tb:
+                tb._activate()
+            elif tb._active:
+                tb._deactivate()
+        if hit_tb is not None:
+            return True
+
+        if hit_sl is not None:
+            self._dragging_slider = hit_sl
+            hit_sl._dragging = True
+            hit_sl.drag_to(lx, ly, ipw, iph)
+            hit_sl.commit(None)
+            hit_sl.set_phase('pressed')
+            return True
+
+        if hit_btn is not None:
+            hit_btn._pressed    = True
+            hit_btn._press_poly = QPolygonF(hit_btn._last_poly)
+            hit_btn._set_phase('click')
+            return True
+
         return False
 
     def mouse_move(self, mx, my, widget_w, widget_h):
@@ -6101,6 +6232,25 @@ def _ease(t: float, curve) -> float:
     if curve == QEasingCurve.InSine:    return 1.0 - _math.cos(t * _math.pi * 0.5)
     c = QEasingCurve(curve); return c.valueForProgress(t)
 
+def _ease_inverse(y: float, curve) -> float:
+    if y <= 0.0: return 0.0
+    if y >= 1.0: return 1.0
+    if curve == QEasingCurve.Linear:    return y
+    if curve == QEasingCurve.OutQuint:  return 1.0 - (1.0 - y) ** 0.2
+    if curve == QEasingCurve.InQuint:   return y ** 0.2
+    if curve == QEasingCurve.OutCubic:  return 1.0 - (1.0 - y) ** (1/3)
+    if curve == QEasingCurve.InCubic:   return y ** (1/3)
+    if curve == QEasingCurve.OutQuad:   return 1.0 - _math.sqrt(1.0 - y)
+    if curve == QEasingCurve.InQuad:    return _math.sqrt(y)
+    if curve == QEasingCurve.OutCirc:   return _math.sqrt(1.0 - (1.0 - y)**2)
+    if curve == QEasingCurve.InCirc:    return _math.sqrt(1.0 - (1.0 - y*y))
+    lo, hi = 0.0, 1.0
+    for _ in range(24):
+        mid = (lo + hi) * 0.5
+        if _ease(mid, curve) < y: lo = mid
+        else: hi = mid
+    return (lo + hi) * 0.5
+
 def _tw_replace(tw, **kwargs):
     d = {**tw.__dict__, **kwargs}
     return type(tw)(**d)
@@ -6201,6 +6351,8 @@ def _draw_partial_polyline(painter: QPainter, pts: List[QPointF], t: float) -> N
         return
     if t >= 1.0:
         for i in range(len(pts) - 1):
+            if pts[i] == pts[i + 1]:
+                continue
             painter.drawLine(pts[i], pts[i + 1])
         return
     lengths = [_math.sqrt((pts[i+1].x()-pts[i].x())**2 + (pts[i+1].y()-pts[i].y())**2) for i in range(len(pts) - 1)]
@@ -6212,12 +6364,14 @@ def _draw_partial_polyline(painter: QPainter, pts: List[QPointF], t: float) -> N
     for i, seg_len in enumerate(lengths):
         if acc >= target:
             break
+        if seg_len == 0:
+            continue
         rem = target - acc
         if rem >= seg_len:
             painter.drawLine(pts[i], pts[i + 1])
             acc += seg_len
         else:
-            frac = rem / seg_len if seg_len > 0 else 1.0
+            frac = rem / seg_len
             painter.drawLine(pts[i], QPointF(pts[i].x() + (pts[i+1].x() - pts[i].x()) * frac, pts[i].y() + (pts[i+1].y() - pts[i].y()) * frac))
             break
 
@@ -6244,10 +6398,10 @@ class PhaseKey:
     def __str__(self) -> str:
         return self.name
     def __hash__(self) -> int:
-        return id(self)
+        return hash(self.name)
     def __eq__(self, other) -> bool:
         if isinstance(other, PhaseKey):
-            return self is other
+            return self.name == other.name
         if isinstance(other, str):
             return self.name == other
         return NotImplemented

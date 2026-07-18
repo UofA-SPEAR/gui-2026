@@ -16,7 +16,7 @@ import time
 from typing import Dict, Any
 
 from spear_gui.overlay_system import (
-    expand_defs,
+    expand_defs, _gradients, _pending_pulse_resets,
     AnimatedPolygon, AnimatedText, AnimatedGraph, AnimatedPie, AnimatedWindow, DataChannel,
     SYS_MOUSE_ABS_X, SYS_MOUSE_ABS_Y,
 )
@@ -146,13 +146,65 @@ class MainOverlayWidget(QOpenGLWidget):
         for win in self._windows:
             win.tick(now)
             win.update(ctx, self.width(), self.height())
+        for gd in _gradients.values():
+            gd._animated.update()
+        for ev in _pending_pulse_resets:
+            ev.value = 'ignore'
+        _pending_pulse_resets.clear()
         self.update()
 
+    def _has_active_always(self, obj) -> bool:
+        drivers = getattr(obj, '_always_drivers', None) or getattr(obj, '_always_drivers_t', None) or {}
+        return any(not d._stopped for d in drivers.values())
+
     def _is_fully_static(self, win) -> bool:
-        return (win._cur_phase not in ('', 'close') and
-                win._is_done() and
-                not win._graphs and
-                not win._spawned)
+        if win._cur_phase in ('', 'close'):
+            return False
+        if not win._is_done():
+            return False
+        if win._graphs or win._spawned:
+            return False
+        for btn in win._buttons:
+            if btn._cur_phase not in ('', 'open', 'close', 'unhover') or btn._hovered or btn._pressed or btn._held:
+                return False
+            if not btn.phase_done():
+                return False
+            if self._has_active_always(btn._polygon):
+                return False
+            if btn.defn.poly_def.gradient is not None:
+                return False
+            if btn._text is not None:
+                if self._has_active_always(btn._text):
+                    return False
+                if btn.defn.text_def is not None and btn.defn.text_def.gradient is not None:
+                    return False
+        for tb in win._textboxes:
+            if tb._active:
+                return False
+            if self._has_active_always(tb._polygon):
+                return False
+            if tb.defn.poly_def.gradient is not None:
+                return False
+        for p in win._polygons:
+            if not p.phase_done():
+                return False
+            if self._has_active_always(p):
+                return False
+            if p.defn.gradient is not None:
+                return False
+        for t in win._texts:
+            if not t.phase_done():
+                return False
+            if self._has_active_always(t):
+                return False
+            if t.defn.gradient is not None:
+                return False
+            if t.defn.text_fn is not None:
+                return False
+        for sw in win._sub_windows:
+            if sw.defn.spawn_event is None and not self._is_fully_static(sw):
+                return False
+        return True
 
     def _draw_with_cache(self, painter, win, w, h, ctx):
         from PySide6.QtGui import QPixmap
@@ -244,6 +296,9 @@ class MainOverlayWidget(QOpenGLWidget):
 
         painter.end()
 
+import os
+
+
 def main():
     rclpy.init()
     node = MainNode()
@@ -252,8 +307,9 @@ def main():
 
     from PySide6.QtGui import QFontDatabase
 
+    from ament_index_python.packages import get_package_share_directory
+
     def load_fonts(font_dir: str = '.'):
-        import os
         for fname in os.listdir(font_dir):
             if fname.lower().endswith(('.ttf', '.otf')):
                 path = os.path.join(font_dir, fname)
@@ -264,7 +320,14 @@ def main():
                     families = QFontDatabase.applicationFontFamilies(fid)
                     print(f'[load_fonts] loaded: {fname} -> {families}')
 
-    load_fonts('spear_gui')
+    # resolve relative to this file's own location, not the process cwd
+    _this_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f'[load_fonts] __file__ = {__file__}')
+    print(f'[load_fonts] resolved dir = {_this_dir}')
+    print(f'[load_fonts] dir exists = {os.path.isdir(_this_dir)}')
+    if os.path.isdir(_this_dir):
+        print(f'[load_fonts] contents = {os.listdir(_this_dir)}')
+    load_fonts(_this_dir)
 
     widget = MainOverlayWidget(node)
     screen = QApplication.screens()[0]
