@@ -36,7 +36,14 @@ register_event(EventDef(name='map_zoom',     value=1))
 register_event(EventDef(name='map_marker_x',     value=0))
 register_event(EventDef(name='map_marker_y',     value=0))
 register_event(EventDef(name='map_phase',     value='open'))
+register_event(EventDef(name='needle_start_angle', value=0))
 
+
+register_gradient(GradientDef(name="needle", p1=P(0.75, 0.35), p2=P(0.75, 0.35), px1=P(0, 0), px2=P(0, 90), radial=True, target="fill", stops=[
+        GradientStop(0.0, QColor(245, 69, 69, 255)),
+        GradientStop(1.0, QColor(245, 69, 69, 50)),
+    ]
+))
 WINDOW_DEFS = [
     #   GREY BACKGROUND RECTANGLE
     WindowDef(
@@ -117,29 +124,68 @@ WINDOW_DEFS = [
     #             values & measurments
     # -------------------------------------------
     WindowDef(
-        p1=P(0, 0), p2=P(0.4375, 1), px1=P(40, 40), px2=P(0, -40),
+        p1=P(0, 0), p2=P(0.4375, 1), px1=P(40, 40), px2=P(-2, -40),
         polygon_defs=[
-            PolygonDef(p=[P(0, 0), P(0, 0), P(0, 0), P(0, 1), P(0, 1), P(0, 1)], px=[P(0, 50), P(5, 50 - 5), P(10, 50), P(10, -50), P(5, -50 + 5), P(0, -50)], gradient=get_gradient('alt_color_fill'))
+            # directional needle
+            PolygonDef(p=[P(0.75, 0.37), P(0.75, 0.37), P(0.75, 0.37), P(0.75, 0.37)], px=[P(0, -90), P(7, 0), P(0, 10), P(-7, 0)], gradient=get_gradient('needle'), 
+                rot_center_p=P(0.75, 0.37),
+                # rot_angle_initial=get_event('needle_start_angle'), This line is causing a segmentation fault and idk how to fix it
+            )
         ],
         text_defs=[
             TextDef(p=P(0, 0), px=P(0, 0), font_size=25, h_align=0, v_align=0, text='Latitude:   <#> DD', text_fn= lambda ctx: f"{ctx['test_value1']['latest']:.7f}", uniform_scale=False),
-            TextDef(p=P(0, 0), px=P(0, 30), font_size=25, h_align=0, v_align=0, text='Longitude:   <#> DD', text_fn= lambda ctx: f"{ctx['test_value2']['latest']:.7f}", uniform_scale=False),
+            TextDef(p=P(0, 0), px=P(0, 50), font_size=25, h_align=0, v_align=0, text='Longitude:   <#> DD', text_fn= lambda ctx: f"{ctx['test_value2']['latest']:.7f}", uniform_scale=False),
             
-            TextDef(p=P(0, 0.1), px=P(0, 0), font_size=15, h_align=0, v_align=0, text='Current Speed:   <#> km/h', text_fn= lambda ctx: f"{ctx['test_value3']['latest']:.2f}", uniform_scale=False),
-            TextDef(p=P(0, 0.1), px=P(0, 30), font_size=15, h_align=0, v_align=0, text='Acceleration:   <#> m/s^2', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
-            TextDef(p=P(0, 0.1), px=P(0, 60), font_size=15, h_align=0, v_align=0, text='Anglular Velocity:   <#> ω', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
+            TextDef(p=P(0, 0.15), px=P(0, 0), font_size=15, h_align=0, v_align=0, text='Current Speed:   <#> km/h', text_fn= lambda ctx: f"{ctx['test_value3']['latest']:.2f}", uniform_scale=False),
+            TextDef(p=P(0, 0.15), px=P(0, 30), font_size=15, h_align=0, v_align=0, text='Acceleration:   <#> m/s^2', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
+            TextDef(p=P(0, 0.15), px=P(0, 60), font_size=15, h_align=0, v_align=0, text='Anglular Velocity:   <#> ω', text_fn= lambda ctx: f"{ctx['test_value5']['latest']:.2f}", uniform_scale=False),
             
-            TextDef(p=P(0.5, 0.1), px=P(0, 0), font_size=15, h_align=0, v_align=0, text='Pitch:   <#> °', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
-            TextDef(p=P(0.5, 0.1), px=P(0, 30), font_size=15, h_align=0, v_align=0, text='Yaw:   <#> °', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
-            TextDef(p=P(0.5, 0.1), px=P(0, 60), font_size=15, h_align=0, v_align=0, text='Roll:   <#> °', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
+            TextDef(p=P(0.5, 0.15), px=P(0, 0), font_size=15, h_align=0, v_align=0, text='Pitch:   <#> °', text_fn= lambda ctx: f"{ctx['test_value6']['latest']:.2f}", uniform_scale=False),
+            TextDef(p=P(0.5, 0.15), px=P(0, 30), font_size=15, h_align=0, v_align=0, text='Yaw:   <#> °', text_fn= lambda ctx: f"{ctx['test_value7']['latest']:.2f}", uniform_scale=False),
+            TextDef(p=P(0.5, 0.15), px=P(0, 60), font_size=15, h_align=0, v_align=0, text='Roll:   <#> °', text_fn= lambda ctx: f"{ctx['test_value8']['latest']:.2f}", uniform_scale=False),
             
-            TextDef(p=P(0.75, 0.35), px=P(0, -105), font_size=10, h_align=0.5, v_align=1, text='N', uniform_scale=False),
-            TextDef(p=P(0.75, 0.35), px=P(0, 105), font_size=10, h_align=0.5, v_align=0, text='S', uniform_scale=False),
-            TextDef(p=P(0.75, 0.35), px=P(105, 0), font_size=10, h_align=0, v_align=0.5, text='E', uniform_scale=False),
-            TextDef(p=P(0.75, 0.35), px=P(-105, 0), font_size=10, h_align=1, v_align=0.5, text='W', uniform_scale=False),
+            TextDef(p=P(0.75, 0.37), px=P(0, -110), font_size=10, h_align=0.5, v_align=1, text='N', uniform_scale=False),
+            TextDef(p=P(0.75, 0.37), px=P(0, 110), font_size=10, h_align=0.5, v_align=0, text='S', uniform_scale=False),
+            TextDef(p=P(0.75, 0.37), px=P(110, 0), font_size=10, h_align=0, v_align=0.5, text='E', uniform_scale=False),
+            TextDef(p=P(0.75, 0.37), px=P(-110, 0), font_size=10, h_align=1, v_align=0.5, text='W', uniform_scale=False),
+
+            TextDef(p=P(0, 0.37), px=P(0, -25), font_size=25, h_align=0, v_align=0, text='degrees:   <#> °', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
+            TextDef(p=P(0, 0.37), px=P(0, 25), font_size=25, h_align=0, v_align=0, text='Cardinal dir:   <#>', text_fn= lambda ctx: f"{ctx['test_value4']['latest']:.2f}", uniform_scale=False),
+            
+            # -------------- markers
+            TextDef(p=P(0.15, 0.5), px=P(0, 0), font_size=25, h_align=0.5, v_align=0, text='Markers:', uniform_scale=False, fill_color=QColor(255, 255, 255, 190)),
+            TextDef(p=P(0.5, 0.5), px=P(0, 0), font_size=25, h_align=0.5, v_align=0, text='Latitude:', uniform_scale=False, fill_color=QColor(255, 255, 255, 190)),
+            TextDef(p=P(0.85, 0.5), px=P(0, 0), font_size=25, h_align=0.5, v_align=0, text='Longitude:', uniform_scale=False, fill_color=QColor(255, 255, 255, 190)),
+        ],
+        textbox_defs=[
+            TextboxDef(
+                poly_def = RectDef(p1=P(0, 0.9), p2=P(0, 0.9), px1=P(2, 0), px2=P(180, 40), fill_color=QColor(255, 255, 255, 40), outline_color=QColor(220, 200, 255, 255), outline_width=1),
+                text_def = TextDef(p=P(0.0, 0.9), px=P(10, 10), font_size=12, h_align=0, v_align=0, text='Marker Name', uniform_scale=False, fill_color=QColor(255, 255, 255, 255)),
+                max_length = 0, max_length_px = 160
+            ),
+            TextboxDef(
+                poly_def = RectDef(p1=P(0.25, 0.9), p2=P(0.25, 0.9), px1=P(2, 0), px2=P(180, 40), fill_color=QColor(255, 255, 255, 40), outline_color=QColor(220, 200, 255, 255), outline_width=1),
+                text_def = TextDef(p=P(0.25, 0.9), px=P(10, 10), font_size=12, h_align=0, v_align=0, text='Latitude', uniform_scale=False, fill_color=QColor(255, 255, 255, 255)),
+                max_length = 0, max_length_px = 160
+            ),
+            TextboxDef(
+                poly_def = RectDef(p1=P(0.50, 0.9), p2=P(0.50, 0.9), px1=P(2, 0), px2=P(180, 40), fill_color=QColor(255, 255, 255, 40), outline_color=QColor(220, 200, 255, 255), outline_width=1),
+                text_def = TextDef(p=P(0.50, 0.9), px=P(10, 10), font_size=12, h_align=0, v_align=0, text='Longitude', uniform_scale=False, fill_color=QColor(255, 255, 255, 255)),
+                max_length = 0, max_length_px = 160
+            ),
+        ],
+        button_defs=[
+            # for creating markers
+            ButtonDef(
+                poly_def = RectDef(p1=P(0.75, 0.9), p2=P(0.75, 0.9), px1=P(2, 0), px2=P(140, 40), fill_color=QColor(240, 100, 230, 200), outline_color=QColor(220, 200, 255, 255), outline_width=1),
+                text_def = TextDef(p=P(0.75, 0.9), px=P(10, 10), font_size=12, h_align=0, v_align=0, text='Create Marker', uniform_scale=False, fill_color=QColor(50, 10, 40, 255)),
+            ),
+            # for rotating needle
+            ButtonDef(key=Qt.Key_Left, action='increment', continuous_update=True, event_out=get_event('needle_start_angle'), event_delta=0.5),
+            ButtonDef(key=Qt.Key_Right, action='increment', continuous_update=True, event_out=get_event('needle_start_angle'), event_delta=-0.5),
         ],
         arc_defs=[
-            ArcDef(center_p=P(0.75, 0.35), inner_p=P(0.75, 0.3), inner_px=P(100, 0), outer_p= P(0.75, 0.3), outer_px=P(103, 0), fill_color=QColor(255, 255, 255, 255), outline_width=0)
+            ArcDef(center_p=P(0.75, 0.37), inner_p=P(0.75, 0.4), inner_px=P(100, 0), outer_p= P(0.75, 0.4), outer_px=P(103, 0), fill_color=QColor(255, 255, 255, 255), outline_width=0),
         ],
     )
 
