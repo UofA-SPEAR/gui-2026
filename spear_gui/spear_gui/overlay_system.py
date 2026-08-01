@@ -701,6 +701,19 @@ class AnimatedOverlay(QWidget):
         for p in self._polygons: p.set_phase(phase)
         for t in self._texts:    t.set_phase(phase)
 
+    def _tick_elements(self):
+        any_visible = any_animating = False
+        for p in self._polygons:
+            p.update()
+            if not p.hidden:
+                any_visible = True
+                if not p.phase_done(): any_animating = True
+        for t in self._texts:
+            t.update()
+            if not t.hidden or t.defn.always_visible:
+                any_visible = True
+                if not t.phase_done(): any_animating = True
+        return any_visible, any_animating
 
     def _tick(self, external=False):
         any_visible, _ = self._tick_elements()
@@ -906,18 +919,7 @@ class _LoadingMixin:
 
     def notify_loaded(self):
         if any(p._phase == 'loaded' for p in self._polygons): return
-        QTimer.singleShot(50, self._do_loaded)
-
-    def _do_loaded(self):
-        self._broadcast('loaded')
-        # The loaded animation takes ~1.8s max. After 2.5s, force _done=True
-        # regardless of whether every sub-tween reports phase_done — some
-        # tweens use easing curves whose _ease_inverse bisection doesn't
-        # converge to exactly t=1.0, leaving them perpetually "active".
-        QTimer.singleShot(2500, self._force_done)
-
-    def _force_done(self):
-        self._done = True
+        QTimer.singleShot(50, lambda: self._broadcast('loaded'))
 
 class _SelectionMixin:
     def _sel_init(self):
@@ -1695,17 +1697,10 @@ class AnimatedButton:
 class SettingsOverlay(QWidget):
     TICK_MS=16
 
-    def __init__(self, polygon_defs, text_defs, slider_defs, button_defs, cam_w=1920, cam_h=1080, parent=None):
-        super().__init__(parent)
-        if parent is None:
-            # Legacy: standalone top-level window
-            self.setWindowFlags(Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint|Qt.Window)
-            self.setAttribute(Qt.WA_TranslucentBackground)
-        else:
-            # Child widget filling the container — no window flags needed,
-            # WA_NoSystemBackground lets QPainter draw transparent content.
-            self.setAttribute(Qt.WA_NoSystemBackground)
-            self.setAutoFillBackground(False)
+    def __init__(self, polygon_defs, text_defs, slider_defs, button_defs, cam_w=1920, cam_h=1080):
+        super().__init__(None)
+        self.setWindowFlags(Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint|Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True); self.setFocusPolicy(Qt.StrongFocus)
         self.cam_w = cam_w; self.cam_h = cam_h
         self._polygons = [AnimatedPolygon(d) for d in polygon_defs]
@@ -1724,13 +1719,11 @@ class SettingsOverlay(QWidget):
             sl.init_value(context); sl.set_phase('open')
         for btn in self._buttons: btn._set_phase('open')
         self._broadcast('open')
-        self.show(); self.raise_()
-        if self.parent() is None:
-            self.activateWindow()
-        self.clearMask()
+        self.show(); self.raise_(); self.activateWindow(); self.clearMask()
         app=QApplication.instance()
         if app:
-            f=SettingsMouseFilter(self)
+            f=SettingsMouseFilter(self); 
+            # f.set_panel(self)
             app.installEventFilter(f)
             self._mouse_filter=f
         self._tick_timer.start()
@@ -1825,15 +1818,10 @@ class SettingsOverlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         if not painter.isActive(): return
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         painter.setRenderHint(QPainter.Antialiasing)
-        if self.parent() is None:
-            # Top-level: clear to transparent first
-            painter.setCompositionMode(QPainter.CompositionMode_Source)
-            painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        else:
-            # Child widget: just fill with the panel background color
-            painter.fillRect(self.rect(), QColor(8, 8, 14, 230))
         painter.setPen(Qt.NoPen)
         w, h = self.width(), self.height()
         for poly in self._polygons:
@@ -2335,15 +2323,9 @@ class CameraSelectOverlay(QWidget):
 
     def __init__(self, parent=None, cam_w=1920, cam_h=1080,
                  initial_display_mode=0, initial_cams=2):
-        super().__init__(parent)
-        if parent is None:
-            # Legacy: standalone top-level window
-            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
-            self.setAttribute(Qt.WA_TranslucentBackground)
-        else:
-            # Child widget filling the container
-            self.setAttribute(Qt.WA_NoSystemBackground)
-            self.setAutoFillBackground(False)
+        super().__init__(None)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True); self.setFocusPolicy(Qt.StrongFocus)
         self.cam_w = cam_w; self.cam_h = cam_h
         self._initial_display_mode = initial_display_mode % NUM_DISPLAY_MODES
@@ -2372,10 +2354,7 @@ class CameraSelectOverlay(QWidget):
         self._broadcast('open')
         for btn in self._buttons: btn._set_phase('open')
         self._scroll.open_anim()
-        self.show(); self.raise_()
-        if self.parent() is None:
-            self.activateWindow()
-        self.clearMask()
+        self.show(); self.raise_(); self.activateWindow(); self.clearMask()
         f = _CSFilter(self); QApplication.instance().installEventFilter(f)
         self._filter = f
         self._tick_timer.start()
@@ -2494,13 +2473,10 @@ class CameraSelectOverlay(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         if not painter.isActive(): return
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         painter.setRenderHint(QPainter.Antialiasing)
-        if self.parent() is None:
-            painter.setCompositionMode(QPainter.CompositionMode_Source)
-            painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        else:
-            painter.fillRect(self.rect(), QColor(8, 8, 14, 230))
         painter.setPen(Qt.NoPen)
         w, h = self.width(), self.height()
         for poly in self._polygons:
@@ -2583,4 +2559,5 @@ class _CSFilter(QObject):
     def __init__(self, panel): super().__init__(panel); self._panel = panel
     def eventFilter(self, obj, event):
         if self._panel is None or self._panel._closing: return False
-        return _filter_buttons(self._panel, event)
+        return _filter_buttons(self._panel, event) 
+

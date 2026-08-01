@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, List
+from typing import Callable, List, Dict
 from PySide6.QtCore import QEasingCurve
 from PySide6.QtGui  import QColor
 
