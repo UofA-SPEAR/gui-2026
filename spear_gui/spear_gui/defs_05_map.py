@@ -23,7 +23,7 @@ from spear_gui.overlay_system import (
     SYS_FPS, SYS_FRAME_TIME, SYS_MOUSE, SYS_MOUSE_X, SYS_MOUSE_Y,
     get_spawn_event, GROUP_EVENT, SELECT_EVENT, SELF_ID, STATIC,
     get_spawn_mouse_norm, get_spawn_mouse_offset_px,
-    get_animated_window, delete_spawned_by_id
+    get_animated_window, delete_spawned_by_id, clear_spawned_by_group
 )
 import os
 
@@ -65,10 +65,10 @@ def render_map(map_id: int):
 map_file = 'map_1.png'
 map_w = 5120
 map_h = 5376
-map_p1_x=dms_to_decimal(53, 31, 52, 'N')
-map_p1_y=dms_to_decimal(113, 31, 52, 'W')
-map_p2_x=dms_to_decimal(53, 31, 22, 'N')
-map_p2_y=dms_to_decimal(113, 31, 4, 'W')
+map_p1_y=dms_to_decimal(53, 31, 52, 'N')
+map_p1_x=dms_to_decimal(113, 31, 52, 'W')
+map_p2_y=dms_to_decimal(53, 31, 22, 'N')
+map_p2_x=dms_to_decimal(113, 31, 4, 'W')
 # render_map(1)
 
 # MAP DATA
@@ -125,6 +125,30 @@ register_gradient(GradientDef(name="needle_2", p1=P(0.50, 0.50), p2=P(0.50, 0.50
     ], phases = {
         'open': Phase([GradientTween(stops=[GradientStop(0.0, QColor(69, 69, 245, 255)), GradientStop(1.0, QColor(69, 69, 245, 50))], start=0, dur=1.0, ease=QEasingCurve.OutQuint)]),
         'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(69, 69, 245, 0)), GradientStop(1.0, QColor(69, 69, 245, 0))], start=0, dur=1.0, ease=QEasingCurve.OutQuint)]),
+    }
+))
+
+
+register_gradient(GradientDef(name="no_marker_selected_text", p1=P(1, 0), p2=P(1, 0), px1=P(0, 30), px2=P(0, 60), phase_event=get_event('selected_marker_phase'), target="fill", stops=[
+        GradientStop(0.0, QColor(255, 255, 255, 255)),
+        GradientStop(0.99998, QColor(255, 255, 255, 255)),
+        GradientStop(0.99999, QColor(255, 255, 255, 0)),
+        GradientStop(1.0, QColor(255, 255, 255, 0)),
+    ], phases = {
+        'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(255, 255, 255, 255)), GradientStop(0.99998, QColor(255, 255, 255, 255)), GradientStop(0.99999, QColor(255, 255, 255, 0)), GradientStop(1.0, QColor(255, 255, 255, 0))], start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+        'open':  Phase([GradientTween(stops=[GradientStop(0.0, QColor(255, 255, 255, 255)), GradientStop(0.00001, QColor(255, 255, 255, 255)), GradientStop(0.00002, QColor(255, 255, 255, 0)), GradientStop(1.0, QColor(255, 255, 255, 0))], start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+    }
+))
+
+register_gradient(GradientDef(name="marker_selected_text", p1=P(1, 0), p2=P(1, 0), px1=P(0, 30), px2=P(0, 60), phase_event=get_event('selected_marker_phase'), target="fill", stops=[
+        GradientStop(0.49998, QColor(255, 255, 255, 0)),
+        GradientStop(0.49999, QColor(255, 255, 255, 255)),
+        GradientStop(0.5, QColor(255, 255, 255, 255)),
+        GradientStop(0.50001, QColor(255, 255, 255, 255)),
+        GradientStop(0.50002, QColor(255, 255, 255, 0)),
+    ], phases = {
+        'open':  Phase([GradientTween(stops=[GradientStop(0.49998, QColor(255, 255, 255, 0)), GradientStop(0.49999, QColor(255, 255, 255, 255)), GradientStop(0.5, QColor(255, 255, 255, 255)), GradientStop(0.50001, QColor(255, 255, 255, 255)), GradientStop(0.50002, QColor(255, 255, 255, 0))], start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+        'close': Phase([GradientTween(stops=[GradientStop(0, QColor(255, 255, 255, 0)), GradientStop(0.00001, QColor(255, 255, 255, 255)), GradientStop(0.5, QColor(255, 255, 255, 255)), GradientStop(0.99999, QColor(255, 255, 255, 255)), GradientStop(1, QColor(255, 255, 255, 0))], start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
     }
 ))
 
@@ -357,7 +381,7 @@ def _compute_target_marker_angle(args) -> float:
 
 
 
-
+SCREEN_OFFSET_LIMIT = 30000.0  # must be under the ±32767 QPainterPath limit
 
 def _latlon_to_map_px(lat: float, lon: float) -> Tuple[float, float]:
     p1x, p2x = get_event('p1_pos_x').value, get_event('p2_pos_x').value
@@ -365,6 +389,8 @@ def _latlon_to_map_px(lat: float, lon: float) -> Tuple[float, float]:
     ipx1, ipx2 = get_event('initial_map_image_px1').value, get_event('initial_map_image_px2').value
     tx = (lon - p1x) / (p2x - p1x) if p2x != p1x else 0.0
     ty = (lat - p1y) / (p2y - p1y) if p2y != p1y else 0.0
+    tx = max(-5.0, min(6.0, tx))
+    ty = max(-5.0, min(6.0, ty))
     map_px_x = ipx1.x + tx * (ipx2.x - ipx1.x)
     map_px_y = ipx1.y + ty * (ipx2.y - ipx1.y)
     return map_px_x, map_px_y
@@ -379,6 +405,14 @@ def _compute_map_pos_y(args) -> float:
     _, px_y = _latlon_to_map_px(lat, lon)
     return -px_y
 
+def _clamp_screen(v: float) -> float:
+    return max(-SCREEN_OFFSET_LIMIT, min(SCREEN_OFFSET_LIMIT, v))
+
+def _map_to_screen_offset(map_x: float, map_y: float) -> P:
+    mpx  = get_event('map_pos_x').value
+    mpy  = get_event('map_pos_y').value
+    zoom = get_event('map_zoom').value
+    return P(_clamp_screen((map_x + mpx) * zoom), _clamp_screen((map_y + mpy) * zoom))
 
 
 
@@ -396,6 +430,12 @@ def _spawn_marker_from_coords():
         lon = float(lon_raw.strip())
     except (TypeError, ValueError, AttributeError) as e:
         print(f'[spawn_from_coords] invalid input — lat={lat_raw!r} lon={lon_raw!r} error={e}')
+        return
+    if not (-90.0 <= lat <= 90.0):
+        print(f'[spawn_from_coords] lat={lat} out of valid range [-90, 90] — did you swap lat/lon?')
+        return
+    if not (-180.0 <= lon <= 180.0):
+        print(f'[spawn_from_coords] lon={lon} out of valid range [-180, 180] — did you swap lat/lon?')
         return
     print(f'[spawn_from_coords] spawning at lat={lat} lon={lon}')
     get_event('spawn_marker_source').value = 'coords'
@@ -437,7 +477,12 @@ def _route_tick(args):
         get_event('route_spawn_point').value = True
     return None
 
-
+def _route_clear():
+    global _route_last_point_px
+    anim = get_animated_window(map_display_window)
+    if anim is not None:
+        clear_spawned_by_group(anim, 'routepoint')
+    _route_last_point_px = None
 
 
 map_info_window = WindowDef(
@@ -446,48 +491,77 @@ map_info_window = WindowDef(
     # polygon_defs=[
     # ],
     text_defs=[
+        TextDef(p=P(0, 0), px=P(10, 12), text='SPAWN MARKER', font_size=14, bold=True, fill_color=QColor(171, 151, 247, 255), h_align=0.0, v_align=0),
         TextDef(p=P(1, 0), px=P(-10, 12), text='MARKER INFO', font_size=14, bold=True, fill_color=QColor(171, 151, 247, 255), h_align=1.0, v_align=0),
-        TextDef(p=P(1, 0), px=P(-10, 30), font_size=11, fill_color=QColor(255, 255, 255, 255), h_align=1.0, v_align=0,
-            text_fn=lambda ctx: 'NO MARKER SELECTED' if not get_event('targeted_marker').value else 'MARKER SELECTED'),
+        TextDef(p=P(1, 0), px=P(-10, 30), text='NO MARKER SELECTED', font_size=11, fill_color=QColor(255, 255, 255, 255), h_align=1.0, v_align=0, gradient=get_gradient('no_marker_selected_text')),
             # text_fn=lambda ctx: 'NO MARKER SELECTED' if not get_event('targeted_marker').value else f"selected: {get_event('targeted_marker').value}"),
         # TextDef(p=P(1, 0), px=P(-10, 40), font_size=11, fill_color=QColor(200, 200, 220, 200), h_align=1.0, v_align=0,
         #     text_fn=lambda ctx: get_event('selected_marker_phase').value)
     ],
     textbox_defs=[
         TextboxDef(
-            poly_def=RectDef(p1=P(1.0, 0.0), p2=P(1.0, 0.0), px1=P(-250, 50), px2=P(-100, 80), fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), outline_width=1),
-            text_def=TextDef(p=P(1.0, 0.0), px=P(-248, 78), fill_color=QColor(255, 255, 255, 255), font_size=12, h_align=0.0, v_align=1.0),
+            poly_def=RectDef(p1=P(1.0, 0.0), p2=P(1.0, 0.0), px1=P(-250, 30), px2=P(-100, 60), fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), outline_width=0,
+            phases={
+                'open':  Phase([RectTween(fill_color=QColor(101, 81, 176, 120), outline_width=1, px1=P(-250, 30), px2=P(-100, 60), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+                'close': Phase([RectTween(fill_color=QColor(101, 81, 176, 120), outline_width=0, px1=P(-250, 45), px2=P(-100, 45), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+            }),
+            text_def=TextDef(p=P(1.0, 0.0), px=P(-175, 45), fill_color=QColor(255, 255, 255, 255), font_size=12, h_align=0.5, v_align=0.5, gradient=get_gradient('marker_selected_text'),
+            phases={
+                'open': Phase([TextTween(fill_color=QColor(255, 255, 255, 255), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+                'close': Phase([TextTween(fill_color=QColor(255, 255, 255, 0), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+            }),
+            preview_text_def=TextDef(p=P(1.0, 0.0), px=P(-175, 45), text='RENAME', font_size=12, h_align=0.5, v_align=0.5, fill_color=QColor(255,255,255,255), gradient=get_gradient('marker_selected_text'),
+            phases={
+                'open': Phase([TextTween(fill_color=QColor(255, 255, 255, 255), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+                'close': Phase([TextTween(fill_color=QColor(255, 255, 255, 0), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+            }),
+            phase_override=get_event('selected_marker_phase'),
             event_out=get_event('marker_name_input'),
+            max_length_px=150,
             clear_when_sent=True,
             override_inputs=True,
             exit_when_sent=True,
         ),
 
         TextboxDef(
-            poly_def=RectDef(p1=P(1.0, 0.0), p2=P(1.0, 0.0), px1=P(-250, 90), px2=P(-175, 120), fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), outline_width=1),
-            text_def=TextDef(p=P(1.0, 0.0), px=P(-248, 118), fill_color=QColor(255, 255, 255, 255), font_size=11, h_align=0.0, v_align=1.0),
+            poly_def=RectDef(p1=P(0.0, 0.0), p2=P(0.0, 0.0), px1=P(5, 30), px2=P(105, 60), fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), outline_width=1),
+            text_def=TextDef(p=P(0.0, 0.0), px=P(55, 45), fill_color=QColor(255, 255, 255, 255), font_size=12, h_align=0.5, v_align=0.5),
+            preview_text_def=TextDef(p=P(0.0, 0.0), px=P(55, 45), text='LATITUDE', font_size=12, h_align=0.5, v_align=0.5, fill_color=QColor(255,255,255,255),
+            phases={
+                'open': Phase([TextTween(fill_color=QColor(255, 255, 255, 255), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+                'close': Phase([TextTween(fill_color=QColor(255, 255, 255, 0), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+            }),
             live_event_out=get_event('marker_lat_input'),
             clear_event=get_event('clear_marker_coord_inputs'),
-            exit_when_sent=False,
+            max_length_px=100,
+            override_inputs=True,
+            exit_when_sent=True,
             clear_when_sent=False,
         ),
         TextboxDef(
-            poly_def=RectDef(p1=P(1.0, 0.0), p2=P(1.0, 0.0), px1=P(-170, 90), px2=P(-95, 120), fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), outline_width=1),
-            text_def=TextDef(p=P(1.0, 0.0), px=P(-168, 118), fill_color=QColor(255, 255, 255, 255), font_size=11, h_align=0.0, v_align=1.0),
+            poly_def=RectDef(p1=P(0.0, 0.0), p2=P(0.0, 0.0), px1=P(110, 30), px2=P(210, 60), fill_color=QColor(101, 81, 176, 120), outline_color=QColor(171, 151, 247, 255), outline_width=1),
+            text_def=TextDef(p=P(0.0, 0.0), px=P(160, 45), fill_color=QColor(255, 255, 255, 255), font_size=12, h_align=0.5, v_align=0.5),
+            preview_text_def=TextDef(p=P(0.0, 0.0), px=P(160, 45), text='LONGITUDE', font_size=12, h_align=0.5, v_align=0.5, fill_color=QColor(255,255,255,255),
+            phases={
+                'open': Phase([TextTween(fill_color=QColor(255, 255, 255, 255), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+                'close': Phase([TextTween(fill_color=QColor(255, 255, 255, 0), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+            }),
             live_event_out=get_event('marker_lon_input'),
             clear_event=get_event('clear_marker_coord_inputs'),
-            exit_when_sent=False,
+            max_length_px=100,
+            override_inputs=True,
+            exit_when_sent=True,
             clear_when_sent=False,
         ),
     ],
     button_defs=[
         ButtonDef(
-            poly_def=RectDef(p1=P(1.0, 0.0), p2=P(1.0, 0.0), px1=P(-95, 65), px2=P(-5, 65), fill_color=QColor(150, 40, 40, 180), outline_color=QColor(220, 80, 80, 0), outline_width=0, phase_override=get_event('selected_marker_phase'), 
+            poly_def=RectDef(p1=P(1.0, 0.0), p2=P(1.0, 0.0), px1=P(-95, 45), px2=P(-5, 45), fill_color=QColor(150, 40, 40, 180), outline_color=QColor(220, 80, 80, 0), outline_width=0, phase_override=get_event('selected_marker_phase'), 
             phases={
-                'open':  Phase([RectTween(fill_color=QColor(150, 40, 40, 180), px1=P(-95, 50), px2=P(-5, 80), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
-                'close': Phase([RectTween(fill_color=QColor(150, 40, 40, 180), px1=P(-95, 65), px2=P(-5, 65), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+                'open':  Phase([RectTween(fill_color=QColor(150, 40, 40, 180), px1=P(-95, 30), px2=P(-5, 60), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
+                'close': Phase([RectTween(fill_color=QColor(150, 40, 40, 180), px1=P(-95, 45), px2=P(-5, 45), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
             }),
-            text_def=TextDef(p=P(1.0, 0.0), px=P(-50, 65), text='DELETE', bold=True, font_size=12, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 0), phase_override=get_event('selected_marker_phase'),
+            text_def=TextDef(p=P(1.0, 0.0), px=P(-50, 45), text='DELETE', bold=True, font_size=12, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255), gradient=get_gradient('marker_selected_text'), phase_override=get_event('selected_marker_phase'),
             phases={
                 'open': Phase([TextTween(fill_color=QColor(255, 255, 255, 255), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
                 'close': Phase([TextTween(fill_color=QColor(255, 255, 255, 0), start=0, dur=0.4, ease=QEasingCurve.OutQuint)]),
@@ -499,24 +573,30 @@ map_info_window = WindowDef(
             on_fire=_delete_targeted_marker,
         ),
         ButtonDef(
-            poly_def=RectDef(p1=P(1.0, 0.0), p2=P(1.0, 0.0), px1=P(-90, 90), px2=P(-5, 120), fill_color=QColor(60, 130, 80, 180), outline_color=QColor(90, 200, 130, 255), outline_width=1),
-            text_def=TextDef(p=P(1.0, 0.0), px=P(-47, 105), text='SPAWN', bold=True, font_size=11, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255)),
+            poly_def=RectDef(p1=P(0.0, 0.0), p2=P(0.0, 0.0), px1=P(215, 30), px2=P(275, 60), fill_color=QColor(60, 130, 80, 180), outline_color=QColor(90, 200, 130, 255), outline_width=1),
+            text_def=TextDef(p=P(0.0, 0.0), px=P(245, 45), text='SPAWN', bold=True, font_size=12, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255)),
             action='set',
             event_out=get_event('spawn_marker_source'),
             event_delta=None,
             on_fire=_spawn_marker_from_coords,
         ),
         ButtonDef(
-            poly_def=RectDef(p1=P(0.0, 1.0), p2=P(0.0, 1.0), px1=P(10, -70), px2=P(90, -40), fill_color=QColor(60, 130, 80, 180), outline_color=QColor(90, 200, 130, 255), outline_width=1),
-            text_def=TextDef(p=P(0.0, 1.0), px=P(50, -55), text='START', bold=True, font_size=11, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255)),
+            poly_def=RectDef(p1=P(0.0, 0.0), p2=P(0.0, 0.0), px1=P(5, 70), px2=P(85, 100), fill_color=QColor(60, 130, 80, 180), outline_color=QColor(90, 200, 130, 255), outline_width=1),
+            text_def=TextDef(p=P(0.0, 0.0), px=P(45, 85), text='START', bold=True, font_size=11, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255)),
             action='set', event_out=get_event('route_active'), event_delta=None,
             on_fire=_route_start,
         ),
         ButtonDef(
-            poly_def=RectDef(p1=P(0.0, 1.0), p2=P(0.0, 1.0), px1=P(95, -70), px2=P(175, -40), fill_color=QColor(150, 40, 40, 180), outline_color=QColor(220, 80, 80, 255), outline_width=1),
-            text_def=TextDef(p=P(0.0, 1.0), px=P(135, -55), text='STOP', bold=True, font_size=11, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255)),
+            poly_def=RectDef(p1=P(0.0, 0.0), p2=P(0.0, 0.0), px1=P(90, 70), px2=P(170, 100), fill_color=QColor(150, 40, 40, 180), outline_color=QColor(220, 80, 80, 255), outline_width=1),
+            text_def=TextDef(p=P(0.0, 0.0), px=P(130, 85), text='STOP', bold=True, font_size=11, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255)),
             action='set', event_out=get_event('route_active'), event_delta=None,
             on_fire=_route_stop,
+        ),
+        ButtonDef(
+            poly_def=RectDef(p1=P(0.0, 0.0), p2=P(0.0, 0.0), px1=P(175, 70), px2=P(255, 100), fill_color=QColor(90, 90, 100, 180), outline_color=QColor(150, 150, 165, 255), outline_width=1),
+            text_def=TextDef(p=P(0.0, 0.0), px=P(215, 85), text='CLEAR', bold=True, font_size=11, h_align=0.5, v_align=0.5, fill_color=QColor(255, 255, 255, 255)),
+            action='set', event_out=get_event('route_active'), event_delta=None,
+            on_fire=_route_clear,
         ),
     ],
     slider_defs=[
@@ -529,8 +609,8 @@ map_image_window = WindowDef(
     p1=P(0.0, 0.0), p2=P(1.0, 1.0), px1=P(0, 0), px2=P(0, 0),
     phase_event=get_event('main_page'),
     listener_defs=[
-        EventListener(value_fn=lambda ctx: (get_event('initial_map_image_px1').value, get_event('map_zoom').value, get_event('map_pos_x').value, get_event('map_pos_y').value), targets=[get_event('map_image_px1')], passthrough=True, transform=lambda v: P((v[0].x + v[2]) * v[1], (v[0].y + v[3]) * v[1])),
-        EventListener(value_fn=lambda ctx: (get_event('initial_map_image_px2').value, get_event('map_zoom').value, get_event('map_pos_x').value, get_event('map_pos_y').value), targets=[get_event('map_image_px2')], passthrough=True, transform=lambda v: P((v[0].x + v[2]) * v[1], (v[0].y + v[3]) * v[1])),
+        EventListener(value_fn=lambda ctx: (get_event('initial_map_image_px1').value, get_event('map_zoom').value, get_event('map_pos_x').value, get_event('map_pos_y').value), targets=[get_event('map_image_px1')], passthrough=True, transform=lambda v: P(_clamp_screen((v[0].x + v[2]) * v[1]), _clamp_screen((v[0].y + v[3]) * v[1]))),
+        EventListener(value_fn=lambda ctx: (get_event('initial_map_image_px2').value, get_event('map_zoom').value, get_event('map_pos_x').value, get_event('map_pos_y').value), targets=[get_event('map_image_px2')], passthrough=True, transform=lambda v: P(_clamp_screen((v[0].x + v[2]) * v[1]), _clamp_screen((v[0].y + v[3]) * v[1]))),
     ],
     polygon_defs=[
         RectDef(p1=P(0.5, 0.5), p2=P(0.5, 0.5), px1=P(-500, -500), px2=P(500, 500),
@@ -592,10 +672,10 @@ map_display_window = WindowDef(
         ),
     ],
     button_defs=[
-        ButtonDef(key=Qt.Key_Down, action='increment', continuous_update=True, event_out=get_event('pos_y'), event_delta=0.0001),
-        ButtonDef(key=Qt.Key_Up, action='increment', continuous_update=True, event_out=get_event('pos_y'), event_delta=-0.0001),
-        ButtonDef(key=Qt.Key_Left, action='increment', continuous_update=True, event_out=get_event('pos_x'), event_delta=0.0001),
-        ButtonDef(key=Qt.Key_Right, action='increment', continuous_update=True, event_out=get_event('pos_x'), event_delta=-0.0001),
+        ButtonDef(key=Qt.Key_Up, action='increment', continuous_update=True, event_out=get_event('pos_y'), event_delta=0.0001),
+        ButtonDef(key=Qt.Key_Down, action='increment', continuous_update=True, event_out=get_event('pos_y'), event_delta=-0.0001),
+        ButtonDef(key=Qt.Key_Right, action='increment', continuous_update=True, event_out=get_event('pos_x'), event_delta=0.0001),
+        ButtonDef(key=Qt.Key_Left, action='increment', continuous_update=True, event_out=get_event('pos_x'), event_delta=-0.0001),
         ButtonDef(poly_def=RectDef(p1=P(0, 0), p2=P(1, 1)), key=Qt.Key_P, mandatory_keys=Qt.Key_Shift, action='set',
             event_out=get_event('spawn_marker'), event_delta=True, invisible=True, ignore_click_consume=True,
             on_fire=_reset_spawn_source_mouse),
@@ -608,19 +688,14 @@ map_display_window = WindowDef(
                     p=[P(0.5, 0.5)] * 2, px=[P(0, 0), P(0, 0)], closed=False,
                     outline_color=QColor(0, 255, 0, 150), outline_width=2.0,
                     pos_fn=lambda self_x=STATIC(0), self_y=STATIC(1), prev_x=STATIC(2), prev_y=STATIC(3): [
-                        P((prev_x + get_event('map_pos_x').value) * get_event('map_zoom').value,
-                        (prev_y + get_event('map_pos_y').value) * get_event('map_zoom').value),
-                        P((self_x + get_event('map_pos_x').value) * get_event('map_zoom').value,
-                        (self_y + get_event('map_pos_y').value) * get_event('map_zoom').value),
+                        _map_to_screen_offset(prev_x, prev_y),
+                        _map_to_screen_offset(self_x, self_y),
                     ],
                 ),
                 PolygonDef(
                     p=[P(0.5, 0.5)] * 4, px=[P(-4, 0), P(0, -4), P(4, 0), P(0, 4)],
                     fill_color=QColor(0, 255, 0, 255),
-                    pos_fn=lambda self_x=STATIC(0), self_y=STATIC(1): P(
-                        (self_x + get_event('map_pos_x').value) * get_event('map_zoom').value,
-                        (self_y + get_event('map_pos_y').value) * get_event('map_zoom').value,
-                    ),
+                    pos_fn=lambda self_x=STATIC(0), self_y=STATIC(1): _map_to_screen_offset(self_x, self_y),
                 ),
             ],
             spawn_event=get_event('route_spawn_point'),
@@ -639,20 +714,11 @@ map_display_window = WindowDef(
             spawn_name_event_fn=get_marker_name_event,
             select_event=get_event('targeted_marker'),
             polygon_defs=[
-                # PolygonDef(p=[P(0.5, 0.5)]*4, px=[P(-10, 0), P(0, -10), P(10, 0), P(0, 10)], fill_color=QColor(171, 151, 247, 255),
-                #     pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): P(
-                #         (marker_x - get_event('map_pos_x').value) * get_event('map_zoom').value,
-                #         (marker_y - get_event('map_pos_y').value) * get_event('map_zoom').value,
-                #     ),
-                # ),
                 PolygonDef(
                     p=[P(0.5, 0.5)]*3, px=[P(-5, -5), P(-10, 0), P(-5, 5)], closed=False,
                     fill_color=QColor(0, 0, 0, 0),
                     outline_color=QColor(171, 151, 247, 0), outline_width=2.0,
-                    pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): P(
-                        (marker_x + get_event('map_pos_x').value) * get_event('map_zoom').value,
-                        (marker_y + get_event('map_pos_y').value) * get_event('map_zoom').value,
-                    ),
+                    pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): _map_to_screen_offset(marker_x, marker_y),
                     phase_override=SELF_ID,
                     phases={
                         'unselected': Phase([PolygonTween(px=[P(-5, -5), P(-10, 0), P(-5, 5)], outline_color=QColor(171, 151, 247, 0),   start=0, dur=0.2, ease=QEasingCurve.OutQuint)]),
@@ -663,10 +729,7 @@ map_display_window = WindowDef(
                     p=[P(0.5, 0.5)]*3, px=[P(5, -5), P(10, 0), P(5, 5)], closed=False,
                     fill_color=QColor(0, 0, 0, 0),
                     outline_color=QColor(171, 151, 247, 0), outline_width=2.0,
-                    pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): P(
-                        (marker_x + get_event('map_pos_x').value) * get_event('map_zoom').value,
-                        (marker_y + get_event('map_pos_y').value) * get_event('map_zoom').value,
-                    ),
+                    pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): _map_to_screen_offset(marker_x, marker_y),
                     phase_override=SELF_ID,
                     phases={
                         'unselected': Phase([PolygonTween(px=[P(5, -5), P(10, 0), P(5, 5)], outline_color=QColor(171, 151, 247, 0),   start=0, dur=0.2, ease=QEasingCurve.OutQuint)]),
@@ -677,19 +740,13 @@ map_display_window = WindowDef(
             text_defs=[
                 TextDef(p=P(0.5, 0.5), px=P(0, -10), font_size=10, v_align=1, uniform_scale=False, fill_color=QColor(171, 151, 247, 255),
                     text_fn=SELF_ID,
-                    pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): P(
-                        (marker_x + get_event('map_pos_x').value) * get_event('map_zoom').value,
-                        (marker_y + get_event('map_pos_y').value) * get_event('map_zoom').value,
-                    ),
+                    pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): _map_to_screen_offset(marker_x, marker_y),
                 ),
             ],
             button_defs=[
                 ButtonDef(
                     poly_def=PolygonDef(p=[P(0.5, 0.5)]*4, px=[P(-10, 0), P(0, -10), P(10, 0), P(0, 10)], fill_color=QColor(171/8, 151/8, 247/8, 255),
-                        pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): P(
-                            (marker_x + get_event('map_pos_x').value) * get_event('map_zoom').value,
-                            (marker_y + get_event('map_pos_y').value) * get_event('map_zoom').value,
-                        ),
+                        pos_fn=lambda marker_x=STATIC(0), marker_y=STATIC(1): _map_to_screen_offset(marker_x, marker_y),
                     ),
                     action='set',
                     event_out=SELECT_EVENT,

@@ -58,6 +58,11 @@ def _get_pixmap(path: str):
     _pixmap_cache[path] = pm
     return pm
 
+_active_override_textboxes: List['AnimatedTextbox'] = []
+
+def get_active_override_textbox() -> Optional['AnimatedTextbox']:
+    return _active_override_textboxes[-1] if _active_override_textboxes else None
+
 @dataclass(frozen=True)
 class P:
     x: float = 0.0
@@ -3835,9 +3840,11 @@ def SevenSegmentDisplay(
 class TextboxDef:
     poly_def:            PolygonDef         = field(default_factory=PolygonDef)
     text_def:            Optional[TextDef]  = None
+    preview_text_def:    Optional[TextDef]  = None
     event_out:           Optional[EventDef] = None
     live_event_out:      Optional[EventDef] = None
     clear_event:         Optional[EventDef] = None
+    phase_override:      Optional[Any]      = None
     max_length:          float              = 1.0
     max_length_px:       float              = 0.0
     clear_when_sent:     bool               = True
@@ -3925,49 +3932,86 @@ _NOSHIFT_MAP: Dict[int, str] = {
     Qt.Key_QuoteLeft:    '`', Qt.Key_Space:         ' ',
 }
 
+_KEY_REPEAT_DELAY    = 0.4
+_KEY_REPEAT_INTERVAL = 0.035
 
 class AnimatedTextbox:
-    def __init__(self, defn: TextboxDef,
-                 cam_w: int = MONITOR_RESOLUTIONS[0][0],
-                 cam_h: int = MONITOR_RESOLUTIONS[0][1]) -> None:
+    def __init__(self, defn: TextboxDef, cam_w: int = MONITOR_RESOLUTIONS[0][0], cam_h: int = MONITOR_RESOLUTIONS[0][1]) -> None:
         self.defn    = defn
         self.cam_w   = cam_w
         self.cam_h   = cam_h
 
-        self._polygon    = AnimatedPolygon(defn.poly_def)
-        self._text       = AnimatedText(defn.text_def) if defn.text_def else None
+        self._polygon      = AnimatedPolygon(defn.poly_def)
+        self._text         = AnimatedText(defn.text_def) if defn.text_def else None
+        self._preview_text = AnimatedText(defn.preview_text_def) if defn.preview_text_def else None
 
         self._buffer:    str  = ''
         self._active:    bool = False
         self._hovered:   bool = False
-        self._cur_phase: str  = ''
-        self._locked:    bool = False
-        self._last_poly: QPolygonF = QPolygonF()
         self._ctrl_held: bool = False
 
-        self._set_phase('open')
+        self._held_key:             Optional[int] = None
+        self._held_shift:           bool = False
+        self._held_ctrl:            bool = False
+        self._next_repeat_time: float = 0.0
 
+        self._base_phase:        str  = ''
+        self._interaction_phase: str  = 'unhover'
+        self._open_done:         bool = False
+
+        self._cur_phase: str = ''
+        self._last_poly: QPolygonF = QPolygonF()
+        self._last_override_phase: str = ''
+
+        self._set_base_phase('open')
         self.hidden: bool = False
 
-    # ── Phase ────────────────────────────────────────────────────
-
-    def _set_phase(self, phase: str) -> None:
-        if self._locked and phase not in ('open', 'close'):
+    def _set_base_phase(self, phase: str) -> None:
+        if phase not in ('open', 'close'):
             return
-        self._cur_phase = phase
-        self._locked    = phase in ('open', 'close')
-        self._polygon.set_phase(phase)
-        if self._text is not None:
-            self._text.set_phase(phase)
+        if phase == self._base_phase:
+            return
+        self._base_phase = phase
+        if phase == 'close':
+            self._active   = False
+            self._hovered  = False
+            self._held_key = None
+            if self in _active_override_textboxes:
+                _active_override_textboxes.remove(self)
+            self._interaction_phase = 'unhover'
+            self._open_done = False
+        elif phase == 'open':
+            self._open_done = False
+        self._recompute_and_apply()
 
-    # ── Hit test ─────────────────────────────────────────────────
+    def _set_interaction_phase(self, phase: str) -> None:
+        if phase not in ('hover', 'unhover', 'click'):
+            return
+        self._interaction_phase = phase
+        self._recompute_and_apply()
+
+    def _target_phase(self) -> str:
+        if self._base_phase == 'close':
+            return 'close'
+        if self._base_phase == 'open':
+            return 'open' if not self._open_done else self._interaction_phase
+        return self._base_phase or ''
+
+    def _recompute_and_apply(self) -> None:
+        target = self._target_phase()
+        if not target:
+            return
+        self._cur_phase = target
+        self._polygon.set_phase(target)
+        if self._text is not None:
+            self._text.set_phase(target)
+        if self._preview_text is not None:
+            self._preview_text.set_phase(target)
 
     def hit_test(self, mx: float, my: float, w: int, h: int) -> bool:
         if not self._last_poly.isEmpty():
             return self._last_poly.containsPoint(QPointF(mx, my), Qt.OddEvenFill)
         return False
-
-    # ── Input handling ───────────────────────────────────────────
 
     def _send(self) -> None:
         if self.defn.event_out is not None:
@@ -3977,13 +4021,46 @@ class AnimatedTextbox:
         if self.defn.exit_when_sent:
             self._deactivate()
 
-    def _deactivate(self) -> None:
-        self._active = False
-        self._set_phase('hover' if self._hovered else 'unhover')
-
     def _activate(self) -> None:
         self._active = True
-        self._set_phase('click')
+        if self.defn.override_inputs and self not in _active_override_textboxes:
+            _active_override_textboxes.append(self)
+        self._set_interaction_phase('click')
+
+    def _deactivate(self) -> None:
+        self._active   = False
+        self._held_key = None
+        if self in _active_override_textboxes:
+            _active_override_textboxes.remove(self)
+        self._set_interaction_phase('hover' if self._hovered else 'unhover')
+
+    def _apply_key_action(self, key: int, shift: bool, ctrl: bool) -> bool:
+        if key == Qt.Key_Backspace:
+            if ctrl:
+                s = self._buffer.rstrip(' ')
+                idx = len(s)
+                while idx > 0 and s[idx - 1] != ' ':
+                    idx -= 1
+                self._buffer = s[:idx]
+            else:
+                self._buffer = self._buffer[:-1]
+            return True
+
+        if key == Qt.Key_V and ctrl:
+            try:
+                text = QApplication.clipboard().text()
+            except Exception:
+                text = ''
+            if text:
+                self._buffer += text.replace('\r', '').replace('\n', ' ')
+            return True
+
+        ch = self._resolve_char(key, shift)
+        if ch is not None:
+            self._buffer += ch
+            return True
+
+        return False
 
     def key_press(self, key: int, shift: bool = False, ctrl: bool = False) -> bool:
         if key in (Qt.Key_Control, Qt.Key_Meta):
@@ -4001,20 +4078,14 @@ class AnimatedTextbox:
             self._deactivate()
             return True
 
-        if key == Qt.Key_Backspace:
-            if ctrl or self._ctrl_held:
-                s = self._buffer.rstrip(' ')
-                idx = len(s)
-                while idx > 0 and s[idx - 1] != ' ':
-                    idx -= 1
-                self._buffer = s[:idx]
-            else:
-                self._buffer = self._buffer[:-1]
-            return True
-
-        ch = self._resolve_char(key, shift)
-        if ch is not None:
-            self._buffer += ch
+        eff_ctrl = ctrl or self._ctrl_held
+        handled = self._apply_key_action(key, shift, eff_ctrl)
+        if handled:
+            if not (key == Qt.Key_V and eff_ctrl):
+                self._held_key         = key
+                self._held_shift       = shift
+                self._held_ctrl        = eff_ctrl
+                self._next_repeat_time = time.monotonic() + _KEY_REPEAT_DELAY
             return True
 
         return self.defn.override_inputs
@@ -4022,6 +4093,8 @@ class AnimatedTextbox:
     def key_release(self, key: int) -> bool:
         if key in (Qt.Key_Control, Qt.Key_Meta):
             self._ctrl_held = False
+        if self._held_key == key:
+            self._held_key = None
         return self._active and self.defn.override_inputs
 
     def _resolve_char(self, key: int, shift: bool) -> Optional[str]:
@@ -4040,8 +4113,6 @@ class AnimatedTextbox:
             return _NOSHIFT_MAP[key]
         return None
 
-    # ── Mouse ────────────────────────────────────────────────────
-
     def mouse_press(self, mx: float, my: float, w: int, h: int) -> bool:
         if self.hit_test(mx, my, w, h):
             self._activate()
@@ -4055,7 +4126,7 @@ class AnimatedTextbox:
         if hit != self._hovered:
             self._hovered = hit
             if not self._active:
-                self._set_phase('hover' if hit else 'unhover')
+                self._set_interaction_phase('hover' if hit else 'unhover')
 
     def mouse_release(self, mx: float, my: float, w: int, h: int) -> None:
         pass
@@ -4063,9 +4134,8 @@ class AnimatedTextbox:
     def _resolve_display_text(self, w: int, h: int) -> str:
         if self._text is None:
             return self._buffer
-        d    = self.defn
-        td   = self._text
-        clip_w_n  = d.max_length  * w + d.max_length_px
+        d = self.defn
+        clip_w_n = d.max_length * w + d.max_length_px
         font = self._text.build_font(1.0)
         fm   = QFontMetrics(font)
         text = self._buffer
@@ -4076,15 +4146,31 @@ class AnimatedTextbox:
     def update(self, widget_w: int = 0, widget_h: int = 0) -> None:
         if self.defn.clear_event is not None and self.defn.clear_event.value:
             self._buffer = ''
+
+        if self._active and self._held_key is not None:
+            now = time.monotonic()
+            while now >= self._next_repeat_time:
+                self._apply_key_action(self._held_key, self._held_shift, self._held_ctrl)
+                self._next_repeat_time += _KEY_REPEAT_INTERVAL
+        elif self._held_key is not None and not self._active:
+            self._held_key = None
+
         self._polygon.update()
         if self._text is not None:
             buf = self._buffer
             self._text.defn = _tw_replace(self._text.defn, text_fn=lambda ctx, b=buf: b)
             self._text.update()
-        if self._locked and self._polygon.phase_done():
-            self._locked = False
+        if self._preview_text is not None:
+            self._preview_text.update()
+
+        if self._base_phase == 'open' and not self._open_done:
+            if self._polygon.phase_done() and (self._text is None or self._text.phase_done()):
+                self._open_done = True
+                self._recompute_and_apply()
+
         if self.defn.live_event_out is not None:
             self.defn.live_event_out.value = self._buffer
+
         w, h = max(1, widget_w), max(1, widget_h)
         self._polygon._dirty = True
         self._last_poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
@@ -4097,11 +4183,25 @@ class AnimatedTextbox:
         if self.hidden:
             return
         self._polygon.draw(painter, w, h, self.cam_w, self.cam_h)
+
+        show_preview = (not self._buffer) and (not self._active) and self._preview_text is not None
+        if show_preview:
+            if not self._preview_text.hidden:
+                text_scale = scale if self._preview_text.defn.uniform_scale else 1.0
+                font  = self._preview_text.build_font(text_scale)
+                label = self._preview_text.resolve_text(None)
+                painter.setFont(font)
+                painter.setPen(self._preview_text.cur_color)
+                dx, dy = self._preview_text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font, text_scale)
+                painter.drawText(dx, dy, label)
+                painter.setPen(Qt.NoPen)
+            return
+
         if self._text is not None and not self._text.hidden:
             display = self._resolve_display_text(w, h)
             text_scale = scale if self._text.defn.uniform_scale else 1.0
-            font    = self._text.build_font(text_scale)
-            fm      = QFontMetrics(font)
+            font = self._text.build_font(text_scale)
+            fm   = QFontMetrics(font)
             painter.setFont(font)
             painter.setPen(self._text.cur_color)
             dx, dy = self._text.resolve_pos(w, h, self.cam_w, self.cam_h, display, font, text_scale)
@@ -4113,11 +4213,8 @@ class AnimatedTextbox:
                 pen = QPen(self._text.cur_color)
                 pen.setWidthF(1.5)
                 painter.setPen(pen)
-                painter.drawLine(QPointF(cursor_x, cursor_y_top),
-                                 QPointF(cursor_x, cursor_y_bot))
+                painter.drawLine(QPointF(cursor_x, cursor_y_top), QPointF(cursor_x, cursor_y_bot))
             painter.setPen(Qt.NoPen)
-
-
 
 
 
@@ -4867,6 +4964,16 @@ class AnimatedWindow:
                     phase = 'close'
                 btn._last_override_phase = phase
                 btn._set_base_phase(phase)
+        
+        for tb, td in zip(self._textboxes, defn.textbox_defs):
+            if td.phase_override is not None:
+                ov = td.phase_override
+                val = ov.value if hasattr(ov, 'value') else (ov() if callable(ov) else ov)
+                phase = str(val) if val is not None else ''
+                if phase not in ('open', 'close'):
+                    phase = 'close'
+                tb._last_override_phase = phase
+                tb._set_base_phase(phase)
 
         self._btn_grid: Dict[tuple, List[int]] = {}
         self._btn_bounds: List[Optional[tuple]] = [None] * len(self._buttons)
@@ -5023,8 +5130,9 @@ class AnimatedWindow:
         for btn, bd in zip(self._buttons, self.defn.button_defs):
             if bd.phase_override is None and phase in ('open', 'close'):
                 btn._set_base_phase(phase)
-        for tb in self._textboxes:
-            tb._set_phase(phase)
+        for tb, td in zip(self._textboxes, self.defn.textbox_defs):
+            if td.phase_override is None:
+                tb._set_base_phase(phase)
         for gd in _gradients.values():
             if gd.phase_event is None:
                 gd._animated.set_phase(phase)
@@ -5368,7 +5476,15 @@ class AnimatedWindow:
                 btn.update(int(ww), int(wh))
 
             # Textboxes
-            for tb in self._textboxes:
+            for tb, td in zip(self._textboxes, self.defn.textbox_defs):
+                ov = td.phase_override
+                if ov is not None:
+                    phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
+                    phase = str(phase) if phase is not None else ''
+                    if phase and phase != tb._last_override_phase:
+                        tb._last_override_phase = phase
+                        if phase in ('open', 'close'):
+                            tb._set_base_phase(phase)
                 tb.update(int(ww), int(wh))
 
             ipw, iph = int(ww), int(wh)
@@ -5717,14 +5833,16 @@ class AnimatedWindow:
         mods  = QApplication.keyboardModifiers()
         shift = bool(mods & Qt.ShiftModifier)
         ctrl  = bool(mods & Qt.ControlModifier)
-        consumed = False
+
         for inst in reversed(self._spawned):
             if inst.window.key_press(key):
-                consumed = True
+                return True
         for sw in reversed(self._sub_windows):
             if sw.defn.spawn_event is not None: continue
             if sw.key_press(key):
-                consumed = True
+                return True
+
+        consumed = False
         for tb in self._textboxes:
             if tb._active:
                 if tb.key_press(key, shift=shift, ctrl=ctrl):
@@ -5738,14 +5856,15 @@ class AnimatedWindow:
 
     def key_release(self, key: int) -> bool:
         self._held_keys.discard(key)
-        consumed = False
         for inst in reversed(self._spawned):
             if inst.window.key_release(key):
-                consumed = True
+                return True
         for sw in reversed(self._sub_windows):
             if sw.defn.spawn_event is not None: continue
             if sw.key_release(key):
-                consumed = True
+                return True
+
+        consumed = False
         for tb in self._textboxes:
             if tb.key_release(key):
                 if tb.defn.override_inputs:
@@ -6488,6 +6607,11 @@ def delete_spawned_by_id(parent_window: AnimatedWindow, obj_id: str) -> None:
         if inst.obj_id == obj_id:
             inst.group_event.value = inst.window.defn.spawn_delete_threshold
             return
+
+def clear_spawned_by_group(parent_window: AnimatedWindow, group: str) -> None:
+    for inst in parent_window._spawned:
+        if inst.window.defn.spawn_event_group == group:
+            inst.group_event.value = inst.window.defn.spawn_delete_threshold
 
 def _patch_fn_defaults(fn: Callable, new_defaults: tuple) -> Callable:
     import types

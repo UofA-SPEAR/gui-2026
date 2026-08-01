@@ -272,12 +272,25 @@ class MainOverlayWidget(QOpenGLWidget):
             return
         if event.isAutoRepeat():
             return
+        from spear_gui.overlay_system import get_active_override_textbox
+        tb = get_active_override_textbox()
+        if tb is not None:
+            mods  = QApplication.keyboardModifiers()
+            shift = bool(mods & Qt.ShiftModifier)
+            ctrl  = bool(mods & Qt.ControlModifier)
+            tb.key_press(event.key(), shift=shift, ctrl=ctrl)
+            return
         for win in self._windows:
             if win.key_press(event.key()):
                 return
 
     def keyReleaseEvent(self, event):
         if event.isAutoRepeat():
+            return
+        from spear_gui.overlay_system import get_active_override_textbox
+        tb = get_active_override_textbox()
+        if tb is not None:
+            tb.key_release(event.key())
             return
         for win in self._windows:
             if win.key_release(event.key()):
