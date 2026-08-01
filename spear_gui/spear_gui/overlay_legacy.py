@@ -27,6 +27,93 @@ from spear_gui.overlay_system import (
     GradientDef, GradientStop, GradientTween,
 )
 
+# SLIDERS
+def make_track_def(
+    p:         P     = P(),
+    px:        P     = P(),
+    length:    float = 0.0,
+    length_px: float = 0.0,
+    h_px:      float = 4.0,
+    fill_color:    QColor = None,
+    outline_color: QColor = None,
+    phases: Dict[str, Phase] = None,
+) -> PolygonDef:
+    half = h_px / 2.0
+    fc = fill_color    or QColor(255, 255, 255, 40)
+    oc = outline_color or QColor(0, 0, 0, 0)
+    return PolygonDef(
+        p  = [P(p.x, p.y), P(p.x+length, p.y), P(p.x+length, p.y), P(p.x, p.y)],
+        px = [P(px.x, px.y-half), P(px.x+length_px, px.y-half),
+              P(px.x+length_px, px.y+half), P(px.x, px.y+half)],
+        fill_color    = fc,
+        outline_color = oc,
+        closed        = True,
+        phases        = phases or {},
+    )
+
+def make_knob_def(
+    fill_color: QColor = None,
+    phases: Dict[str, Phase] = None,
+) -> PolygonDef:
+    fc = fill_color or QColor(255, 255, 255)
+    return PolygonDef(
+        p             = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
+        px            = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
+        fill_color    = fc,
+        outline_color = QColor(0, 0, 0, 0),
+        closed        = True,
+        phases        = phases or {},
+    )
+
+def make_mark_fill_def(
+    p:      P     = P(),
+    px:     P     = P(),
+    h_px:   float = 8.0,
+    fill_color: QColor = None,
+    phases: Dict[str, Phase] = None,
+) -> PolygonDef:
+    half = h_px / 2.0
+    fc   = fill_color or QColor(255, 255, 255, 60)
+    return PolygonDef(
+        p  = [P(p.x, p.y)] * 4,
+        px = [P(px.x, px.y-half), P(px.x, px.y-half),
+              P(px.x, px.y+half), P(px.x, px.y+half)],
+        fill_color    = fc,
+        outline_color = QColor(0, 0, 0, 0),
+        closed        = True,
+        phases        = phases or {},
+    )
+
+def make_mark_tick_def(
+    p:      P     = P(),
+    px:     P     = P(),
+    w_px:   float = 3.0,
+    h_px:   float = 14.0,
+    fill_color: QColor = None,
+    phases: Dict[str, Phase] = None,
+) -> PolygonDef:
+    hw = w_px / 2.0
+    hh = h_px / 2.0
+    fc = fill_color or QColor(255, 255, 255, 200)
+    return PolygonDef(
+        p  = [P(p.x, p.y)] * 4,
+        px = [P(px.x-hw, px.y-hh), P(px.x+hw, px.y-hh),
+              P(px.x+hw, px.y+hh), P(px.x-hw, px.y+hh)],
+        fill_color    = fc,
+        outline_color = QColor(0, 0, 0, 0),
+        closed        = True,
+        phases        = phases or {},
+    )
+
+
+@dataclass
+class SliderTextDefs:
+    label:   Optional[TextDef] = None   # anchored near track P1, static
+    min_val: Optional[TextDef] = None   # anchored at track P1
+    max_val: Optional[TextDef] = None   # anchored at track P2
+    current: Optional[TextDef] = None   # follows knob (px injected each frame)
+
+
 # ──────────────────────── AnimatedOverlay ────────────────────────
 
 class AnimatedOverlay(QWidget):

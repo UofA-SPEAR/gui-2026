@@ -1,175 +1,309 @@
-# from __future__ import annotations
-# from typing import Any, Callable, Dict, List, Optional, Tuple
-# import math
+from __future__ import annotations
+from typing import Any, Callable, Dict, List, Optional, Tuple
+import math
 
-# from PySide6.QtCore import Qt, QEasingCurve
-# from PySide6.QtGui  import QColor
+from PySide6.QtCore import Qt, QEasingCurve
+from PySide6.QtGui  import QColor
 
-# from spear_gui.overlay_system import (
-#     P, Reset, Phase, expand_defs,
-#     PolygonDef, PolygonTween, RectDef, RectTween,                              # PolygonDef
-#     ArcDef,                                                                    # ArcDef
-#     TextDef, TextTween, TextBlock, DataTable,                                  # TextDef
-#     SliderDef,                                                                 # SliderDef
-#     ButtonDef, SegmentedButtons, Segment, SevenSegmentDisplay,                 # ButtonDef
-#     TextboxDef,                                                                # TextboxDef
-#     GraphDef, SeriesDef,                                                       # GraphDef
-#     PieDef,                                                                    # PieDef
-#     WindowDef, WindowTween, register_windows,                                  # WindowDef
-#     EventDef, EventListener, register_event, get_event,                        # EventDef
-#     GradientDef, GradientStop, GradientTween, register_gradient, get_gradient, # GradientDef
+from spear_gui.overlay_system import (
+    P, Reset, Phase, expand_defs,
+    PolygonDef, PolygonTween, RectDef, RectTween,                              # PolygonDef
+    ArcDef,                                                                    # ArcDef
+    TextDef, TextTween, TextBlock, DataTable,                                  # TextDef
+    BasicSliderDef, SliderDef,                                                 # SliderDef
+    ButtonDef, SegmentedButtons, Segment, SevenSegmentDisplay,                 # ButtonDef
+    TextboxDef,                                                                # TextboxDef
+    GraphDef, SeriesDef,                                                       # GraphDef
+    PieDef,                                                                    # PieDef
+    WindowDef, WindowTween, register_windows,                                  # WindowDef
+    EventDef, EventListener, register_event, get_event,                        # EventDef
+    GradientDef, GradientStop, GradientTween, register_gradient, get_gradient, # GradientDef
 
-#     P_OPEN, P_CLOSE, P_HOVER, P_UNHOVER, P_CLICK, P_RELEASE, P_SET, P_ALWAYS,
-#     SYS_FPS, SYS_FRAME_TIME, SYS_MOUSE, SYS_MOUSE_X, SYS_MOUSE_Y,
-#     get_spawn_event, GROUP_EVENT, STATIC, get_spawn_mouse_norm
+    P_OPEN, P_CLOSE, P_HOVER, P_UNHOVER, P_CLICK, P_RELEASE, P_SET, P_ALWAYS,
+    SYS_FPS, SYS_FRAME_TIME, SYS_MOUSE, SYS_MOUSE_X, SYS_MOUSE_Y,
+    get_spawn_event, GROUP_EVENT, STATIC, get_spawn_mouse_norm, get_spawn_mouse_offset_px, get_own_window_size_px
+)
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+WINDOW_LAYER = 10
+
+register_gradient(GradientDef(
+    name='startup_grid', p1=P(0.5, 0.5), p2=P(1, 1), radial=True, target='outline', stops=[
+        GradientStop(0.0, QColor(0, 0, 0, 0)),
+        GradientStop(1.0, QColor(0, 0, 0, 0)),
+    ], phase_event=get_event('layout_page'), phases={
+        'open': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 50)), GradientStop(1.0, QColor(0, 0, 0, 0))], start=0, dur=0.5, ease=QEasingCurve.OutQuint)]),
+        'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 0)), GradientStop(1.0, QColor(0, 0, 0, 0))], start=0, dur=0.5, ease=QEasingCurve.OutQuint)]),
+    }
+))
+
+register_gradient(GradientDef(
+    name='layout_white_fill', p1=P(0, 0), p2=P(1, 1), px1=P(-3, -3), px2=P(3, 3), target='fill', global_position=True, stops=[
+        GradientStop(0.0, QColor(170, 170, 170, 255)),
+        GradientStop(0.0001, QColor(170, 170, 170, 255)),
+        GradientStop(0.0002, QColor(170, 170, 170, 0)),
+        GradientStop(1.0, QColor(170, 170, 170, 0)),
+    ], phase_event=get_event('layout_page'), phases={
+        'open': Phase([GradientTween(stops=[GradientStop(0.0, QColor(170, 170, 170, 255)), GradientStop(0.9998, QColor(170, 170, 170, 255)), GradientStop(0.9999, QColor(170, 170, 170, 0)), GradientStop(1.00, QColor(170, 170, 170, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+        'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(170, 170, 170, 255)), GradientStop(0.0001, QColor(170, 170, 170, 255)), GradientStop(0.0002, QColor(170, 170, 170, 0)), GradientStop(1.00, QColor(170, 170, 170, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+    }
+))
+
+register_gradient(GradientDef(
+    name='layout_black_fill', p1=P(0, 0), p2=P(1, 1), px1=P(-3, -3), px2=P(3, 3), target='fill', global_position=True, stops=[
+        GradientStop(0.0, QColor(0, 0, 0, 255)),
+        GradientStop(0.0001, QColor(0, 0, 0, 255)),
+        GradientStop(0.0002, QColor(0, 0, 0, 0)),
+        GradientStop(1.0, QColor(0, 0, 0, 0)),
+    ], phase_event=get_event('layout_page'), phases={
+        'open': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 255)), GradientStop(0.9998, QColor(0, 0, 0, 255)), GradientStop(0.9999, QColor(0, 0, 0, 0)), GradientStop(1.00, QColor(0, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+        'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 255)), GradientStop(0.0001, QColor(0, 0, 0, 255)), GradientStop(0.0002, QColor(0, 0, 0, 0)), GradientStop(1.00, QColor(0, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+    }
+))
+
+register_gradient(GradientDef(
+    name='layout_black_outline', p1=P(0, 0), p2=P(1, 1), px1=P(-3, -3), px2=P(3, 3), target='outline', global_position=True, stops=[
+        GradientStop(0.0, QColor(0, 0, 0, 255)),
+        GradientStop(0.0001, QColor(0, 0, 0, 255)),
+        GradientStop(0.0002, QColor(0, 0, 0, 0)),
+        GradientStop(1.0, QColor(0, 0, 0, 0)),
+    ], phase_event=get_event('layout_page'), phases={
+        'open': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 255)), GradientStop(0.9998, QColor(0, 0, 0, 255)), GradientStop(0.9999, QColor(0, 0, 0, 0)), GradientStop(1.00, QColor(0, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+        'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 255)), GradientStop(0.0001, QColor(0, 0, 0, 255)), GradientStop(0.0002, QColor(0, 0, 0, 0)), GradientStop(1.00, QColor(0, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+    }
+))
+
+register_gradient(GradientDef(
+    name='layout_black_translucent_fill', p1=P(0, 0), p2=P(1, 1), px1=P(-3, -3), px2=P(3, 3), target='fill', global_position=True, stops=[
+        GradientStop(0.0, QColor(0, 0, 0, 100)),
+        GradientStop(0.0001, QColor(0, 0, 0, 100)),
+        GradientStop(0.0002, QColor(0, 0, 0, 0)),
+        GradientStop(1.0, QColor(0, 0, 0, 0)),
+    ], phase_event=get_event('layout_page'), phases={
+        'open': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 100)), GradientStop(0.9998, QColor(0, 0, 0, 100)), GradientStop(0.9999, QColor(0, 0, 0, 0)), GradientStop(1.00, QColor(0, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+        'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 100)), GradientStop(0.0001, QColor(0, 0, 0, 100)), GradientStop(0.0002, QColor(0, 0, 0, 0)), GradientStop(1.00, QColor(0, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+    }
+))
+
+register_gradient(GradientDef(
+    name='layout_red_fill', p1=P(0, 0), p2=P(1, 1), px1=P(-3, -3), px2=P(3, 3), target='fill', global_position=True, stops=[
+        GradientStop(0.0, QColor(150, 0, 0, 100)),
+        GradientStop(0.0001, QColor(150, 0, 0, 100)),
+        GradientStop(0.0002, QColor(150, 0, 0, 0)),
+        GradientStop(1.0, QColor(150, 0, 0, 0)),
+    ], phase_event=get_event('layout_page'), phases={
+        'open': Phase([GradientTween(stops=[GradientStop(0.0, QColor(150, 0, 0, 100)), GradientStop(0.9998, QColor(150, 0, 0, 100)), GradientStop(0.9999, QColor(150, 0, 0, 0)), GradientStop(1.00, QColor(150, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+        'close': Phase([GradientTween(stops=[GradientStop(0.0, QColor(150, 0, 0, 100)), GradientStop(0.0001, QColor(150, 0, 0, 100)), GradientStop(0.0002, QColor(150, 0, 0, 0)), GradientStop(1.00, QColor(150, 0, 0, 0))], start=0, dur=1.0, ease=QEasingCurve.OutExpo)]),
+    }
+))
+
+background_polygons = [
+    RectDef(p1=P(0, 0), p2=P(1, 1), gradient=get_gradient('layout_white_fill'), phase_override=get_event('layout_page'))
+]
+
+for i in range(19):
+    px = (i - 9) * 120
+    background_polygons += [
+        PolygonDef(p=[P(0.5, 0), P(0.5, 1)], px=[P(px, 0), P(px, 0)], outline_color=QColor(255, 255, 255, 10), gradient=get_gradient('startup_grid'), outline_width=1),
+    ]
+for i in range(11):
+    py = (i - 5) * 120
+    background_polygons += [
+        PolygonDef(p=[P(0, 0.5), P(1, 0.5)], px=[P(0, py), P(0, py)], outline_color=QColor(255, 255, 255, 10), gradient=get_gradient('startup_grid'), outline_width=1, phases={
+            'always': Phase([PolygonTween(px=[P(0, 120), P(0, 120)], start=0.0, dur=5.0, ease=QEasingCurve.Linear)], loop=True, stop_phases=['close']),
+        }),
+    ]
+
+# MAP WINDOW
+map_window = WindowDef(
+    p1=P(0.0, 0.0), p2=P((740-70)/1920, 0.6), px1=P(0, 0), px2=P(0, 0),
+    export_p1=get_event('map_window_p1'),
+    export_p2=get_event('map_window_p2'),
+    export_px1=get_event('map_window_px1'),
+    export_px2=get_event('map_window_px2'),
+    draggable=True, scalable=True, grid_snap_pixel=True, force_boundary=True, sticky_boundary=True, grid_snap_x=10, grid_snap_y=10, drag_boundary_px1=P(70, 0), drag_boundary_px2=P(-70, 0),
+    ignore_mouse_event=lambda: not get_event('layout_mode').value,
+    polygon_defs=[
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 1), p2=P(1, 1), px1=P(0, -10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=4),
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 40), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=2),
+    ],
+    text_defs=[
+        TextDef(p=P(0, 0), px=P(2, 38), text='1.', bold=True, h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(2, 42), text='MAP', bold=True, h_align=0, v_align=0, font_size=70, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(32, 38), text='<#> x <#>', h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill'), text_fn=lambda ctx: [
+            f'{get_own_window_size_px().x:.0f}',
+            f'{get_own_window_size_px().y:.0f}',
+        ])
+    ]
+)
+
+# LOGGER WINDOW
+logger_window = WindowDef(
+    p1=P((740+70)/1920, 0.0), p2=P(1-(740+70)/1920, 1.0), px1=P(0, 0), px2=P(0, 0),
+    export_p1=get_event('logger_window_p1'),
+    export_p2=get_event('logger_window_p2'),
+    export_px1=get_event('logger_window_px1'),
+    export_px2=get_event('logger_window_px2'),
+    draggable=True, scalable=True, grid_snap_pixel=True, force_boundary=True, sticky_boundary=True, grid_snap_x=10, grid_snap_y=10, drag_boundary_px1=P(70, 0), drag_boundary_px2=P(-70, 0),
+    ignore_mouse_event=lambda: not get_event('layout_mode').value,
+    polygon_defs=[
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 1), p2=P(1, 1), px1=P(0, -10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=4),
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 40), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=2),
+    ],
+    text_defs=[
+        TextDef(p=P(0, 0), px=P(2, 38), text='2.', bold=True, h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(2, 42), text='LOGGER', bold=True, h_align=0, v_align=0, font_size=70, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(32, 38), text='<#> x <#>', h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill'), text_fn=lambda ctx: [
+            f'{get_own_window_size_px().x:.0f}',
+            f'{get_own_window_size_px().y:.0f}',
+        ])
+    ]
+)
+
+# INFO WINDOW
+info_window = WindowDef(
+    p1=P(0.0, 0.6), p2=P((740-70)/1920, 1.0), px1=P(0, 0), px2=P(0, 0),
+    export_p1=get_event('info_window_p1'),
+    export_p2=get_event('info_window_p2'),
+    export_px1=get_event('info_window_px1'),
+    export_px2=get_event('info_window_px2'),
+    draggable=True, scalable=True, grid_snap_pixel=True, force_boundary=True, sticky_boundary=True, grid_snap_x=10, grid_snap_y=10, drag_boundary_px1=P(70, 0), drag_boundary_px2=P(-70, 0),
+    ignore_mouse_event=lambda: not get_event('layout_mode').value,
+    polygon_defs=[
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 1), p2=P(1, 1), px1=P(0, -10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=4),
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 40), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=2),
+    ],
+    text_defs=[
+        TextDef(p=P(0, 0), px=P(2, 38), text='3.', bold=True, h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(2, 42), text='INFO DISPLAY', bold=True, h_align=0, v_align=0, font_size=70, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(32, 38), text='<#> x <#>', h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill'), text_fn=lambda ctx: [
+            f'{get_own_window_size_px().x:.0f}',
+            f'{get_own_window_size_px().y:.0f}',
+        ])
+    ]
+)
+# TASK WINDOW
+task_window = WindowDef(
+    p1=P(1-(740-70)/1920, 0.0), p2=P(1.0, 1.0), px1=P(0, 0), px2=P(0, 0),
+    export_p1=get_event('task_window_p1'),
+    export_p2=get_event('task_window_p2'),
+    export_px1=get_event('task_window_px1'),
+    export_px2=get_event('task_window_px2'),
+    draggable=True, scalable=True, grid_snap_pixel=True, force_boundary=True, sticky_boundary=True, grid_snap_x=10, grid_snap_y=10, drag_boundary_px1=P(70, 0), drag_boundary_px2=P(-70, 0),
+    ignore_mouse_event=lambda: not get_event('layout_mode').value,
+    polygon_defs=[
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 1), p2=P(1, 1), px1=P(0, -10), gradient=get_gradient('layout_black_fill')),
+        RectDef(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=4),
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 40), fill_color=QColor(255, 0, 0, 0), gradient=get_gradient('layout_black_outline'), outline_width=2),
+    ],
+    text_defs=[
+        TextDef(p=P(0, 0), px=P(2, 38), text='5.', bold=True, h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(2, 42), text='TASKS', bold=True, h_align=0, v_align=0, font_size=70, gradient=get_gradient('layout_black_fill')),
+        TextDef(p=P(0, 0), px=P(32, 38), text='<#> x <#>', h_align=0, v_align=1, font_size=16, gradient=get_gradient('layout_black_fill'), text_fn=lambda ctx: [
+            f'{get_own_window_size_px().x:.0f}',
+            f'{get_own_window_size_px().y:.0f}',
+        ])
+    ],
+    button_defs=[
+        ButtonDef(poly_def=RectDef(p1=P(1, 0), p2=P(1, 0), px1=P(-40, 0), px2=P(0, 40), gradient=get_gradient('layout_black_fill')), event_out=get_event('force_hide_map_window'), action='cycle', event_delta=[True, False]),
+    ],
+)
+
+layout_window = WindowDef(
+    p1=P(0.0, 0.0), p2=P(1, 1),
+    listener_defs=[
+        EventListener(value_fn=lambda ctx: get_event('layout_mode').value, targets=[get_event('layout_page')], conditions=[lambda v: v], values=['open', 'close']),
+    ],
+    polygon_defs=background_polygons + [
+        PolygonDef(p=[P(0.5, 0.7)]*4, px=[P(-130 - 2, -50), P(-120 + 2, -50), P(-120, 25), P(-130, 25)], gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), PolygonTween(p=[P(0.5, 0.6)]*4, start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([PolygonTween(p=[P(0.5, 0.7)]*4, start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+        RectDef(p1=P(0.5, 0.7), p2=P(0.5, 0.7), px1=P(-130, 40), px2=P(-120, 50), gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), RectTween(p1=P(0.5, 0.6), p2=P(0.5, 0.6), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([RectTween(p1=P(0.5, 0.7), p2=P(0.5, 0.7), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+        PolygonDef(p=[P(0.5, 0.7)]*4, px=[P(120 - 2, -50), P(130 + 2, -50), P(130, 25), P(120, 25)], gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), PolygonTween(p=[P(0.5, 0.6)]*4, start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([PolygonTween(p=[P(0.5, 0.7)]*4, start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+        RectDef(p1=P(0.5, 0.7), p2=P(0.5, 0.7), px1=P(120, 40), px2=P(130, 50), gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), RectTween(p1=P(0.5, 0.6), p2=P(0.5, 0.6), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([RectTween(p1=P(0.5, 0.7), p2=P(0.5, 0.7), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+    ],
+    text_defs=[
+        TextDef(p=P(0.4, 0.5), px=P(0, -2), text='EDITING LAYOUT', bold=True, h_align=0.5, v_align=1, font_size=100, gradient=get_gradient('layout_black_translucent_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), TextTween(p=P(0.5, 0.5), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([TextTween(p=P(0.6, 0.5), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+        TextDef(p=P(0.6, 0.5), px=P(0, 2), text='PRESS [L] TO CONFIRM EDITS', bold=True, h_align=0.5, v_align=0.5, font_size=30, gradient=get_gradient('layout_black_translucent_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), TextTween(p=P(0.5, 0.5), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([TextTween(p=P(0.4, 0.5), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+        TextDef(p=P(0.5, 0.7), px=P(0, -2), text='OVERLAP', bold=True, h_align=0.5, v_align=1.0, font_size=30, gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), TextTween(p=P(0.5, 0.6), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([TextTween(p=P(0.5, 0.7), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+        TextDef(p=P(0.5, 0.7), px=P(0, 2), text='DETECTED', bold=True, h_align=0.5, v_align=0.0, font_size=30, gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page'), phases={
+            'open': Phase([Reset(), TextTween(p=P(0.5, 0.6), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+            'close': Phase([TextTween(p=P(0.5, 0.7), start=0, dur=0.85, ease=QEasingCurve.OutQuint)]),
+        }),
+    ],
+    button_defs=[
+        ButtonDef(key=Qt.Key_L, event_out=get_event('layout_mode'), action='cycle', event_delta=[True, False]),
+    ],
+    sub_windows=[map_window, logger_window, info_window, task_window]
+)
+
+overlay_window = WindowDef(
+    p1=P(0.0, 0.0), p2=P(1, 1),
+    polygon_defs=[
+        # RED BORDER LIMITS
+        RectDef(p1=P(0, 0), p2=P(0, 1), px1=P(0, 0), px2=P(70, 0), gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page')),
+        RectDef(p1=P(1, 0), p2=P(1, 1), px1=P(-70, 0), px2=P(0, 0), gradient=get_gradient('layout_red_fill'), phase_override=get_event('layout_page')),
+
+        # BLACK OUTLINE DETAIL
+        RectDef(p1=P(0, 0), p2=P(1, 0), px2=P(0, 10), gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+        RectDef(p1=P(0, 1), p2=P(1, 1), px1=P(0, -10), gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+        PolygonDef(p=[P(0.5, 0)]*4, px=[P(-165, 0), P(165, 0), P(145, 20), P(-145, 20)], gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+        PolygonDef(p=[P(0.5, 1)]*4, px=[P(-165, 0), P(165, 0), P(145, -20), P(-145, -20)], gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+        PolygonDef(p=[P(0, 0)]*4, px=[P(0, 0), P(10, 0), P(10, 50), P(0, 60)], gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+        PolygonDef(p=[P(1, 0)]*4, px=[P(0, 0), P(-10, 0), P(-10, 50), P(0, 60)], gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+        PolygonDef(p=[P(0, 1)]*4, px=[P(0, 0), P(10, 0), P(10, -50), P(0, -60)], gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+        PolygonDef(p=[P(1, 1)]*4, px=[P(0, 0), P(-10, 0), P(-10, -50), P(0, -60)], gradient=get_gradient('layout_black_fill'), phase_override=get_event('layout_page')),
+    ],
+    text_defs=[
+        TextDef(p=P(0.5, 0), px=P(0, 1), text='- <#> -', font_size=15, h_align=0.5, v_align=0.0, gradient=get_gradient('layout_white_fill'), text_fn=lambda ctx: datetime.now(ZoneInfo('America/Edmonton')).time().replace(microsecond=0)),
+        TextDef(p=P(0.5, 1), px=P(0, 0), text='SPEAR', font_size=15, h_align=0.5, v_align=1.0, gradient=get_gradient('layout_white_fill')),
+    ],
+)
+
+# task_window = WindowDef(
+#     p1=P(0.0, 0.0), p2=P(0.5, 0.5),
+#     phase_event=get_event('task_window_p1'),   # any live event just to keep polling active
+#     phase_fn=lambda v: 'sync',
+#     phases={
+#         'sync': Phase([WindowTween(p1=get_event('task_window_p1'), p2=get_event('task_window_p2'), start=0, dur=0, ease=QEasingCurve.OutQuint)], update_retrigger=True)
+#     },
+#     polygon_defs=[
+#         RectDef(p1=P(0, 0), p2=P(1, 1), fill_color=QColor(0, 255, 0, 50))
+#     ],
 # )
 
-# WINDOW_LAYER = 0
 
-# subscription_list = ['test_value1', 'test_value2', 'test_value3', 'test_value4', 'test_value5', 'test_value6', 'test_value7', 'test_value8', 'test_value9', 'test_value10']
-# subscription_columns = 2
-# subscription_listeners = []
-# subscription_polygons = []
-# subscription_texts = []
-# for i in range(len(subscription_list)):
-#     print(subscription_list[i])
-#     x = i % subscription_columns
-#     y = math.floor(i / subscription_columns)
-#     target_x = x / 10 + 0.7
-#     target_y = y / 10 + 0.25
-#     name = f'sub_sample_pulse{i}'
-#     register_event(EventDef(name=name, value=None))
-#     register_gradient(GradientDef(
-#         name=name, p1=P(target_x, target_y), p2=P(target_x, target_y), px1=P(0, 0), px2=P(-60, 0), target='fill', phase_event=get_event(name),
-#         stops=[GradientStop(0.0, QColor(255, 0, 0, 255)), GradientStop(1.0, QColor(255, 0, 0, 0))], 
-#         phases={'pulse': Phase([
-#             GradientTween(stops=[GradientStop(0.0, QColor(0, 100, 0, 255)), GradientStop(1.0, QColor(0, 255, 0, 0))], start=0, dur=0, ease=QEasingCurve.OutQuint),
-#             GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 0)), GradientStop(1.0, QColor(0, 0, 0, 0))], start=0, dur=1, ease=QEasingCurve.OutQuint),
-#             ])
-#         }
-#     ))
-#     subscription_listeners += [
-#         EventListener(value_fn='pulse', targets=[get_event(name)], passthrough=True, wait_for_updates=lambda ctx: ctx[subscription_list[i]]['push_count']),
-#     ]
-#     subscription_polygons += [
-#         PolygonDef(p=[P(target_x, target_y)]*4, px=[P(0, -15), P(0, 15), P(-60, 15), P(-60, -15)], gradient=get_gradient(name), phase_override=lambda: get_event(name).value),
-#         PolygonDef(p=[P(target_x, target_y)]*6, px=[P(-3, 12), P(-3, -12), P(0, -15), P(3, -12), P(3, 12), P(0, 15)], fill_color=QColor(255, 0, 0, 255), phase_override=lambda: get_event(name).value, phases={
-#             'pulse': Phase([
-#                     PolygonTween(fill_color=QColor(0, 255, 0, 255), start=0, dur=0.0, ease=QEasingCurve.OutQuint),
-#                     PolygonTween(fill_color=QColor(0, 100, 0, 255), start=0, dur=1.0, ease=QEasingCurve.OutQuint),
-#                 ])
-#             }
-#         ),
-#     ]
-#     subscription_texts += [
-#         TextDef(p=P(target_x, target_y), px=P(7, 0), h_align=0, text = subscription_list[i], uniform_scale=False),
-#         TextDef(p=P(target_x, target_y), px=P(-7, 0), h_align=1, text_fn = lambda ctx: ctx[subscription_list[i]]['push_count'], uniform_scale=False),
-#     ]
-# subscription_window = WindowDef(p1=P(0.0, 0.0), p2=P(1.0, 1.0), listener_defs = subscription_listeners, polygon_defs = subscription_polygons, text_defs = subscription_texts)
+WINDOW_DEFS = []
+# WINDOW_DEFS.append(task_window)
+WINDOW_DEFS.append(layout_window)
+WINDOW_DEFS.append(overlay_window)
 
-
-# # register_gradient(GradientDef(
-# #     name='launch_text_outline1', p1=P(0.5, 0.5), p2=P(0.5, 0.5), px1=P(-300, -150), px2=P(300, 150), target='outline', stops=[
-# #         GradientStop(0.0, QColor(50, 50, 50, 255)),
-# #         GradientStop(0.5, QColor(50, 50, 50, 255)),
-# #         GradientStop(0.5001, QColor(50, 50, 50, 0)),
-# #     ],
-# # ))
-# # register_gradient(GradientDef(
-# #     name='launch_text_outline2', p1=P(0.5, 0.5), p2=P(0.5, 0.5), px1=P(-300, -150), px2=P(300, 150), target='outline', stops=[
-# #         GradientStop(0.0, QColor(50, 50, 50, 0)),
-# #         GradientStop(0.5, QColor(50, 50, 50, 0)),
-# #         GradientStop(0.5001, QColor(50, 50, 50, 255)),
-# #     ],
-# # ))
-
-# # register_gradient(GradientDef(
-# #     name='sub_sample_pulse', p1=P(0.9, 0.5), p2=P(0.9, 0.5), px1=P(0, 0), px2=P(-60, 0), target='fill', phase_event=get_event('sub_sample_pulse'),
-# #     stops=[GradientStop(0.0, QColor(0, 255, 0, 255)), GradientStop(1.0, QColor(0, 0, 0, 255))], 
-# #     phases={'pulse': Phase([
-# #         GradientTween(stops=[GradientStop(0.0, QColor(0, 100, 0, 255)), GradientStop(1.0, QColor(0, 255, 0, 0))], start=0, dur=0, ease=QEasingCurve.OutQuint),
-# #         GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 0)), GradientStop(1.0, QColor(0, 0, 0, 0))], start=0, dur=1, ease=QEasingCurve.OutQuint),
-# #         ])
-# #     }
-# # ))
-
-# # register_gradient(GradientDef(
-# #     name='sub_sample_pulse2', p1=P(0.9, 0.7), p2=P(0.9, 0.7), px1=P(0, 0), px2=P(-60, 0), target='fill', phase_event=get_event('sub_sample_pulse'),
-# #     stops=[GradientStop(0.0, QColor(0, 255, 0, 255)), GradientStop(1.0, QColor(0, 0, 0, 255))], 
-# #     phases={'pulse': Phase([
-# #         GradientTween(stops=[GradientStop(0.0, QColor(0, 100, 0, 255)), GradientStop(1.0, QColor(0, 255, 0, 0))], start=0, dur=0, ease=QEasingCurve.OutQuint),
-# #         GradientTween(stops=[GradientStop(0.0, QColor(0, 0, 0, 0)), GradientStop(1.0, QColor(0, 0, 0, 0))], start=0, dur=1, ease=QEasingCurve.OutQuint),
-# #         ])
-# #     }
-# # ))
-
-# WINDOW_DEFS = [
-    # WindowDef(
-    #     p1=P(0.0, 0.0), p2=P(1.0, 1.0),
-    #     polygon_defs=[
-    #         # PolygonDef(p=[P(0, 0), P(0, 0), P(0, 1), P(0, 1)], px=[P(0, 0), P(50, 50), P(50, -50), P(0, 0)], fill_color=QColor(255, 255, 255, 255),
-    #         # pos_fn=lambda: [P(0, 0), P(SYS_MOUSE_X.value / 10, SYS_MOUSE_Y.value / 10), P(SYS_MOUSE_X.value / 10, SYS_MOUSE_Y.value / 10), P(0, 0)]),
-    #         PolygonDef(p=[P(0.5, 0.5)]*4, px=[P(-100, -5), P(100, -5), P(100, 5), P(-100, 5)], fill_color=QColor(255, 255, 255, 255), rot_center_p=P(0.5, 0.5), rot_target_p=P(0.5, 0.5), rot_angle_initial=0, phases={
-    #             'open': Phase([PolygonTween(rot_angle=700, start=0, dur=5.0, ease=QEasingCurve.OutQuint)])
-    #         }),
-    #     ],
-    #     text_defs=[
-    #         # TextDef(
-    #         #     p=P(0.5, 0.5), px=P(-100, -150), text='LAUNCHING', bold=True, italic=True, v_align=1, font_size=100, color=QColor(255,255,255,0), outline_width=2,
-    #         #     gradient=get_gradient('launch_text_outline1'),
-    #         # ),
-    #         TextDef(
-    #             p=P(0.5, 0.5), px=P(-50, 100), text='SPEAR', bold=True, italic=True, font_size=400, color=QColor(255,255,255,0), outline_width=4,
-    #             gradient=get_gradient('launch_text_outline1'), phases={
-    #                 'open': Phase([TextTween(px=P(0, 0), start=0, dur=1.0, ease=QEasingCurve.OutBack)])
-    #             }
-    #         ),
-    #         TextDef(
-    #             p=P(0.5, 0.5), px=P(50, -100), text='SPEAR', bold=True, italic=True, font_size=400, color=QColor(255,255,255,0), outline_width=4,
-    #             gradient=get_gradient('launch_text_outline2'), phases={
-    #                 'open': Phase([TextTween(px=P(0, 0), start=0, dur=1.0, ease=QEasingCurve.OutBack)])
-    #             }
-    #         ),
-    #     ],
-    # ),
-
-#     WindowDef(
-#         p1=P(0.0, 0.0), p2=P(1.0, 1.0),
-#         listener_defs=[
-#             EventListener(value_fn='pulse', targets=[get_event('sub_sample_pulse')], passthrough=True, wait_for_updates=lambda ctx: ctx['test_value1']['push_count']),
-#             EventListener(value_fn='pulse', targets=[get_event('sub_sample_pulse2')], passthrough=True, wait_for_updates=lambda ctx: ctx['test_value8']['push_count']),
-#         ],
-#         polygon_defs=[
-#             PolygonDef(p=[P(0.9, 0.5)]*4, px=[P(0, -15), P(0, 15), P(-60, 15), P(-60, -15)], gradient=get_gradient('sub_sample_pulse'), phase_override=lambda: get_event('sub_sample_pulse').value),
-
-#             PolygonDef(p=[P(0.9, 0.5)]*6, px=[P(-3, 12), P(-3, -12), P(0, -15), P(3, -12), P(3, 12), P(0, 15)], fill_color=QColor(255, 0, 0, 255), phase_override=lambda: get_event('sub_sample_pulse').value, phases={
-#                 'pulse': Phase([
-#                         PolygonTween(fill_color=QColor(0, 255, 0, 255), start=0, dur=0.0, ease=QEasingCurve.OutQuint),
-#                         PolygonTween(fill_color=QColor(0, 100, 0, 255), start=0, dur=1.0, ease=QEasingCurve.OutQuint),
-#                     ])
-#                 }
-#             ),
-
-#             PolygonDef(p=[P(0.9, 0.7)]*4, px=[P(0, -15), P(0, 15), P(-60, 15), P(-60, -15)], gradient=get_gradient('sub_sample_pulse2'), phase_override=lambda: get_event('sub_sample_pulse2').value),
-
-#             PolygonDef(p=[P(0.9, 0.7)]*6, px=[P(-3, 12), P(-3, -12), P(0, -15), P(3, -12), P(3, 12), P(0, 15)], fill_color=QColor(255, 0, 0, 255), phase_override=lambda: get_event('sub_sample_pulse2').value, phases={
-#                 'pulse': Phase([
-#                         PolygonTween(fill_color=QColor(0, 255, 0, 255), start=0, dur=0.0, ease=QEasingCurve.OutQuint),
-#                         PolygonTween(fill_color=QColor(0, 100, 0, 255), start=0, dur=1.0, ease=QEasingCurve.OutQuint),
-#                     ])
-#                 }
-#             )
-#         ],
-#         text_defs=[
-#             TextDef(p=P(0.9, 0.5), px=P(7, 0), h_align=0, text = 'test_value1', uniform_scale=False),
-#             TextDef(p=P(0.9, 0.5), px=P(-7, 0), h_align=1, text_fn = lambda ctx: ctx['test_value1']['push_count'], uniform_scale=False),
-#             TextDef(p=P(0.9, 0.7), px=P(7, 0), h_align=0, text = 'test_value8', uniform_scale=False),
-#             TextDef(p=P(0.9, 0.7), px=P(-7, 0), h_align=1, text_fn = lambda ctx: ctx['test_value8']['push_count'], uniform_scale=False),
-#         ]
-#     ),
-
-# ]
-
-# WINDOW_DEFS.append(subscription_window)
-
-# register_windows(WINDOW_LAYER, WINDOW_DEFS)
+register_windows(WINDOW_LAYER, WINDOW_DEFS)

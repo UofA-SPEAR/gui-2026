@@ -10,7 +10,7 @@ from spear_gui.overlay_system import (
     PolygonDef, PolygonTween, RectDef, RectTween,                              # PolygonDef
     ArcDef,                                                                    # ArcDef
     TextDef, TextTween, TextBlock, DataTable,                                  # TextDef
-    SliderDef,                                                                 # SliderDef
+    BasicSliderDef, SliderDef,                                                 # SliderDef
     ButtonDef, SegmentedButtons, Segment, SevenSegmentDisplay,                 # ButtonDef
     TextboxDef,                                                                # TextboxDef
     GraphDef, SeriesDef,                                                       # GraphDef
@@ -21,7 +21,7 @@ from spear_gui.overlay_system import (
 
     P_OPEN, P_CLOSE, P_HOVER, P_UNHOVER, P_CLICK, P_RELEASE, P_SET, P_ALWAYS,
     SYS_FPS, SYS_FRAME_TIME, SYS_MOUSE, SYS_MOUSE_X, SYS_MOUSE_Y,
-    get_spawn_event, GROUP_EVENT, STATIC, get_spawn_mouse_norm
+    get_spawn_event, GROUP_EVENT, STATIC, get_spawn_mouse_norm, get_spawn_mouse_offset_px
 )
 
 from datetime import datetime
@@ -33,17 +33,21 @@ register_event(EventDef(name="new_log", value=None))
 WINDOW_LAYER = 0
 
 logger_phases = {}
-for i in range(50):
+for i in range(100):
     y = -70 - i * 15
-    name = 'open' if i == 0 else 'close' if i == 50 else str(i)
+    name = 'open' if i == 0 else 'close' if i == 100 else str(i)
     logger_phases[name] = Phase([WindowTween(px1=P(9, y - 10), px2=P(-9, y + 10), start=0, dur=0.5, ease=QEasingCurve.OutQuint)])
 
 logger_window = WindowDef(
     p1=P(0.0, 0.0), p2=P(0.5, 1.0),
     phase_event=get_event('main_page'),
     phases={
-        'open': Phase([WindowTween(p1=P(0.5, 0.0), p2=P(0.5, 1.0), px1=P(-157 - 8, 0), px2=P(157 + 8, 0), start=0.5, dur=1.0, ease=QEasingCurve.OutQuint)])
+        'open': Phase([WindowTween(p1=get_event('logger_window_p1'), p2=get_event('logger_window_p2'), px1=get_event('logger_window_px1'), px2=get_event('logger_window_px2'), start=0.0, dur=1.0, ease=QEasingCurve.OutQuint)], update_retrigger=True)
     },
+    # phase_event=get_event('main_page'),
+    # phases={
+    #     'open': Phase([WindowTween(p1=P(0.5, 0.0), p2=P(0.5, 1.0), px1=P(-157 - 8, 0), px2=P(157 + 8, 0), start=0.5, dur=1.0, ease=QEasingCurve.OutQuint)])
+    # },
     listener_defs=[
         EventListener(value_fn=lambda ctx: ctx['test_value1']['latest'], targets=[get_event('textbox_test_value')], passthrough=True),
         EventListener(value_fn=True, targets=[get_event('new_log')], passthrough=True, wait_for_updates=get_event('textbox_test_value')),
@@ -70,15 +74,15 @@ logger_window = WindowDef(
             spawn_event=get_event('new_log'),
             spawn_event_group='log',
             spawn_tick_increment=True,
-            spawn_delete_threshold=50,
-            spawn_limit=51,
+            spawn_delete_threshold=100,
+            spawn_limit=101,
             spawn_static_values=[lambda: datetime.now(ZoneInfo("America/Edmonton")).strftime("%H:%M:%S.%f")[:-4]],
             phase_event=GROUP_EVENT,
             phase_fn=lambda v: str(int(v)) if int(v) > 0 else 'open',
             phases=logger_phases,
             text_defs=[
                 TextDef(
-                    p=P(0.5, 0.5),
+                    p=P(0, 0.5), px=P(90, 0),
                     text='log entry',
                     font_size=10.0,
                     fill_color=QColor(255, 255, 255, 200),
@@ -103,6 +107,3 @@ WINDOW_DEFS = []
 WINDOW_DEFS.append(logger_window)
 
 register_windows(WINDOW_LAYER, WINDOW_DEFS)
-
-# pretend all subscriptions exist already
-# to get a value from subscription: lambda ctx: ctx['test_value5']['latest']

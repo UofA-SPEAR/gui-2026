@@ -44,6 +44,20 @@ def register_gradient(defn: GradientDef) -> GradientDef:
 def get_gradient(name: str) -> GradientDef:
     return _gradients[name]
 
+_pixmap_cache: Dict[str, Optional['QPixmap']] = {}
+
+def _get_pixmap(path: str):
+    from PySide6.QtGui import QPixmap
+    if path in _pixmap_cache:
+        return _pixmap_cache[path]
+    pm = QPixmap(path)
+    if pm.isNull():
+        print(f'[image] failed to load: {path}')
+        _pixmap_cache[path] = None
+        return None
+    _pixmap_cache[path] = pm
+    return pm
+
 @dataclass(frozen=True)
 class P:
     x: float = 0.0
@@ -53,6 +67,29 @@ class P:
 class GradientStop:
     position: float
     color:    QColor
+
+class _RectCornerRef:
+    __slots__ = ('corner1', 'corner2', 'tl', 'tr', 'br', 'bl')
+    def __init__(self, corner1, corner2, tl, tr, br, bl):
+        self.corner1 = corner1
+        self.corner2 = corner2
+        self.tl = tl; self.tr = tr; self.br = br; self.bl = bl
+
+def _resolve_corner(val):
+    if isinstance(val, EventDef):
+        v = val.value
+        return v if isinstance(v, P) else P()
+    return val
+
+def _rect_corner_ref_to_points(ref: '_RectCornerRef') -> List[P]:
+    c1 = _resolve_corner(ref.corner1)
+    c2 = _resolve_corner(ref.corner2)
+    return [
+        P(c1.x + ref.tl.x, c1.y + ref.tl.y),
+        P(c2.x + ref.tr.x, c1.y + ref.tr.y),
+        P(c2.x + ref.br.x, c2.y + ref.br.y),
+        P(c1.x + ref.bl.x, c2.y + ref.bl.y),
+    ]
 
 def RectDef(
     p1:                  P                             = P(), 
@@ -78,6 +115,15 @@ def RectDef(
     gradient_px1:        P                             = P(),
     gradient_p2:         P                             = P(),
     gradient_px2:        P                             = P(),
+    rot_center_p:        P                             = P(),
+    rot_center_px:       P                             = P(),
+    rot_target_p:        P                             = P(),
+    rot_target_px:       P                             = P(),
+    rot_angle_initial:   float                         = 0.0,
+    rot_angle:           float                         = 0.0,
+    rot_angle_fn:        Any                           = 0.0,
+    image_path:          Optional[str]                 = None,
+    image_opacity:       float                         = 1.0,
     visible_threshold_x: float                         = 0.0,
     visible_threshold_y: float                         = 0.0,
     phase_override:      Optional[Any]                 = None,
@@ -101,7 +147,7 @@ def RectDef(
         px                  = px,
         fill_color          = fill_color    or QColor(0, 0, 0, 0),
         outline_color       = outline_color or QColor(0, 0, 0, 0),
-        outline_width          = outline_width,
+        outline_width       = outline_width,
         draw_progress       = draw_progress,
         uniform_scale       = uniform_scale,
         closed              = closed,
@@ -114,6 +160,15 @@ def RectDef(
         gradient_px1        = gradient_px1,
         gradient_p2         = gradient_p2,
         gradient_px2        = gradient_px2,
+        rot_center_p        = rot_center_p,
+        rot_center_px       = rot_center_px,
+        rot_target_p        = rot_target_p,
+        rot_target_px       = rot_target_px,
+        rot_angle_initial   = rot_angle_initial,
+        rot_angle           = rot_angle,
+        rot_angle_fn        = rot_angle_fn,
+        image_path          = image_path,
+        image_opacity       = image_opacity,
         visible_threshold_x = visible_threshold_x,
         visible_threshold_y = visible_threshold_y,
         phase_override      = phase_override,
@@ -158,9 +213,18 @@ def RectTween(
     br_r, br_p = _split(br)
     bl_r, bl_p = _split(bl)
  
+    def _has_event(*vals):
+        return any(isinstance(v, EventDef) for v in vals)
+
     def _make_p(base1, base2):
         if base1 is None and base2 is None and tl_r is None and tr_r is None and br_r is None and bl_r is None:
             return None
+        if _has_event(base1, base2):
+            return _RectCornerRef(
+                corner1=base1 if base1 is not None else P(),
+                corner2=base2 if base2 is not None else P(),
+                tl=tl_r or P(), tr=tr_r or P(), br=br_r or P(), bl=bl_r or P(),
+            )
         _p1  = base1  or P()
         _p2  = base2  or P()
         _tlr = tl_r   or P()
@@ -173,10 +237,16 @@ def RectTween(
             P(_p2.x + _brr.x, _p2.y + _brr.y),
             P(_p1.x + _blr.x, _p2.y + _blr.y),
         ]
- 
+
     def _make_px(base1, base2):
         if base1 is None and base2 is None and tl_p is None and tr_p is None and br_p is None and bl_p is None:
             return None
+        if _has_event(base1, base2):
+            return _RectCornerRef(
+                corner1=base1 if base1 is not None else P(),
+                corner2=base2 if base2 is not None else P(),
+                tl=tl_p or P(), tr=tr_p or P(), br=br_p or P(), bl=bl_p or P(),
+            )
         _px1 = base1 or P()
         _px2 = base2 or P()
         _tlp = tl_p  or P()
@@ -237,11 +307,16 @@ class PolygonDef:
     rot_target_px:       P                                     = field(default_factory=P)
     rot_angle_initial:   float                                 = 0.0
     rot_angle:           float                                 = 0.0
+    rot_angle_fn:        Any                                   = 0.0
+    image_path:          Optional[str]                         = None
+    image_opacity:       float                                 = 1.0
     dynamic_px:          Optional[Callable[[int,int],List[P]]] = None
     visible_threshold_x: float                                 = 0.0
     visible_threshold_y: float                                 = 0.0
     phase_override:      Optional[Any]                         = None
     pos_fn:              Optional[Callable[[], Union[P, List[P]]]] = None
+    export_p:            Optional[EventDef]                    = None
+    export_px:           Optional[EventDef]                    = None
 
 @dataclass
 class PolygonTween:
@@ -273,16 +348,17 @@ class PolygonTween:
 
 @dataclass
 class GradientDef:
-    name:        str
-    stops:       List[GradientStop]
-    phases:      Dict[str, Phase]   = field(default_factory=dict)
-    p1:          P                  = field(default_factory=P)
-    px1:         P                  = field(default_factory=P)
-    p2:          P                  = field(default_factory=P)
-    px2:         P                  = field(default_factory=P)
-    radial:      bool               = False
-    target:      str                = 'fill'
-    phase_event: Optional[EventDef] = None
+    name:            str
+    stops:           List[GradientStop]
+    phases:          Dict[str, Phase]   = field(default_factory=dict)
+    p1:              P                  = field(default_factory=P)
+    px1:             P                  = field(default_factory=P)
+    p2:              P                  = field(default_factory=P)
+    px2:             P                  = field(default_factory=P)
+    radial:          bool               = False
+    target:          str                = 'fill'
+    phase_event:     Optional[EventDef] = None
+    global_position: bool               = False
 
 @dataclass
 class GradientTween:
@@ -314,6 +390,7 @@ class TextDef:
     rot_target_px:       P                              = field(default_factory=P)
     rot_angle_initial:   float                          = 0.0
     rot_angle:           float                          = 0.0
+    rot_angle_fn:        Any                            = 0.0
     phases:              Optional[Dict[str, Phase]]     = None
     bold:                bool                           = False
     italic:              bool                           = False
@@ -373,10 +450,11 @@ class Phase:
     loop:        bool       = False
     stop_phases: List[str]  = field(default_factory=lambda: ['close'])
     pulse_event: Optional[Any] = None
+    update_retrigger: bool  = False
 
 def TextBlock(
-    p:           P                          = field(default_factory=P),
-    px:          P                          = field(default_factory=P),
+    p:           P                          = P(),
+    px:          P                          = P(),
     text:        str                        = 'Sample Text',
     font_size:   float                      = 10.0,
     fill_color:  QColor                     = QColor(255, 255, 255, 255),
@@ -624,6 +702,7 @@ class _TweenDriver:
         self._pulse_last_value: Any  = None
         self._pulse_checked:    bool = False
         self._resolved_cache: Dict[int, tuple] = {}
+        self._retrigger_snapshots: Dict[str, Any] = {}
 
     def _active_tweens(self, phase, prev, phases: dict) -> list:
         if phase in phases:
@@ -641,38 +720,36 @@ class _TweenDriver:
         if not phases:
             self.hidden = False
             return
-
-        key = id(phases)
-        cached = self._resolved_cache.get(key)
-        if cached is None:
-            resolved_phases = {}
-            phase_groups = {}
-            for pkey, val in phases.items():
-                if isinstance(pkey, tuple):
-                    canonical = pkey[0]
-                    for k in pkey:
-                        phase_groups[k] = canonical
-                        resolved_phases[canonical] = val
-                else:
-                    phase_groups[pkey] = pkey
-                    resolved_phases[pkey] = val
-            cached = (resolved_phases, phase_groups)
-            self._resolved_cache[key] = cached
-
-        resolved_phases, phase_groups = cached
+        resolved_phases = {}
+        phase_groups = {}
+        for key, val in phases.items():
+            if isinstance(key, tuple):
+                canonical = key[0]
+                for k in key:
+                    phase_groups[k] = canonical
+                    resolved_phases[canonical] = val
+            else:
+                phase_groups[key] = key
+                resolved_phases[key] = val
         canonical     = phase_groups.get(phase, phase)
         cur_canonical = phase_groups.get(self._phase, self._phase)
 
         if canonical not in resolved_phases:
             return
 
+        phase_def = resolved_phases[canonical]
+
         if canonical == cur_canonical and self._phase != '' and canonical != 'pulse':
-            return
+            if phase_def.update_retrigger and self._retrigger_changed(canonical, phase_def):
+                pass
+            else:
+                return
 
         self._prev  = self._phase
         self._phase = phase
         self._idx   = 0
-        self._tweens = self._active_tweens(canonical, self._prev, resolved_phases)
+        self._tweens = [tw if isinstance(tw, Reset) else _resolve_tween_event_refs(tw)
+                        for tw in self._active_tweens(canonical, self._prev, resolved_phases)]
         if self._tweens or canonical in resolved_phases:
             self.hidden = False
         while self._idx < len(self._tweens) and isinstance(self._tweens[self._idx], Reset):
@@ -680,6 +757,7 @@ class _TweenDriver:
             self._idx += 1
         self._save_start()
         self._timer.restart()
+        self._update_retrigger_snapshot(canonical, phase_def)
 
         if phase in ('open', 'close'):
             self._pulse_checked = False
@@ -814,13 +892,12 @@ class _TweenDriver:
                 break
         if pulse_phase is None:
             return
-    
-        # Don't pulse while closing or while open animation is still playing
+
         if self._phase in ('close',):
             return
         if self._phase == 'open' and not self._is_done():
             return
-    
+
         ev = pulse_phase.pulse_event
         if isinstance(ev, EventDef):
             cur_val = ev.value
@@ -829,29 +906,66 @@ class _TweenDriver:
             except: return
         else:
             cur_val = ev
-    
-        # Seed on first check — don't pulse immediately
+
         if not self._pulse_checked:
             self._pulse_last_value = cur_val
             self._pulse_checked    = True
             return
-    
-        # Only fire when the value is literally 'pulse' — ignore the 'ignore' reset
+
         if cur_val == 'pulse' and self._pulse_last_value != 'pulse':
             self._pulse_last_value = cur_val
-            if self._phase not in ('open', 'close'):
-                self._prev  = self._phase
-                self._phase = 'pulse'
-                self._idx   = 0
-                self._tweens = self._active_tweens(
-                    'pulse', self._prev,
-                    {_phase_key_name(k): v for k, v in phases.items()}
-                )
-                self._save_start()
-                self._timer.restart()
+            self._prev  = self._phase
+            self._phase = 'pulse'
+            self._idx   = 0
+            self._tweens = self._active_tweens('pulse', self._prev, phases)
+            self._save_start()
+            self._timer.restart()
         elif cur_val != 'pulse':
-            # Track any non-pulse value so we correctly detect the NEXT 'pulse' edge
             self._pulse_last_value = cur_val
+
+    def _collect_event_refs(self, phase_def):
+        refs = []
+        for tw in phase_def.tweens:
+            if isinstance(tw, Reset):
+                continue
+            for attr in ('p', 'px', 'p1', 'p2', 'px1', 'px2'):
+                val = getattr(tw, attr, None)
+                if isinstance(val, EventDef):
+                    refs.append(val)
+        return refs
+
+    def _retrigger_changed(self, canonical, phase_def) -> bool:
+        refs = self._collect_event_refs(phase_def)
+        if not refs:
+            return False
+        prev_snapshot = self._retrigger_snapshots.get(canonical)
+        cur_snapshot  = tuple(list(ev.value) if isinstance(ev.value, list) else ev.value for ev in refs)
+        if prev_snapshot is None:
+            return False
+        return cur_snapshot != prev_snapshot
+
+    def _update_retrigger_snapshot(self, canonical, phase_def):
+        refs = self._collect_event_refs(phase_def)
+        if refs:
+            self._retrigger_snapshots[canonical] = tuple(
+                list(ev.value) if isinstance(ev.value, list) else ev.value for ev in refs
+            )
+        else:
+            self._retrigger_snapshots.pop(canonical, None)
+    
+    def _collect_event_refs(self, phase_def):
+        refs = []
+        for tw in phase_def.tweens:
+            if isinstance(tw, Reset):
+                continue
+            for attr in ('p', 'px', 'p1', 'p2', 'px1', 'px2'):
+                val = getattr(tw, attr, None)
+                if isinstance(val, EventDef):
+                    refs.append(val)
+                elif isinstance(val, _RectCornerRef):
+                    if isinstance(val.corner1, EventDef): refs.append(val.corner1)
+                    if isinstance(val.corner2, EventDef): refs.append(val.corner2)
+        return refs
     
 _ALWAYS_PHASE_ORIGINS: Dict[str, float] = {}
 
@@ -1137,15 +1251,10 @@ class _AnimatedGradient(_TweenDriver):
         val = str(ev.value) if ev.value is not None else ''
         if not val or val == self._cur_phase:
             return
-        # Skip 'ignore' (pulse reset sentinel) and unknown phases
         if val == 'ignore':
             return
-        # For 'pulse': only set_phase if the gradient has a pulse phase.
-        # The pulse fires via _check_pulse on the polygon/text, not here.
         if val == 'pulse':
             if 'pulse' in self.defn.phases:
-                # Already handled by _check_pulse path on owning polygon.
-                # Gradient's own pulse is driven by pulse_event, not phase_event.
                 pass
             return
         self._cur_phase = val
@@ -1356,8 +1465,8 @@ class AnimatedPolygon(_TweenDriver):
                     else:
                         self._pos_offset = result
                     self._dirty = True
-            except Exception:
-                pass
+            except Exception as e:
+                print(f'[pos_fn error] {e}')
         self._drive()
         self._check_pulse(self.defn.phases or {})
 
@@ -1390,6 +1499,11 @@ class AnimatedPolygon(_TweenDriver):
  
         if any(p.x != 0 or p.y != 0 for p in sum_pts + sum_px):
             self._dirty = True
+        
+        if self.defn.export_p is not None:
+            self.defn.export_p.value = [P(p.x, p.y) for p in self.cur_p]
+        if self.defn.export_px is not None:
+            self.defn.export_px.value = [P(p.x, p.y) for p in self.cur_px]
 
     def phase_done(self) -> bool:
         if not self._is_done():
@@ -1479,21 +1593,21 @@ class AnimatedPolygon(_TweenDriver):
                 ap  = always_pts[j]
                 apx = always_px[j]
                 po  = pos[j]
-                sx  = (0.5 + (p.x - 0.5) * cx) * widget_w + px.x + po.x
-                sy  = (0.5 + (p.y - 0.5) * cy) * widget_h + px.y + po.y
-                pts.append(QPointF(sx + ap.x * cx * widget_w + apx.x,
-                                   sy + ap.y * cy * widget_h + apx.y))
-                base_pts.append(QPointF(sx, sy))
+                bx  = (0.5 + (p.x - 0.5) * cx) * widget_w + px.x
+                by  = (0.5 + (p.y - 0.5) * cy) * widget_h + px.y
+                pts.append(QPointF(bx + po.x + ap.x * cx * widget_w + apx.x,
+                                by + po.y + ap.y * cy * widget_h + apx.y))
+                base_pts.append(QPointF(bx, by))
         else:
             for j, (p, px) in enumerate(zip(self.cur_p, self.cur_px)):
                 ap  = always_pts[j]
                 apx = always_px[j]
                 po  = pos[j]
-                sx  = p.x * widget_w + px.x + po.x
-                sy  = p.y * widget_h + px.y + po.y
-                pts.append(QPointF(sx + ap.x * widget_w + apx.x,
-                                   sy + ap.y * widget_h + apx.y))
-                base_pts.append(QPointF(sx, sy))
+                bx  = p.x * widget_w + px.x
+                by  = p.y * widget_h + px.y
+                pts.append(QPointF(bx + po.x + ap.x * widget_w + apx.x,
+                                by + po.y + ap.y * widget_h + apx.y))
+                base_pts.append(QPointF(bx, by))
 
         self._cached_poly = QPolygonF(base_pts)
         self._cached_w    = widget_w
@@ -1511,7 +1625,8 @@ class AnimatedPolygon(_TweenDriver):
         effective_outline = self._always_outline_color if self._always_outline_color is not None else self.cur_outline_color
         lw         = self.cur_line_width
         gd = self.defn.gradient
-        has_fill    = self.defn.closed and (effective_fill.alpha() > 0 or (gd is not None and gd.target == 'fill'))
+        has_image   = self.defn.closed and self.defn.image_path is not None
+        has_fill    = self.defn.closed and (effective_fill.alpha() > 0 or (gd is not None and gd.target == 'fill') or has_image)
         has_gradient_outline = gd is not None and gd.target == 'outline'
         has_outline = lw > 0 and (effective_outline.alpha() > 0 or has_gradient_outline)
         is_open     = not self.defn.closed
@@ -1519,10 +1634,11 @@ class AnimatedPolygon(_TweenDriver):
         if not has_fill and not has_outline:
             return
 
+        angle_offset = _resolve_angle_value(self.defn.rot_angle_fn)
         rot = _resolve_rotation(
             self.cur_rot_center_p, self.cur_rot_center_px,
             self.cur_rot_target_p, self.cur_rot_target_px,
-            self.cur_rot_angle_initial, self.cur_rot_angle,
+            self.cur_rot_angle_initial, self.cur_rot_angle + angle_offset,
             w, h
         )
         if rot is not None:
@@ -1534,21 +1650,38 @@ class AnimatedPolygon(_TweenDriver):
 
         def _outline_brush():
             gd = self.defn.gradient
-            if gd is not None and gd.target == 'outline':
-                def _has_point(p, px):
-                    return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
+            if gd is None or gd.target != 'outline':
+                return None
+
+            def _has_point(p, px):
+                return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
+
+            if gd.global_position:
+                gw, gh = get_true_screen_size()
+                off = _current_window_screen_offset
                 if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
-                    x1 = self.cur_gradient_p1.x * w + self.cur_gradient_px1.x
-                    y1 = self.cur_gradient_p1.y * h + self.cur_gradient_px1.y
-                    x2 = self.cur_gradient_p2.x * w + self.cur_gradient_px2.x
-                    y2 = self.cur_gradient_p2.y * h + self.cur_gradient_px2.y
+                    x1 = self.cur_gradient_p1.x * gw + self.cur_gradient_px1.x - off.x
+                    y1 = self.cur_gradient_p1.y * gh + self.cur_gradient_px1.y - off.y
+                    x2 = self.cur_gradient_p2.x * gw + self.cur_gradient_px2.x - off.x
+                    y2 = self.cur_gradient_p2.y * gh + self.cur_gradient_px2.y - off.y
                 else:
-                    x1 = gd.p1.x * w + gd.px1.x
-                    y1 = gd.p1.y * h + gd.px1.y
-                    x2 = gd.p2.x * w + gd.px2.x
-                    y2 = gd.p2.y * h + gd.px2.y
+                    x1 = gd.p1.x * gw + gd.px1.x - off.x
+                    y1 = gd.p1.y * gh + gd.px1.y - off.y
+                    x2 = gd.p2.x * gw + gd.px2.x - off.x
+                    y2 = gd.p2.y * gh + gd.px2.y - off.y
                 return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
-            return None
+
+            if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
+                x1 = self.cur_gradient_p1.x * w + self.cur_gradient_px1.x
+                y1 = self.cur_gradient_p1.y * h + self.cur_gradient_px1.y
+                x2 = self.cur_gradient_p2.x * w + self.cur_gradient_px2.x
+                y2 = self.cur_gradient_p2.y * h + self.cur_gradient_px2.y
+            else:
+                x1 = gd.p1.x * w + gd.px1.x
+                y1 = gd.p1.y * h + gd.px1.y
+                x2 = gd.p2.x * w + gd.px2.x
+                y2 = gd.p2.y * h + gd.px2.y
+            return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
 
         pts = list(self.get_polygon(w, h, cam_w, cam_h))
 
@@ -1586,6 +1719,24 @@ class AnimatedPolygon(_TweenDriver):
             gd = self.defn.gradient
             if gd is None:
                 return fill
+
+            if gd.global_position:
+                gw, gh = get_true_screen_size()
+                off = _current_window_screen_offset
+                def _has_point(p, px):
+                    return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
+                if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
+                    x1 = self.cur_gradient_p1.x * gw + self.cur_gradient_px1.x - off.x
+                    y1 = self.cur_gradient_p1.y * gh + self.cur_gradient_px1.y - off.y
+                    x2 = self.cur_gradient_p2.x * gw + self.cur_gradient_px2.x - off.x
+                    y2 = self.cur_gradient_p2.y * gh + self.cur_gradient_px2.y - off.y
+                else:
+                    x1 = gd.p1.x * gw + gd.px1.x - off.x
+                    y1 = gd.p1.y * gh + gd.px1.y - off.y
+                    x2 = gd.p2.x * gw + gd.px2.x - off.x
+                    y2 = gd.p2.y * gh + gd.px2.y - off.y
+                return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
+
             def _has_point(p, px):
                 return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
             if _has_point(self.cur_gradient_p1, self.cur_gradient_px1) or _has_point(self.cur_gradient_p2, self.cur_gradient_px2):
@@ -1602,48 +1753,69 @@ class AnimatedPolygon(_TweenDriver):
 
         gradient_outline = _outline_brush()
         poly = QPolygonF(pts)
+        pixmap = _get_pixmap(self.defn.image_path) if has_image else None
+
+        def _paint_image():
+            painter.save()
+            path = QPainterPath()
+            path.addPolygon(poly)
+            painter.setClipPath(path, Qt.IntersectClip)
+            rect = poly.boundingRect()
+            if self.defn.image_opacity < 1.0:
+                painter.setOpacity(self.defn.image_opacity)
+            painter.drawPixmap(rect, pixmap, QRectF(pixmap.rect()))
+            painter.restore()
+
+        def _stroke_outline():
+            if gradient_outline is not None:
+                pen = QPen(QBrush(gradient_outline), lw)
+            else:
+                pen = QPen(effective_outline)
+                pen.setWidthF(lw)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPolygon(poly)
+            painter.setPen(Qt.NoPen)
 
         if has_fill and not has_outline:
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(_fill_brush())
-            painter.drawPolygon(poly)
-            painter.setBrush(Qt.NoBrush)
-        elif has_outline and not has_fill:
-            if len(pts) >= 2:
-                if gradient_outline is not None:
-                    pen = QPen(QBrush(gradient_outline), lw)
-                    pen.setCapStyle(Qt.RoundCap)
-                    pen.setJoinStyle(Qt.RoundJoin)
-                else:
-                    pen = QPen(effective_outline)
-                    pen.setWidthF(lw)
-                    pen.setCapStyle(Qt.RoundCap)
-                    pen.setJoinStyle(Qt.RoundJoin)
-                painter.setPen(pen)
-                painter.setBrush(Qt.NoBrush)
-                painter.drawPolygon(poly)
-                painter.setPen(Qt.NoPen)
-        else:
-            if len(pts) >= 2:
-                if gradient_outline is not None:
-                    pen = QPen(QBrush(gradient_outline), lw)
-                    pen.setCapStyle(Qt.RoundCap)
-                    pen.setJoinStyle(Qt.RoundJoin)
-                else:
-                    pen = QPen(effective_outline)
-                    pen.setWidthF(lw)
-                    pen.setCapStyle(Qt.RoundCap)
-                    pen.setJoinStyle(Qt.RoundJoin)
-                painter.setPen(pen)
-                painter.setBrush(_fill_brush())
-                painter.drawPolygon(poly)
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(Qt.NoBrush)
+            if pixmap is not None:
+                _paint_image()
             else:
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(_fill_brush())
                 painter.drawPolygon(poly)
                 painter.setBrush(Qt.NoBrush)
+        elif has_outline and not has_fill:
+            if len(pts) >= 2:
+                _stroke_outline()
+        else:
+            if len(pts) >= 2:
+                if pixmap is not None:
+                    _paint_image()
+                    _stroke_outline()
+                else:
+                    if gradient_outline is not None:
+                        pen = QPen(QBrush(gradient_outline), lw)
+                    else:
+                        pen = QPen(effective_outline)
+                        pen.setWidthF(lw)
+                    pen.setCapStyle(Qt.RoundCap)
+                    pen.setJoinStyle(Qt.RoundJoin)
+                    painter.setPen(pen)
+                    painter.setBrush(_fill_brush())
+                    painter.drawPolygon(poly)
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(Qt.NoBrush)
+            else:
+                if pixmap is not None:
+                    _paint_image()
+                else:
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(_fill_brush())
+                    painter.drawPolygon(poly)
+                    painter.setBrush(Qt.NoBrush)
 
         if rot is not None:
             painter.restore()
@@ -2041,10 +2213,11 @@ class AnimatedText(_TweenDriver):
                 dx     = dx + full_w - disp_w
             full_label = display_label
 
+        angle_offset = _resolve_angle_value(self.defn.rot_angle_fn)
         rot = _resolve_rotation(
             self.cur_rot_center_p, self.cur_rot_center_px,
             self.cur_rot_target_p, self.cur_rot_target_px,
-            self.cur_rot_angle_initial, self.cur_rot_angle,
+            self.cur_rot_angle_initial, self.cur_rot_angle + angle_offset,
             widget_w, widget_h
         )
         if rot is not None:
@@ -2058,21 +2231,20 @@ class AnimatedText(_TweenDriver):
 
         if not use_path:
             # fast path — solid color text
-            if cd >= 1.0 or self.defn.sub_char_clip:
-                painter.setPen(fill_color)
-                if self.defn.sub_char_clip and cd < 1.0:
-                    full_w  = fm.horizontalAdvance(full_label)
-                    clip_w  = full_w * cd
-                    ascent  = fm.ascent()
-                    descent = fm.descent()
-                    clip_x  = (dx + full_w - clip_w) if self.defn.backward else dx
-                    painter.save()
-                    painter.setClipRect(QRectF(clip_x, dy - ascent, clip_w, ascent + descent))
-                    painter.drawText(int(dx), int(dy), full_label)
-                    painter.restore()
-                else:
-                    painter.drawText(int(dx), int(dy), full_label)
-                painter.setPen(Qt.NoPen)
+            painter.setPen(fill_color)
+            if self.defn.sub_char_clip and cd < 1.0:
+                full_w  = fm.horizontalAdvance(full_label)
+                clip_w  = full_w * cd
+                ascent  = fm.ascent()
+                descent = fm.descent()
+                clip_x  = (dx + full_w - clip_w) if self.defn.backward else dx
+                painter.save()
+                painter.setClipRect(QRectF(clip_x, dy - ascent, clip_w, ascent + descent))
+                painter.drawText(int(dx), int(dy), full_label)
+                painter.restore()
+            else:
+                painter.drawText(int(dx), int(dy), full_label)
+            painter.setPen(Qt.NoPen)
             return
 
         path = QPainterPath()
@@ -2090,7 +2262,26 @@ class AnimatedText(_TweenDriver):
         gd = self.defn.gradient
 
         def _gradient_brush():
-            def _has(p, px): return p.x!=0 or p.y!=0 or px.x!=0 or px.y!=0
+            gd = self.defn.gradient
+
+            def _has(p, px):
+                return p.x != 0 or p.y != 0 or px.x != 0 or px.y != 0
+
+            if gd.global_position:
+                gw, gh = get_true_screen_size()
+                off = _current_window_screen_offset
+                if _has(self.cur_gradient_p1, self.cur_gradient_px1) or _has(self.cur_gradient_p2, self.cur_gradient_px2):
+                    x1 = self.cur_gradient_p1.x * gw + self.cur_gradient_px1.x - off.x
+                    y1 = self.cur_gradient_p1.y * gh + self.cur_gradient_px1.y - off.y
+                    x2 = self.cur_gradient_p2.x * gw + self.cur_gradient_px2.x - off.x
+                    y2 = self.cur_gradient_p2.y * gh + self.cur_gradient_px2.y - off.y
+                else:
+                    x1 = gd.p1.x * gw + gd.px1.x - off.x
+                    y1 = gd.p1.y * gh + gd.px1.y - off.y
+                    x2 = gd.p2.x * gw + gd.px2.x - off.x
+                    y2 = gd.p2.y * gh + gd.px2.y - off.y
+                return gd._animated.build_gradient(x1, y1, x2, y2, radial=gd.radial)
+
             if _has(self.cur_gradient_p1, self.cur_gradient_px1) or \
             _has(self.cur_gradient_p2, self.cur_gradient_px2):
                 x1 = self.cur_gradient_p1.x  * widget_w + self.cur_gradient_px1.x
@@ -2139,53 +2330,220 @@ class ArcDef:
     center_px:           P                = field(default_factory=P)
     outer_p:             P                = field(default_factory=P)
     outer_px:            P                = field(default_factory=P)
-    inner_p:             Optional[P]      = None
-    inner_px:            Optional[P]      = None
-    angle_start:         Optional[float]  = None
-    angle_end:           Optional[float]  = None
-    circle:              bool             = False
-    fill_color:          QColor           = field(default_factory=lambda: QColor(255, 255, 255, 255))
-    outline_color:       Optional[QColor] = None
-    outline_width:       float            = 0.0
-    rot_center_p:        P                = field(default_factory=P)
-    rot_center_px:       P                = field(default_factory=P)
-    rot_target_p:        P                = field(default_factory=P)
-    rot_target_px:       P                = field(default_factory=P)
-    rot_angle_initial:   float            = 0.0
-    rot_angle:           float            = 0.0
-    hidden:              bool             = False
-    visible_threshold_x: float            = 0.0
-    visible_threshold_y: float            = 0.0
+    inner_p:              Optional[P]      = None
+    inner_px:             Optional[P]      = None
+    angle_start:          Optional[float]  = None
+    angle_end:            Optional[float]  = None
+    circle:               bool             = False
+    fill_color:           QColor           = field(default_factory=lambda: QColor(255, 255, 255, 255))
+    outline_color:        Optional[QColor] = None
+    outline_width:        float            = 0.0
+    rot_center_p:         P                = field(default_factory=P)
+    rot_center_px:        P                = field(default_factory=P)
+    rot_target_p:         P                = field(default_factory=P)
+    rot_target_px:        P                = field(default_factory=P)
+    rot_angle_initial:    float            = 0.0
+    rot_angle:            float            = 0.0
+    rot_angle_fn:         Any              = 0.0
+    hidden:               bool             = False
+    phases:               Dict[str, Phase] = field(default_factory=dict)
+    visible_threshold_x:  float            = 0.0
+    visible_threshold_y:  float            = 0.0
 
     def __post_init__(self):
         if not self.circle and self.angle_start is None and self.angle_end is None:
             self.circle = True
 
+@dataclass
+class ArcTween:
+    center_p:          Optional[P]         = None
+    center_px:         Optional[P]         = None
+    inner_p:           Optional[P]         = None
+    inner_px:          Optional[P]         = None
+    outer_p:           Optional[P]         = None
+    outer_px:          Optional[P]         = None
+    angle_start:       Optional[float]     = None
+    angle_end:         Optional[float]     = None
+    outline_width:     Optional[float]     = None
+    rot_center_p:      Optional[P]         = None
+    rot_center_px:     Optional[P]         = None
+    rot_target_p:      Optional[P]         = None
+    rot_target_px:     Optional[P]         = None
+    rot_angle_initial: Optional[float]     = None
+    rot_angle:         Optional[float]     = None
+    start:             float               = 0.0
+    dur:               float               = 0.5
+    ease:              QEasingCurve.Type   = QEasingCurve.OutQuint
+    prev_phase:        Optional[str]       = None
+    blend:             bool                = False
 
-class AnimatedArc:
+class AnimatedArc(_TweenDriver):
     def __init__(self, defn: ArcDef) -> None:
+        super().__init__()
         self.defn   = defn
         self.hidden = defn.hidden
 
-    def _resolve(self, ww: int, wh: int) -> Tuple[float, float, float, float, Optional[float]]:
-        d  = self.defn
-        cx = d.center_p.x * ww + d.center_px.x
-        cy = d.center_p.y * wh + d.center_px.y
+        self.cur_center_p     = P(defn.center_p.x, defn.center_p.y)
+        self.cur_center_px    = P(defn.center_px.x, defn.center_px.y)
+        self.cur_outer_p      = P(defn.outer_p.x, defn.outer_p.y)
+        self.cur_outer_px     = P(defn.outer_px.x, defn.outer_px.y)
+        self.cur_inner_p      = P(defn.inner_p.x, defn.inner_p.y) if defn.inner_p is not None else None
+        self.cur_inner_px     = P(defn.inner_px.x, defn.inner_px.y) if defn.inner_px is not None else None
+        self.cur_angle_start  = defn.angle_start
+        self.cur_angle_end    = defn.angle_end
+        self.cur_outline_width = defn.outline_width
 
-        # outer radius — use distance from center to outer point
-        ox = d.outer_p.x * ww + d.outer_px.x
-        oy = d.outer_p.y * wh + d.outer_px.y
+        self.cur_rot_center_p      = P(defn.rot_center_p.x,  defn.rot_center_p.y)
+        self.cur_rot_center_px     = P(defn.rot_center_px.x, defn.rot_center_px.y)
+        self.cur_rot_target_p      = P(defn.rot_target_p.x,  defn.rot_target_p.y)
+        self.cur_rot_target_px     = P(defn.rot_target_px.x, defn.rot_target_px.y)
+        self.cur_rot_angle_initial = defn.rot_angle_initial
+        self.cur_rot_angle         = defn.rot_angle
+
+        self._save_start()
+
+    # ── _TweenDriver hooks ──────────────────────────────────────
+
+    def _save_start(self):
+        self._s_center_p      = P(self.cur_center_p.x, self.cur_center_p.y)
+        self._s_center_px     = P(self.cur_center_px.x, self.cur_center_px.y)
+        self._s_outer_p       = P(self.cur_outer_p.x, self.cur_outer_p.y)
+        self._s_outer_px      = P(self.cur_outer_px.x, self.cur_outer_px.y)
+        self._s_inner_p       = P(self.cur_inner_p.x, self.cur_inner_p.y) if self.cur_inner_p is not None else None
+        self._s_inner_px      = P(self.cur_inner_px.x, self.cur_inner_px.y) if self.cur_inner_px is not None else None
+        self._s_angle_start   = self.cur_angle_start
+        self._s_angle_end     = self.cur_angle_end
+        self._s_outline_width = self.cur_outline_width
+        self._s_rot_center_p      = P(self.cur_rot_center_p.x,  self.cur_rot_center_p.y)
+        self._s_rot_center_px     = P(self.cur_rot_center_px.x, self.cur_rot_center_px.y)
+        self._s_rot_target_p      = P(self.cur_rot_target_p.x,  self.cur_rot_target_p.y)
+        self._s_rot_target_px     = P(self.cur_rot_target_px.x, self.cur_rot_target_px.y)
+        self._s_rot_angle_initial = self.cur_rot_angle_initial
+        self._s_rot_angle         = self.cur_rot_angle
+
+    def _apply(self, tw: ArcTween, v: float):
+        def _lerp_p(cur_val, s_val, tw_val):
+            base = s_val if s_val is not None else P(0.0, 0.0)
+            nx = base.x + (tw_val.x - base.x) * v if tw_val.x is not None else base.x
+            ny = base.y + (tw_val.y - base.y) * v if tw_val.y is not None else base.y
+            return P(nx, ny)
+
+        if tw.center_p  is not None: self.cur_center_p  = _lerp_p(self.cur_center_p,  self._s_center_p,  tw.center_p)
+        if tw.center_px is not None: self.cur_center_px = _lerp_p(self.cur_center_px, self._s_center_px, tw.center_px)
+        if tw.outer_p   is not None: self.cur_outer_p   = _lerp_p(self.cur_outer_p,   self._s_outer_p,   tw.outer_p)
+        if tw.outer_px  is not None: self.cur_outer_px  = _lerp_p(self.cur_outer_px,  self._s_outer_px,  tw.outer_px)
+        if tw.inner_p   is not None: self.cur_inner_p   = _lerp_p(self.cur_inner_p,   self._s_inner_p,   tw.inner_p)
+        if tw.inner_px  is not None: self.cur_inner_px  = _lerp_p(self.cur_inner_px,  self._s_inner_px,  tw.inner_px)
+
+        if tw.angle_start is not None:
+            base = self._s_angle_start if self._s_angle_start is not None else 0.0
+            self.cur_angle_start = base + (tw.angle_start - base) * v
+        if tw.angle_end is not None:
+            base = self._s_angle_end if self._s_angle_end is not None else 0.0
+            self.cur_angle_end = base + (tw.angle_end - base) * v
+        if tw.outline_width is not None:
+            self.cur_outline_width = self._s_outline_width + (tw.outline_width - self._s_outline_width) * v
+
+        if tw.rot_center_p      is not None: self.cur_rot_center_p      = P(self._s_rot_center_p.x  + (tw.rot_center_p.x  - self._s_rot_center_p.x)  * v, self._s_rot_center_p.y  + (tw.rot_center_p.y  - self._s_rot_center_p.y)  * v)
+        if tw.rot_center_px     is not None: self.cur_rot_center_px     = P(self._s_rot_center_px.x + (tw.rot_center_px.x - self._s_rot_center_px.x) * v, self._s_rot_center_px.y + (tw.rot_center_px.y - self._s_rot_center_px.y) * v)
+        if tw.rot_target_p      is not None: self.cur_rot_target_p      = P(self._s_rot_target_p.x  + (tw.rot_target_p.x  - self._s_rot_target_p.x)  * v, self._s_rot_target_p.y  + (tw.rot_target_p.y  - self._s_rot_target_p.y)  * v)
+        if tw.rot_target_px     is not None: self.cur_rot_target_px     = P(self._s_rot_target_px.x + (tw.rot_target_px.x - self._s_rot_target_px.x) * v, self._s_rot_target_px.y + (tw.rot_target_px.y - self._s_rot_target_px.y) * v)
+        if tw.rot_angle_initial is not None: self.cur_rot_angle_initial = self._s_rot_angle_initial + (tw.rot_angle_initial - self._s_rot_angle_initial) * v
+        if tw.rot_angle         is not None: self.cur_rot_angle         = self._s_rot_angle         + (tw.rot_angle         - self._s_rot_angle)         * v
+        self._dirty = True
+
+    def _apply_blend(self, tw: ArcTween, v: float):
+        def _blend_p(cur_val, tw_val):
+            base = cur_val if cur_val is not None else P(0.0, 0.0)
+            dx = tw_val.x if tw_val.x is not None else 0.0
+            dy = tw_val.y if tw_val.y is not None else 0.0
+            return P(base.x + dx * v, base.y + dy * v)
+
+        if tw.center_p  is not None: self.cur_center_p  = _blend_p(self.cur_center_p,  tw.center_p)
+        if tw.center_px is not None: self.cur_center_px = _blend_p(self.cur_center_px, tw.center_px)
+        if tw.outer_p   is not None: self.cur_outer_p   = _blend_p(self.cur_outer_p,   tw.outer_p)
+        if tw.outer_px  is not None: self.cur_outer_px  = _blend_p(self.cur_outer_px,  tw.outer_px)
+        if tw.inner_p   is not None: self.cur_inner_p   = _blend_p(self.cur_inner_p,   tw.inner_p)
+        if tw.inner_px  is not None: self.cur_inner_px  = _blend_p(self.cur_inner_px,  tw.inner_px)
+
+        if tw.angle_start   is not None: self.cur_angle_start   = (self.cur_angle_start or 0.0) + tw.angle_start * v
+        if tw.angle_end     is not None: self.cur_angle_end     = (self.cur_angle_end   or 0.0) + tw.angle_end   * v
+        if tw.outline_width is not None: self.cur_outline_width = self.cur_outline_width + tw.outline_width * v
+        self._dirty = True
+
+    def _snap_to(self, tw: ArcTween):
+        def _snap_p(cur_val, tw_val):
+            base = cur_val if cur_val is not None else P(0.0, 0.0)
+            nx = tw_val.x if tw_val.x is not None else base.x
+            ny = tw_val.y if tw_val.y is not None else base.y
+            return P(nx, ny)
+
+        if tw.center_p  is not None: self.cur_center_p  = _snap_p(self.cur_center_p,  tw.center_p)
+        if tw.center_px is not None: self.cur_center_px = _snap_p(self.cur_center_px, tw.center_px)
+        if tw.outer_p   is not None: self.cur_outer_p   = _snap_p(self.cur_outer_p,   tw.outer_p)
+        if tw.outer_px  is not None: self.cur_outer_px  = _snap_p(self.cur_outer_px,  tw.outer_px)
+        if tw.inner_p   is not None: self.cur_inner_p   = _snap_p(self.cur_inner_p,   tw.inner_p)
+        if tw.inner_px  is not None: self.cur_inner_px  = _snap_p(self.cur_inner_px,  tw.inner_px)
+
+        if tw.angle_start       is not None: self.cur_angle_start       = tw.angle_start
+        if tw.angle_end         is not None: self.cur_angle_end         = tw.angle_end
+        if tw.outline_width     is not None: self.cur_outline_width     = tw.outline_width
+        if tw.rot_center_p      is not None: self.cur_rot_center_p      = tw.rot_center_p
+        if tw.rot_center_px     is not None: self.cur_rot_center_px     = tw.rot_center_px
+        if tw.rot_target_p      is not None: self.cur_rot_target_p      = tw.rot_target_p
+        if tw.rot_target_px     is not None: self.cur_rot_target_px     = tw.rot_target_px
+        if tw.rot_angle_initial is not None: self.cur_rot_angle_initial = tw.rot_angle_initial
+        if tw.rot_angle         is not None: self.cur_rot_angle         = tw.rot_angle
+        self._dirty = True
+
+    def _reset_to_def(self):
+        d = self.defn
+        self.cur_center_p      = P(d.center_p.x, d.center_p.y)
+        self.cur_center_px     = P(d.center_px.x, d.center_px.y)
+        self.cur_outer_p       = P(d.outer_p.x, d.outer_p.y)
+        self.cur_outer_px      = P(d.outer_px.x, d.outer_px.y)
+        self.cur_inner_p       = P(d.inner_p.x, d.inner_p.y) if d.inner_p is not None else None
+        self.cur_inner_px      = P(d.inner_px.x, d.inner_px.y) if d.inner_px is not None else None
+        self.cur_angle_start   = d.angle_start
+        self.cur_angle_end     = d.angle_end
+        self.cur_outline_width = d.outline_width
+        self.cur_rot_center_p      = P(d.rot_center_p.x,  d.rot_center_p.y)
+        self.cur_rot_center_px     = P(d.rot_center_px.x, d.rot_center_px.y)
+        self.cur_rot_target_p      = P(d.rot_target_p.x,  d.rot_target_p.y)
+        self.cur_rot_target_px     = P(d.rot_target_px.x, d.rot_target_px.y)
+        self.cur_rot_angle_initial = d.rot_angle_initial
+        self.cur_rot_angle         = d.rot_angle
+        self._dirty = True
+
+    def set_phase(self, phase: str):
+        super().set_phase(phase, self.defn.phases)
+        self._dirty = True
+
+    def phase_done(self) -> bool:
+        return self._is_done()
+
+    def update(self) -> None:
+        self._drive()
+        self._check_pulse(self.defn.phases or {})
+
+    # ── Geometry / Draw ──────────────────────────────────────────
+
+    def _resolve(self, ww: int, wh: int):
+        cx = self.cur_center_p.x * ww + self.cur_center_px.x
+        cy = self.cur_center_p.y * wh + self.cur_center_px.y
+
+        ox = self.cur_outer_p.x * ww + self.cur_outer_px.x
+        oy = self.cur_outer_p.y * wh + self.cur_outer_px.y
         outer_r = _math.sqrt((ox - cx) ** 2 + (oy - cy) ** 2)
 
-        # inner radius
         inner_r = None
-        if d.inner_p is not None:
-            ipx = d.inner_px or P()
-            ix = d.inner_p.x * ww + ipx.x
-            iy = d.inner_p.y * wh + ipx.y
+        if self.cur_inner_p is not None:
+            ipx = self.cur_inner_px or P()
+            ix = self.cur_inner_p.x * ww + ipx.x
+            iy = self.cur_inner_p.y * wh + ipx.y
             r  = _math.sqrt((ix - cx) ** 2 + (iy - cy) ** 2)
-            if r > 0.0 and (d.inner_p.x != d.center_p.x or d.inner_p.y != d.center_p.y or
-                             ipx.x != d.center_px.x or ipx.y != d.center_px.y):
+            if r > 0.0 and (self.cur_inner_p.x != self.cur_center_p.x or self.cur_inner_p.y != self.cur_center_p.y or
+                             ipx.x != self.cur_center_px.x or ipx.y != self.cur_center_px.y):
                 inner_r = r
 
         return cx, cy, outer_r, inner_r
@@ -2195,17 +2553,18 @@ class AnimatedArc:
             return
 
         d = self.defn
-        if d.fill_color.alpha() == 0 and (d.outline_width <= 0 or d.outline_color is None or d.outline_color.alpha() == 0):
+        if d.fill_color.alpha() == 0 and (self.cur_outline_width <= 0 or d.outline_color is None or d.outline_color.alpha() == 0):
             return
 
         cx, cy, outer_r, inner_r = self._resolve(ww, wh)
         if outer_r <= 0:
             return
 
+        angle_offset = _resolve_angle_value(d.rot_angle_fn)
         rot = _resolve_rotation(
-            d.rot_center_p, d.rot_center_px,
-            d.rot_target_p, d.rot_target_px,
-            d.rot_angle_initial, d.rot_angle,
+            self.cur_rot_center_p, self.cur_rot_center_px,
+            self.cur_rot_target_p, self.cur_rot_target_px,
+            self.cur_rot_angle_initial, self.cur_rot_angle + angle_offset,
             ww, wh
         )
         if rot is not None:
@@ -2215,14 +2574,14 @@ class AnimatedArc:
             painter.rotate(angle)
             painter.translate(-rcx, -rcy)
 
-        # determine if full circle
         is_circle = d.circle
         if not is_circle:
-            if d.angle_start is None or d.angle_end is None:
+            if self.cur_angle_start is None or self.cur_angle_end is None:
                 is_circle = True
             else:
-                diff = abs(d.angle_end - d.angle_start)
+                diff = abs(self.cur_angle_end - self.cur_angle_start)
                 if diff == 0.0:
+                    if rot is not None: painter.restore()
                     return
                 elif diff >= 360.0:
                     is_circle = True
@@ -2242,47 +2601,31 @@ class AnimatedArc:
                     path.addEllipse(rect_outer)
                 return path
 
-            # Our convention: 0 = North, clockwise
-            # Qt convention:  0 = East (3 o'clock), counter-clockwise, units = 1/16th degree
-            # Convert: qt_angle = 90 - our_angle
-            start_our = d.angle_start if d.angle_start is not None else 0.0
-            end_our   = d.angle_end   if d.angle_end   is not None else 0.0
+            start_our = self.cur_angle_start if self.cur_angle_start is not None else 0.0
+            end_our   = self.cur_angle_end   if self.cur_angle_end   is not None else 0.0
 
-            # span is always positive, direction is clockwise in our system
-            # which means negative span in Qt
             span = end_our - start_our
-            # normalise so span is in (-360, 360), preserve sign
             span = span % 360.0
             if span == 0.0:
-                return path  # nothing to draw
+                return path
 
-            # Convert start to Qt: 0=North,CW -> Qt 0=East,CCW
             qt_start = 90.0 - start_our
-            qt_span  = -span   # clockwise in our system = negative in Qt
+            qt_span  = -span
 
-            # Qt works in 1/16th degrees internally via arcTo which takes degrees directly
             rect_inner = QRectF(cx - inner_r, cy - inner_r, inner_r * 2, inner_r * 2) if (inner_r is not None and inner_r > 0) else None
 
             if rect_inner is not None:
-                # donut arc
-                start_rad = _math.radians(start_our - 90.0)  # convert to standard math angle
+                start_rad = _math.radians(start_our - 90.0)
                 end_rad   = _math.radians(end_our   - 90.0)
-
-                # start point on outer arc
-                path.moveTo(cx + outer_r * _math.cos(start_rad),
-                            cy + outer_r * _math.sin(start_rad))
+                path.moveTo(cx + outer_r * _math.cos(start_rad), cy + outer_r * _math.sin(start_rad))
                 path.arcTo(rect_outer, qt_start, qt_span)
-                # connect to inner arc end point
-                path.lineTo(cx + inner_r * _math.cos(end_rad),
-                            cy + inner_r * _math.sin(end_rad))
+                path.lineTo(cx + inner_r * _math.cos(end_rad), cy + inner_r * _math.sin(end_rad))
                 path.arcTo(rect_inner, qt_start + qt_span, -qt_span)
                 path.closeSubpath()
             else:
-                # pie slice
                 start_rad = _math.radians(start_our - 90.0)
                 path.moveTo(cx, cy)
-                path.lineTo(cx + outer_r * _math.cos(start_rad),
-                            cy + outer_r * _math.sin(start_rad))
+                path.lineTo(cx + outer_r * _math.cos(start_rad), cy + outer_r * _math.sin(start_rad))
                 path.arcTo(rect_outer, qt_start, qt_span)
                 path.closeSubpath()
 
@@ -2295,318 +2638,101 @@ class AnimatedArc:
         painter.drawPath(path)
         painter.setBrush(Qt.NoBrush)
 
-        if d.outline_width > 0.0 and d.outline_color is not None and d.outline_color.alpha() > 0:
+        if self.cur_outline_width > 0.0 and d.outline_color is not None and d.outline_color.alpha() > 0:
             pen = QPen(d.outline_color)
-            pen.setWidthF(d.outline_width)
+            pen.setWidthF(self.cur_outline_width)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
             painter.drawPath(path)
             painter.setPen(Qt.NoPen)
-        
+
         if rot is not None:
             painter.restore()
 
 # ──────────────────────── SLIDER DEF ────────────────────────
 
-def make_track_def(
-    p:         P     = P(),
-    px:        P     = P(),
-    length:    float = 0.0,
-    length_px: float = 0.0,
-    h_px:      float = 4.0,
-    fill_color:    QColor = None,
-    outline_color: QColor = None,
-    phases: Dict[str, Phase] = None,
-) -> PolygonDef:
-    half = h_px / 2.0
-    fc = fill_color    or QColor(255, 255, 255, 40)
-    oc = outline_color or QColor(0, 0, 0, 0)
-    return PolygonDef(
-        p  = [P(p.x, p.y), P(p.x+length, p.y), P(p.x+length, p.y), P(p.x, p.y)],
-        px = [P(px.x, px.y-half), P(px.x+length_px, px.y-half),
-              P(px.x+length_px, px.y+half), P(px.x, px.y+half)],
-        fill_color    = fc,
-        outline_color = oc,
-        closed        = True,
-        phases        = phases or {},
-    )
-
-def make_knob_def(
-    fill_color: QColor = None,
-    phases: Dict[str, Phase] = None,
-) -> PolygonDef:
-    fc = fill_color or QColor(255, 255, 255)
-    return PolygonDef(
-        p             = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
-        px            = [P(0, 0), P(0, 0), P(0, 0), P(0, 0)],
-        fill_color    = fc,
-        outline_color = QColor(0, 0, 0, 0),
-        closed        = True,
-        phases        = phases or {},
-    )
-
-def make_mark_fill_def(
-    p:      P     = P(),
-    px:     P     = P(),
-    h_px:   float = 8.0,
-    fill_color: QColor = None,
-    phases: Dict[str, Phase] = None,
-) -> PolygonDef:
-    half = h_px / 2.0
-    fc   = fill_color or QColor(255, 255, 255, 60)
-    return PolygonDef(
-        p  = [P(p.x, p.y)] * 4,
-        px = [P(px.x, px.y-half), P(px.x, px.y-half),
-              P(px.x, px.y+half), P(px.x, px.y+half)],
-        fill_color    = fc,
-        outline_color = QColor(0, 0, 0, 0),
-        closed        = True,
-        phases        = phases or {},
-    )
-
-def make_mark_tick_def(
-    p:      P     = P(),
-    px:     P     = P(),
-    w_px:   float = 3.0,
-    h_px:   float = 14.0,
-    fill_color: QColor = None,
-    phases: Dict[str, Phase] = None,
-) -> PolygonDef:
-    hw = w_px / 2.0
-    hh = h_px / 2.0
-    fc = fill_color or QColor(255, 255, 255, 200)
-    return PolygonDef(
-        p  = [P(p.x, p.y)] * 4,
-        px = [P(px.x-hw, px.y-hh), P(px.x+hw, px.y-hh),
-              P(px.x+hw, px.y+hh), P(px.x-hw, px.y+hh)],
-        fill_color    = fc,
-        outline_color = QColor(0, 0, 0, 0),
-        closed        = True,
-        phases        = phases or {},
-    )
-
-
 @dataclass
-class SliderTextDefs:
-    label:   Optional[TextDef] = None   # anchored near track P1, static
-    min_val: Optional[TextDef] = None   # anchored at track P1
-    max_val: Optional[TextDef] = None   # anchored at track P2
-    current: Optional[TextDef] = None   # follows knob (px injected each frame)
+class SliderDef:
+    event_out: Optional[EventDef] = None
+    min_val:   float = 0.0
+    max_val:   float = 1.0
+    step:      float = 0.0
+    decimals:  int   = 0
 
-@dataclass
-class SliderGroupDef:
-    p:          P                                        = field(default_factory=P)
-    px:         P                                        = field(default_factory=P)
-    length:     float                                    = 0.0
-    length_px:  float                                    = 0.0
-    min_val:      float                                  = 0.0
-    max_val:      float                                  = 1.0
-    event_out:    Optional[EventDef]                     = None
-    step:         float                                  = 0.0
-    label:        str                                    = ''
-    unit:         str                                    = ''
-    decimals:     int                                    = 0
-    track:        Optional[PolygonDef]                   = None
-    knob:         Optional[PolygonDef]                   = None
-    mark_fill:    Optional[PolygonDef]                   = None
-    mark_tick:    Optional[PolygonDef]                   = None
-    text_label:   Optional[TextDef]                      = None
-    text_min:     Optional[TextDef]                      = None
-    text_max:     Optional[TextDef]                      = None
-    text_current: Optional[TextDef]                      = None
-    phases:       Dict[str, Phase]                       = field(default_factory=dict)
-    event_out:    Optional[EventDef]                     = None
-    knob_hit_px:  float                                  = 10.0
+    # track interpolation anchors
+    min_track_p:  Optional[List[P]] = None
+    min_track_px: Optional[List[P]] = None
+    max_track_p:  Optional[List[P]] = None
+    max_track_px: Optional[List[P]] = None
+
+    # knob movement anchors
+    min_p:  P = field(default_factory=P)
+    min_px: P = field(default_factory=P)
+    max_p:  P = field(default_factory=P)
+    max_px: P = field(default_factory=P)
+
+    track_poly_def:  Optional[PolygonDef]     = None
+    fill_poly_def:   Optional[PolygonDef]     = None
+    knob_poly_def:   Optional[PolygonDef]     = None
+    extra_poly_defs: List[PolygonDef]         = field(default_factory=list)
+
+    min_text_def:     Optional[TextDef] = None
+    max_text_def:     Optional[TextDef] = None
+    current_text_def: Optional[TextDef] = None
+    extra_text_defs:  List[TextDef]     = field(default_factory=list)
+
+    knob_hit_px: float = 10.0
     visible_threshold_x: float = 0.0
     visible_threshold_y: float = 0.0
 
+def BasicSliderDef(
+    p1: P = P(), p2: P = P(), px1: P = P(), px2: P = P(),
+    event_out: Optional[EventDef] = None,
+    min_val: float = 0.0, max_val: float = 1.0, step: float = 0.0, decimals: int = 0,
+    label: str = '', unit: str = '',
+    font_family: str = 'Oxanium SemiBold',
+    track_h: float = 4.0, knob_size: float = 10.0,
+    track_idle: QColor = QColor(255, 255, 255, 40),
+    fill_idle: QColor = QColor(200, 220, 255, 60),
+    knob_idle: QColor = QColor(255, 255, 255, 220),
+    knob_hover: QColor = QColor(255, 255, 255, 255),
+    knob_press: QColor = QColor(180, 210, 255, 255),
+    text_color: QColor = QColor(200, 220, 255, 255),
+) -> SliderDef:
+    half = track_h / 2.0
+    track_pts_p  = [P(p1.x, p1.y), P(p2.x, p1.y), P(p2.x, p1.y), P(p1.x, p1.y)]
+    track_pts_px = [P(px1.x, px1.y - half), P(px2.x, px1.y - half), P(px2.x, px1.y + half), P(px1.x, px1.y + half)]
 
-def SliderDef(
-    p:           P     = P(),
-    px:          P     = P(),
-    length:      float = 0.0,
-    length_px:   float = 0.0,
-    event_out:   Optional[EventDef] = None,
-    min_val:     float = 0.0,
-    max_val:     float = 1.0,
-    step:        float = 0.0,
-    label:       str   = '',
-    unit:        str   = '',
-    decimals:    int   = 0,
-    font_family: str   = 'Oxanium SemiBold',
-    track_h:     float = 4.0,
-    knob_size:   int   = 10,
-    mark_h:      float = 6.0,
-    tick_h:      float = 12.0,
-    track_idle:  QColor = QColor(255, 255, 255,  40),
-    track_press: QColor = QColor(200, 220, 255,  80),
-    fill_idle:   QColor = QColor(200, 220, 255,  60),
-    fill_press:  QColor = QColor(200, 220, 255, 120),
-    tick_idle:   QColor = QColor(255, 255, 255, 200),
-    tick_press:  QColor = QColor(200, 220, 255, 255),
-    knob_idle:   QColor = QColor(255, 255, 255, 220),
-    knob_hover:  QColor = QColor(255, 255, 255, 255),
-    knob_press:  QColor = QColor(180, 210, 255, 255),
-    text_dim:    QColor = QColor(200, 220, 255, 160),
-    text_bright: QColor = QColor(200, 220, 255, 255),
-    zero_white:  QColor = QColor(255, 255, 255,   0),
-    zero_color:  QColor = QColor(200, 220, 255,   0),
-    visible_threshold_x: float = 0.0,
-    visible_threshold_y: float = 0.0,
-) -> SliderGroupDef:
-    fam       = font_family
-    unit_text = unit
-
-    def _track_phases():
-        pts_full = [P(p.x, p.y), P(p.x+length, p.y), P(p.x+length, p.y), P(p.x, p.y)]
-        pts_zero = [P(p.x, p.y), P(p.x,        p.y), P(p.x,        p.y), P(p.x, p.y)]
-        return {
-            'open':     Phase([PolygonTween(p=pts_zero, fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
-                               PolygonTween(p=pts_full, fill_color=track_idle, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint)]),
-            'close':    Phase([PolygonTween(p=pts_zero, fill_color=zero_white,  start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
-            'pressed':  Phase([PolygonTween(p=pts_full, fill_color=track_press, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
-            'released': Phase([PolygonTween(p=pts_full, fill_color=track_idle,  start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
-        }
-
-    def _knob_phases():
-        s  = knob_size
-        sh = int(knob_size * 1.3)
-        sp = int(knob_size * 0.8)
-        def _px(e): return [P(0, -e), P(e, 0), P(0, e), P(-e, 0)]
-        pts = [P(0, 0)] * 4
-        return {
-            'open':      Phase([PolygonTween(p=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
-                                PolygonTween(p=pts, px=_px(s),  fill_color=knob_idle,  start=0.10, dur=0.40, ease=QEasingCurve.OutBack)]),
-            'close':     Phase([PolygonTween(p=pts, px=_px(0),  fill_color=zero_white, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
-            'hovered':   Phase([PolygonTween(p=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutQuint)]),
-            'unhovered': Phase([PolygonTween(p=pts, px=_px(s),  fill_color=knob_idle,  start=0.00, dur=0.15, ease=QEasingCurve.OutQuint)]),
-            'pressed':   Phase([PolygonTween(p=pts, px=_px(sp), fill_color=knob_press, start=0.00, dur=0.08, ease=QEasingCurve.OutQuint)]),
-            'released':  Phase([PolygonTween(p=pts, px=_px(sh), fill_color=knob_hover, start=0.00, dur=0.12, ease=QEasingCurve.OutBack)]),
-        }
-
-    def _mark_phases(idle_col, press_col):
-        pts = [P(0, 0)] * 4
-        return {
-            'open':     Phase([PolygonTween(p=pts, fill_color=zero_color, start=0.00, dur=0.00, ease=QEasingCurve.Linear),
-                               PolygonTween(p=pts, fill_color=idle_col,   start=0.10, dur=0.40, ease=QEasingCurve.OutQuint)]),
-            'close':    Phase([PolygonTween(p=pts, fill_color=zero_color, start=0.00, dur=0.20, ease=QEasingCurve.InQuint)]),
-            'pressed':  Phase([PolygonTween(p=pts, fill_color=press_col,  start=0.00, dur=0.10, ease=QEasingCurve.OutQuint)]),
-            'released': Phase([PolygonTween(p=pts, fill_color=idle_col,   start=0.00, dur=0.20, ease=QEasingCurve.OutQuint)]),
-        }
-
-    def _text_phases(tp, tpx, h_align=0.5, v_align=0.5):
-        return {
-            'open':     Phase([TextTween(p=tp, px=tpx, start=0.05, dur=0.40, ease=QEasingCurve.OutQuint, fill_color=text_dim,    h_align=h_align, v_align=v_align)]),
-            'close':    Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.InQuint,  fill_color=zero_color,  h_align=h_align, v_align=v_align)]),
-            'pressed':  Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.10, ease=QEasingCurve.OutQuint, fill_color=text_bright, h_align=h_align, v_align=v_align)]),
-            'released': Phase([TextTween(p=tp, px=tpx, start=0.00, dur=0.20, ease=QEasingCurve.OutQuint, fill_color=text_dim,    h_align=h_align, v_align=v_align)]),
-        }
-
-    def _group_phases():
-        return {
-            'open':  Phase([PolygonTween(p=[P(0, 0)], px=[P(0, 0)],  start=0.00, dur=0.40, ease=QEasingCurve.OutQuint)]),
-            'close': Phase([PolygonTween(p=[P(0, 0)], px=[P(0, 20)], start=0.00, dur=0.25, ease=QEasingCurve.InQuint)]),
-        }
-
-    return SliderGroupDef(
-        p=p, px=px,
-        length=length,
-        length_px=length_px,
-        min_val=min_val,
-        max_val=max_val,
-        step=step,
-        label=label,
-        unit=unit,
-        decimals=decimals,
-        event_out=event_out,
-        knob_hit_px=knob_size,
-
-        track=make_track_def(
-            p=p, px=px,
-            length=length, length_px=length_px,
-            h_px=track_h,
-            fill_color=zero_white,
-            phases=_track_phases(),
+    return SliderDef(
+        event_out=event_out, min_val=min_val, max_val=max_val, step=step, decimals=decimals,
+        min_track_p=[P(p1.x, p1.y)] * 4,
+        min_track_px=[P(px1.x, px1.y - half), P(px1.x, px1.y - half), P(px1.x, px1.y + half), P(px1.x, px1.y + half)],
+        max_track_p=track_pts_p,
+        max_track_px=track_pts_px,
+        min_p=P(p1.x, p1.y), min_px=P(px1.x, px1.y),
+        max_p=P(p2.x, p1.y), max_px=P(px2.x, px1.y),
+        track_poly_def=PolygonDef(p=track_pts_p, px=track_pts_px, fill_color=track_idle),
+        fill_poly_def=PolygonDef(p=track_pts_p, px=track_pts_px, fill_color=fill_idle),
+        knob_poly_def=PolygonDef(
+            p=[P(0, 0)] * 4, px=[P(0, -knob_size), P(knob_size, 0), P(0, knob_size), P(-knob_size, 0)],
+            fill_color=knob_idle,
+            phases={
+                'hovered':   Phase([PolygonTween(fill_color=knob_hover, start=0, dur=0.12, ease=QEasingCurve.OutQuint)]),
+                'unhovered': Phase([PolygonTween(fill_color=knob_idle,  start=0, dur=0.15, ease=QEasingCurve.OutQuint)]),
+                'pressed':   Phase([PolygonTween(fill_color=knob_press, start=0, dur=0.08, ease=QEasingCurve.OutQuint)]),
+                'released':  Phase([PolygonTween(fill_color=knob_hover, start=0, dur=0.12, ease=QEasingCurve.OutQuint)]),
+            },
         ),
-
-        knob=make_knob_def(
-            fill_color=zero_white,
-            phases=_knob_phases(),
-        ),
-
-        mark_fill=make_mark_fill_def(
-            p=p, px=px,
-            h_px=mark_h,
-            fill_color=zero_color,
-            phases=_mark_phases(fill_idle, fill_press),
-        ),
-
-        mark_tick=make_mark_tick_def(
-            p=p, px=px,
-            w_px=2.0, h_px=tick_h,
-            fill_color=zero_white,
-            phases=_mark_phases(tick_idle, tick_press),
-        ),
-
-        text_label=TextDef(
-            p=P(p.x, p.y), px=P(px.x - 8, px.y),
-            text=label, font_size=7.0,
-            fill_color=zero_color,
-            phases=_text_phases(P(p.x, p.y), P(px.x - 8, px.y), h_align=1.0, v_align=0.5),
-            bold=True, italic=False, font_family=fam,
-            h_align=1.0, v_align=0.5, uniform_scale=False,
-        ) if label else None,
-
-        text_min=TextDef(
-            p=P(0.0, 0.0), px=P(0.0, 14.0),
-            text='', font_size=9.0,
-            fill_color=zero_color,
-            phases=_text_phases(P(p.x, p.y), P(px.x, px.y + 14.0), h_align=0.0, v_align=0.0),
-            bold=False, italic=False, font_family=fam,
-            h_align=0.0, v_align=0.0, uniform_scale=False,
-            text_fn=lambda ctx, u=unit_text, dec=decimals: (
-                f"{ctx.defn.min_val:.{dec}f}{u}" if ctx else ''
-            ) if dec > 0 else (
-                f"{int(ctx.defn.min_val)}{u}" if ctx else ''
-            ),
-        ) if min_val is not None else None,
-
-        text_max=TextDef(
-            p=P(0.0, 0.0), px=P(0.0, 14.0),
-            text='', font_size=9.0,
-            fill_color=zero_color,
-            phases=_text_phases(P(0.0, 0.0), P(0.0, 14.0), h_align=1.0, v_align=0.0),
-            bold=False, italic=False, font_family=fam,
-            h_align=1.0, v_align=0.0, uniform_scale=False,
-            text_fn=lambda ctx, u=unit_text, dec=decimals: (
-                f"{ctx.defn.max_val:.{dec}f}{u}" if ctx else ''
-            ) if dec > 0 else (
-                f"{int(ctx.defn.max_val)}{u}" if ctx else ''
-            ),
-        ) if max_val is not None else None,
-
-        text_current=TextDef(
-            p=P(0.0, 0.0), px=P(0.0, -12.0),
-            text='', font_size=10.0,
-            fill_color=zero_color,
-            phases=_text_phases(P(0.0, 0.0), P(0.0, -12.0), h_align=0.5, v_align=1.0),
-            bold=False, italic=False, font_family=fam,
-            h_align=0.5, v_align=1.0, uniform_scale=False,
-            text_fn=lambda ctx, u=unit_text, dec=decimals: (
-                f"{ctx._cur_value:.{dec}f}{u}" +
-                (f"  ({ctx._cur_value - ctx._initial_value:+.{dec}f})" if ctx.has_change else '')
-            ) if ctx and dec > 0 else (
-                f"{int(ctx._cur_value)}{u}" +
-                (f"  ({int(ctx._cur_value - ctx._initial_value):+})" if ctx.has_change else '')
-            ) if ctx else '',
-        ),
-
-        phases=_group_phases(),
+        min_text_def=TextDef(p=P(p1.x, p1.y), px=P(px1.x, px1.y + 14), text='', font_size=9.0, fill_color=text_color, h_align=0.0, v_align=0.0, font_family=font_family),
+        max_text_def=TextDef(p=P(p2.x, p1.y), px=P(px2.x, px1.y + 14), text='', font_size=9.0, fill_color=text_color, h_align=1.0, v_align=0.0, font_family=font_family),
+        current_text_def=TextDef(p=P(0, 0), px=P(0, -14), text='', font_size=10.0, fill_color=text_color, h_align=0.5, v_align=1.0, font_family=font_family, text_fn=lambda ctx: ctx._current_text_value() if ctx else ''),
+        extra_text_defs=[TextDef(p=P(p1.x, p1.y), px=P(px1.x, px1.y - 12), text=label, font_size=9.0, fill_color=text_color, h_align=0.0, v_align=1.0, bold=True, font_family=font_family)] if label else [],
     )
 
+
 class SliderGroup:
-    def __init__(self, defn: SliderGroupDef, cam_w=MONITOR_RESOLUTIONS[0][0], cam_h=MONITOR_RESOLUTIONS[0][1]):
+    def __init__(self, defn: SliderDef, cam_w=MONITOR_RESOLUTIONS[0][0], cam_h=MONITOR_RESOLUTIONS[0][1]):
         self.defn  = defn
         self.cam_w = cam_w
         self.cam_h = cam_h
@@ -2616,60 +2742,71 @@ class SliderGroup:
         self._dragging:      bool  = False
         self._hovered:       bool  = False
 
-        self._track      = AnimatedPolygon(defn.track)     if defn.track     else None
-        self._knob       = AnimatedPolygon(defn.knob)      if defn.knob      else None
-        self._mark_fill  = AnimatedPolygon(defn.mark_fill) if defn.mark_fill else None
-        self._mark_tick  = AnimatedPolygon(defn.mark_tick) if defn.mark_tick else None
+        self._track  = AnimatedPolygon(defn.track_poly_def) if defn.track_poly_def else None
+        self._fill   = AnimatedPolygon(defn.fill_poly_def)  if defn.fill_poly_def  else None
+        self._knob   = AnimatedPolygon(defn.knob_poly_def)  if defn.knob_poly_def  else None
+        self._extras = [AnimatedPolygon(d) for d in defn.extra_poly_defs]
 
-        self._text_label   = AnimatedText(defn.text_label)   if defn.text_label   else None
-        self._text_min     = AnimatedText(defn.text_min)     if defn.text_min     else None
-        self._text_max     = AnimatedText(defn.text_max)     if defn.text_max     else None
-        self._text_current = AnimatedText(defn.text_current) if defn.text_current else None
+        self._min_text     = AnimatedText(defn.min_text_def)     if defn.min_text_def     else None
+        self._max_text     = AnimatedText(defn.max_text_def)     if defn.max_text_def     else None
+        self._current_text = AnimatedText(defn.current_text_def) if defn.current_text_def else None
+        self._extra_texts  = [AnimatedText(d) for d in defn.extra_text_defs]
 
-        _group_def = PolygonDef(p=[P(0, 0)], px=[P(0, 30)], fill_color=QColor(0, 0, 0, 0), outline_color=QColor(0, 0, 0, 0), closed=True, phases=defn.phases)
-        self._group = AnimatedPolygon(_group_def)
+        if self._min_text is not None:
+            self._min_text.defn = _tw_replace(self._min_text.defn, text_fn=lambda ctx: self._format(self.defn.min_val))
+        if self._max_text is not None:
+            self._max_text.defn = _tw_replace(self._max_text.defn, text_fn=lambda ctx: self._format(self.defn.max_val))
 
-        self._track_x1: float = 0.0
-        self._track_y1: float = 0.0
-        self._track_x2: float = 0.0
-        self._track_y2: float = 0.0
-        self._knob_sx:  float = 0.0
-        self._knob_sy:  float = 0.0
-        self._knob_base_px: Optional[List[P]] = None
-        self._last_knob_sx: float = 0.0
-        self._last_knob_sy: float = 0.0
-        self._last_text_min_x:  float = 0.0
-        self._last_text_min_y:  float = 0.0
-        self._last_text_max_x:  float = 0.0
-        self._last_text_max_y:  float = 0.0
-        self._last_text_cur_x:  float = 0.0
-        self._last_text_cur_y:  float = 0.0
-        self._snap_knob_to_start: bool = False
-        self._snap_knob_to_start: bool  = False
- 
-        self._tick_display_sx:    float = 0.0 
-        self._tick_target_sx:     float = 0.0
-        self._tick_ease_start_sx: float = 0.0
-        self._tick_ease_t0:       float = 0.0
-        self._tick_easing:        bool  = False
-        self._tick_frozen:        bool  = False
+        if self._knob is not None:
+            self._knob.defn = _tw_replace(self._knob.defn, pos_fn=lambda: P(self._anchor_x, self._anchor_y))
+        if self._current_text is not None:
+            self._current_text.defn = _tw_replace(self._current_text.defn, pos_fn=lambda: P(self._anchor_x, self._anchor_y))
+
+        self._anchor_x: float = 0.0
+        self._anchor_y: float = 0.0
+        self._last_anchor_x: float = 0.0
+        self._last_anchor_y: float = 0.0
+        self._line_ax: float = 0.0
+        self._line_ay: float = 0.0
+        self._line_bx: float = 0.0
+        self._line_by: float = 0.0
 
         self.hidden: bool = False
 
-    def init_value(self, ctx):
-        if self.defn.event_out is not None and self.defn.event_out._is_numeric:
-            self._cur_value = self._initial_value = float(self.defn.event_out.value)
+    def _format(self, v: float) -> str:
+        dec = self.defn.decimals
+        return f'{v:.{dec}f}' if dec > 0 else str(int(round(v)))
     
+    def _current_text_value(self) -> str:
+        dec = self.defn.decimals
+        base = f'{self._cur_value:.{dec}f}' if dec > 0 else str(int(round(self._cur_value)))
+        if self.has_change:
+            diff = self._cur_value - self._initial_value
+            diff_s = f'{diff:+.{dec}f}' if dec > 0 else f'{int(diff):+}'
+            return f'{base}  ({diff_s})'
+        return base
+
+    def _all_polys(self):
+        yield from ([self._track] if self._track else [])
+        yield from ([self._fill] if self._fill else [])
+        yield from ([self._knob] if self._knob else [])
+        yield from self._extras
+
+    def _all_texts(self):
+        yield from ([self._min_text] if self._min_text else [])
+        yield from ([self._max_text] if self._max_text else [])
+        yield from ([self._current_text] if self._current_text else [])
+        yield from self._extra_texts
+
+    def init_value(self, ctx):
+        # if self.defn.event_out is not None:
+        if self.defn.event_out._is_numeric:
+            self._cur_value = self._initial_value = float(self.defn.event_out.value)
+
     def commit(self, ctx):
         self._initial_value = self._cur_value
-        if self.defn.event_out is not None:
-            self.defn.event_out.value = self._cur_value
- 
-        self._tick_ease_start_sx = self._tick_display_sx
-        self._tick_target_sx     = self._knob_sx
-        self._tick_ease_t0       = time.monotonic()
-        self._tick_easing        = True
-        self._tick_frozen        = False
+        # if self.defn.event_out is not None:
+        self.defn.event_out.value = self._cur_value
 
     def revert(self):
         self._cur_value = self._initial_value
@@ -2679,189 +2816,93 @@ class SliderGroup:
         return self._cur_value != self._initial_value
 
     def set_phase(self, phase: str):
-        for comp in (self._track, self._knob, self._mark_fill, self._mark_tick, self._group):
-            if comp is not None:
-                comp.set_phase(phase)
-        for text in (self._text_label, self._text_min, self._text_max, self._text_current):
-            if text is not None:
-                text.set_phase(phase)
-        if phase == 'open':
-            self._snap_knob_to_start = True
-        if self._knob is not None:
-            self._knob._spx = [P(p.x - self._last_knob_sx, p.y - self._last_knob_sy) for p in self._knob._spx]
-        if self._text_min is not None and (self._last_text_min_x != 0.0 or self._last_text_min_y != 0.0):
-            self._text_min.cur_px = P(self._text_min.cur_px.x - self._last_text_min_x, self._text_min.cur_px.y - self._last_text_min_y)
-            self._text_min._spx   = P(self._text_min._spx.x   - self._last_text_min_x, self._text_min._spx.y   - self._last_text_min_y)
-        if self._text_max is not None and (self._last_text_max_x != 0.0 or self._last_text_max_y != 0.0):
-            self._text_max.cur_px = P(self._text_max.cur_px.x - self._last_text_max_x, self._text_max.cur_px.y - self._last_text_max_y)
-            self._text_max._spx   = P(self._text_max._spx.x   - self._last_text_max_x, self._text_max._spx.y   - self._last_text_max_y)
-        if self._text_current is not None and (self._last_text_cur_x != 0.0 or self._last_text_cur_y != 0.0):
-            self._text_current.cur_px = P(self._text_current.cur_px.x - self._last_text_cur_x, self._text_current.cur_px.y - self._last_text_cur_y)
-            self._text_current._spx   = P(self._text_current._spx.x   - self._last_text_cur_x, self._text_current._spx.y   - self._last_text_cur_y)
+        for p in self._all_polys():
+            p.set_phase(phase)
+        for t in self._all_texts():
+            t.set_phase(phase)
 
     def phase_done(self) -> bool:
-        comps = [self._track, self._knob, self._mark_fill, self._mark_tick, self._group, self._text_label, self._text_min, self._text_max,   self._text_current]
-        return all(c.phase_done() for c in comps if c is not None)
+        return all(p.phase_done() for p in self._all_polys()) and all(t.phase_done() for t in self._all_texts())
+
+    def _ratio(self) -> float:
+        d = self.defn
+        if d.max_val == d.min_val:
+            return 0.0
+        return max(0.0, min(1.0, (self._cur_value - d.min_val) / (d.max_val - d.min_val)))
 
     def hit_test_knob(self, mx: float, my: float, w: int, h: int) -> bool:
-        return (abs(mx - self._knob_sx) <= self.defn.knob_hit_px and abs(my - self._knob_sy) <= self.defn.knob_hit_px)
+        if self._knob is None:
+            return False
+        return (abs(mx - self._anchor_x) <= self.defn.knob_hit_px and
+                abs(my - self._anchor_y) <= self.defn.knob_hit_px)
 
     def drag_to(self, mx, my, w, h):
-        span = self._track_x2 - self._track_x1
-        if span == 0:
-            return
-        ratio = max(0.0, min(1.0, (mx - self._track_x1) / span))
-        d     = self.defn
+        ax, ay, bx, by = self._line_ax, self._line_ay, self._line_bx, self._line_by
+        dx, dy = bx - ax, by - ay
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq == 0:
+            ratio = 0.0
+        else:
+            ratio = ((mx - ax) * dx + (my - ay) * dy) / seg_len_sq
+            ratio = max(0.0, min(1.0, ratio))
+        d = self.defn
         lo, hi, step = d.min_val, d.max_val, d.step
         raw = lo + ratio * (hi - lo)
         if step > 0:
             raw = round(raw / step) * step
         self._cur_value = max(lo, min(hi, raw))
-    
+
     def update(self, widget_w: int, widget_h: int):
-        if not self._tick_frozen and not self._tick_easing and self._tick_display_sx == 0.0:
-            d = self.defn
-            if (d.max_val - d.min_val) != 0:
-                init_ratio = (self._initial_value - d.min_val) / (d.max_val - d.min_val)
-            else:
-                init_ratio = 0.0
-            init_ratio = max(0.0, min(1.0, init_ratio))
-            
-        # 1. Tick group
-        self._group.update()
-        gp  = self._group.cur_p[0]
-        gpx = self._group.cur_px[0]
-        g_dx = gp.x * widget_w + gpx.x
-        g_dy = gp.y * widget_h + gpx.y
-
-        # 2. Track End Points
         d = self.defn
-        self._track_x1 = d.p.x * widget_w + d.px.x + g_dx
-        self._track_y1 = d.p.y * widget_h + d.px.y + g_dy
-        self._track_x2 = (d.p.x + d.length) * widget_w + d.px.x + d.length_px + g_dx
-        self._track_y2 = self._track_y1
+        ratio = self._ratio()
 
-        # 3. Track Screen Position
+        self._line_ax = d.min_p.x * widget_w + d.min_px.x
+        self._line_ay = d.min_p.y * widget_h + d.min_px.y
+        self._line_bx = d.max_p.x * widget_w + d.max_px.x
+        self._line_by = d.max_p.y * widget_h + d.max_px.y
+        self._anchor_x = self._line_ax + (self._line_bx - self._line_ax) * ratio
+        self._anchor_y = self._line_ay + (self._line_by - self._line_ay) * ratio
+
+        _slider_knob_positions[id(self.defn)] = P(self._anchor_x, self._anchor_y)
+
         if self._track is not None:
-            self._track._screen_offset = P(g_dx, g_dy)
-            self._track._dirty = True
             self._track.update()
 
-        # 4. Knob Position
-        if self._snap_knob_to_start:
-            self._knob._spx = [P(self._track_x1 - self._knob_sx, self._track_y1 - self._knob_sy) for p in self._knob.cur_px]
-            self._last_knob_sx = self._track_x1
-            self._last_knob_sy = self._track_y1
-            self._snap_knob_to_start = False
+        if self._fill is not None:
+            self._fill.update()
+            if d.min_track_p is not None and d.max_track_p is not None:
+                self._fill.cur_p = [P(a.x + (b.x - a.x) * ratio, a.y + (b.y - a.y) * ratio) for a, b in zip(d.min_track_p, d.max_track_p)]
+            if d.min_track_px is not None and d.max_track_px is not None:
+                self._fill.cur_px = [P(a.x + (b.x - a.x) * ratio, a.y + (b.y - a.y) * ratio) for a, b in zip(d.min_track_px, d.max_track_px)]
+            self._fill._dirty = True
 
-        ratio = 0.0 if d.max_val - d.min_val == 0 else max(0.0, min(1.0, (self._cur_value - d.min_val) / (d.max_val - d.min_val)))
-        self._knob_sx = self._track_x1 + ratio * (self._track_x2 - self._track_x1)
-        self._knob_sy = self._track_y1
-
-        # 5. Initial Mark Position
-        if self._dragging:
-            self._tick_frozen = True
-        else:
-            if self._tick_easing:
-                elapsed = time.monotonic() - self._tick_ease_t0
-                dur = 0.5
-                if elapsed >= dur:
-                    self._tick_display_sx = self._tick_target_sx
-                    self._tick_easing     = False
-                else:
-                    t = elapsed / dur
-                    v = 1.0 - (1.0 - t) ** 5
-                    self._tick_display_sx = (self._tick_ease_start_sx + (self._tick_target_sx - self._tick_ease_start_sx) * v)
-            elif not self._tick_frozen:
-                d = self.defn
-                if (d.max_val - d.min_val) != 0:
-                    init_ratio = (self._initial_value - d.min_val) / (d.max_val - d.min_val)
-                else:
-                    init_ratio = 0.0
-                init_ratio = max(0.0, min(1.0, init_ratio))
-                self._tick_display_sx = self._track_x1 + init_ratio * (self._track_x2 - self._track_x1)
-
-        self._init_sx = self._tick_display_sx
-
-        # 6. Knob
         if self._knob is not None:
-            self._knob.cur_px = [P(p.x - self._last_knob_sx, p.y - self._last_knob_sy) for p in self._knob.cur_px]
             self._knob.update()
-            self._knob.cur_px = [P(p.x + self._knob_sx, p.y + self._knob_sy) for p in self._knob.cur_px]
-            self._last_knob_sx = self._knob_sx
-            self._last_knob_sy = self._knob_sy
-            self._knob._dirty = True
 
-        # 7. Mark Fill
-        if self._mark_fill is not None:
-            self._mark_fill.update()
-            left_x  = min(self._knob_sx, self._tick_display_sx)
-            right_x = max(self._knob_sx, self._tick_display_sx)
-            half = (self.defn.mark_fill.px[2].y - self.defn.mark_fill.px[0].y) / 2
-            self._mark_fill.cur_p = [P(0, 0)] * 4
-            self._mark_fill.cur_px = [
-                P(left_x,  self._knob_sy - half),
-                P(right_x, self._knob_sy - half),
-                P(right_x, self._knob_sy + half),
-                P(left_x,  self._knob_sy + half),
-            ]
-            self._mark_fill._dirty = True
+        for extra in self._extras:
+            extra.update()
 
-        # 8. Mark Tick
-        if self._mark_tick is not None:
-            self._mark_tick.update()
-            hw = (self.defn.mark_tick.px[1].x - self.defn.mark_tick.px[0].x) / 2.0
-            hh = (self.defn.mark_tick.px[2].y - self.defn.mark_tick.px[0].y) / 2.0
-            self._mark_tick.cur_p = [P(0, 0)] * 4
-            self._mark_tick.cur_px = [
-                P(self._tick_display_sx - hw, self._knob_sy - hh),
-                P(self._tick_display_sx + hw, self._knob_sy - hh),
-                P(self._tick_display_sx + hw, self._knob_sy + hh),
-                P(self._tick_display_sx - hw, self._knob_sy + hh),
-            ]
-            self._mark_tick._dirty = True
+        if self._min_text is not None:
+            self._min_text.update()
+        if self._max_text is not None:
+            self._max_text.update()
+        if self._current_text is not None:
+            self._current_text.update()
 
-        # 9. Label text
-        if self._text_label is not None:
-            self._text_label.update()
+        for extra in self._extra_texts:
+            extra.update()
 
-        if self._text_min is not None:
-            self._text_min.cur_px = P(self._text_min.cur_px.x - self._last_text_min_x, self._text_min.cur_px.y - self._last_text_min_y)
-            self._text_min.update()
-            self._text_min.cur_p  = P(0.0, 0.0)
-            self._text_min.cur_px = P(self._track_x1 + self._text_min.cur_px.x, self._track_y1 + self._text_min.cur_px.y)
-            self._last_text_min_x = self._track_x1
-            self._last_text_min_y = self._track_y1
-            self._text_min._dirty = True
-
-        if self._text_max is not None:
-            self._text_max.cur_px = P(self._text_max.cur_px.x - self._last_text_max_x, self._text_max.cur_px.y - self._last_text_max_y)
-            self._text_max.update()
-            self._text_max.cur_p  = P(0.0, 0.0)
-            self._text_max.cur_px = P(self._track_x2 + self._text_max.cur_px.x, self._track_y1  + self._text_max.cur_px.y)
-            self._last_text_max_x = self._track_x2
-            self._last_text_max_y = self._track_y1
-            self._text_max._dirty = True
-
-        if self._text_current is not None:
-            self._text_current.cur_px = P(self._text_current.cur_px.x - self._last_text_cur_x, self._text_current.cur_px.y - self._last_text_cur_y)
-            self._text_current.update()
-            self._text_current.cur_p  = P(0.0, 0.0)
-            self._text_current.cur_px = P(self._knob_sx + self._text_current.cur_px.x, self._knob_sy + self._text_current.cur_px.y)
-            self._last_text_cur_x     = self._knob_sx
-            self._last_text_cur_y     = self._knob_sy
-            self._text_current._dirty = True
-            
     def draw(self, painter: QPainter, w: int, h: int, scale: float = 1.0):
         if self.hidden:
             return
         cam_w, cam_h = self.cam_w, self.cam_h
-        if self._track     is not None: self._track.draw(painter, w, h, cam_w, cam_h)
-        if self._mark_fill is not None: self._mark_fill.draw(painter, w, h, cam_w, cam_h)
-        if self._mark_tick is not None: self._mark_tick.draw(painter, w, h, cam_w, cam_h)
-        if self._knob      is not None: self._knob.draw(painter, w, h, cam_w, cam_h)
-        for text in (self._text_label, self._text_min, self._text_max, self._text_current):
-            if text is None or text.hidden:
+        if self._track is not None: self._track.draw(painter, w, h, cam_w, cam_h)
+        if self._fill  is not None: self._fill.draw(painter, w, h, cam_w, cam_h)
+        if self._knob  is not None: self._knob.draw(painter, w, h, cam_w, cam_h)
+        for extra in self._extras:
+            extra.draw(painter, w, h, cam_w, cam_h)
+        for text in self._all_texts():
+            if text.hidden:
                 continue
             text.draw_text(painter, w, h, cam_w, cam_h, self, scale=scale)
 
@@ -2869,20 +2910,24 @@ class SliderGroup:
 
 @dataclass
 class ButtonDef:
-    poly_def:          PolygonDef         = field(default_factory=PolygonDef)
-    text_def:          Optional[TextDef]  = None
-    key:               Optional[int]      = None
-    mandatory_keys:    Any                = None
-    action:            str                = 'set'
-    event_out:         Any                = None
-    event_delta:       Any                = None
-    hold_when_set:     bool               = False
-    phase_override:    Optional[Any]      = None
-    on_fire:           Optional[Callable] = None
-    continuous_update: bool               = False
-    invisible:         bool               = False
-    visible_threshold_x: float = 0.0
-    visible_threshold_y: float = 0.0
+    poly_def:             PolygonDef         = field(default_factory=PolygonDef)
+    text_def:             Optional[TextDef]  = None
+    extra_poly_defs:      List[PolygonDef]   = field(default_factory=list)
+    extra_text_defs:      List[TextDef]      = field(default_factory=list)
+    key:                  Optional[int]      = None
+    mandatory_keys:       Any                = None
+    action:               str                = 'set'
+    event_out:            Any                = None
+    event_delta:          Any                = None
+    hold_when_set:        bool               = False
+    phase_override:       Optional[Any]      = None
+    on_fire:              Optional[Callable] = None
+    continuous_update:    bool               = False
+    invisible:            bool               = False
+    ignore_click_consume: bool               = False
+    ignore_mouse_event:   Any                = None
+    visible_threshold_x:  float              = 0.0
+    visible_threshold_y:  float              = 0.0
 
     def __post_init__(self):
         if self.action not in ('set', 'cycle'): self.hold_when_set = False
@@ -2959,7 +3004,14 @@ class AnimatedButton:
         self._held      = False
         self._polygon   = AnimatedPolygon(defn.poly_def)
         self._text      = AnimatedText(defn.text_def) if defn.text_def else None
-        self._locked    = False
+        self._extra_polys = [AnimatedPolygon(d) for d in defn.extra_poly_defs]
+        self._extra_texts = [AnimatedText(d) for d in defn.extra_text_defs]
+
+        self._base_phase:        str  = ''          # open/close
+        self._interaction_phase: str  = 'unhover'   # hover/unhover/click/release/set
+        self._open_done:         bool = False
+        self._applied_phase:     str  = ''
+
         self._cur_phase = ''
         self._last_poly: QPolygonF = QPolygonF()
         self._last_w:     int = 0
@@ -2967,12 +3019,28 @@ class AnimatedButton:
         self._last_phase: str = ''
         self._press_poly:QPolygonF = QPolygonF()
         self._last_override_phase: str = ''
-        self._pending_set_check: bool = False
         self._last_continuous_time: float = 0.0
         self._continuous_accum: float = 0.0
 
-    def _set_phase(self, phase: str):
-        if self._locked and phase not in ('open', 'close'):
+    def _set_base_phase(self, phase: str):
+        if phase not in ('open', 'close'):
+            return
+        if phase == self._base_phase:
+            return
+        self._base_phase = phase
+        if phase == 'close':
+            self._held      = False
+            self._pressed   = False
+            self._key_held  = False
+            self._hovered   = False
+            self._interaction_phase = 'unhover'
+            self._open_done = False
+        elif phase == 'open':
+            self._open_done = False
+        self._recompute_and_apply()
+
+    def _set_interaction_phase(self, phase: str):
+        if phase not in ('hover', 'unhover', 'click', 'release', 'set'):
             return
         if self._held and phase in ('hover', 'unhover', 'release'):
             return
@@ -2980,48 +3048,56 @@ class AnimatedButton:
             return
         if self._pressed and phase in ('hover', 'unhover'):
             return
-        if self._is_closed and phase not in ('open', 'close'):
+        self._interaction_phase = phase
+        self._recompute_and_apply()
+
+    def _target_phase(self) -> str:
+        if self._base_phase == 'close':
+            return 'close'
+        if self._base_phase == 'open':
+            return 'open' if not self._open_done else self._interaction_phase
+        return self._base_phase or ''
+
+    def _recompute_and_apply(self):
+        target = self._target_phase()
+        if not target:
             return
-        if phase == 'close':
-            self._held = False
-        self._cur_phase = phase
-        self._locked = phase in ('open', 'close')
-        if phase == 'open':
-            self._pending_set_check = True
-        self._polygon.set_phase(phase)
+        self._applied_phase = target
+        self._cur_phase     = target
+        self._polygon.set_phase(target)
         if self._text is not None:
-            self._text.set_phase(phase)
+            self._text.set_phase(target)
+        for p in self._extra_polys: p.set_phase(target)
+        for t in self._extra_texts: t.set_phase(target)
 
     def _check_held(self):
         if not self.defn.hold_when_set:
             return
-        ev    = self.defn.event_out
-        delta = self.defn.event_delta
-        if ev is None:
+        pairs = self._iter_event_pairs()
+        if not pairs:
             return
-        if self._cur_phase == 'close':
+        if self._base_phase == 'close':
             if self._held:
                 self._held = False
             return
-        if self._locked and self.defn.action != 'cycle':
-            return
         if self.defn.action == 'cycle':
-            last = delta[-1] if isinstance(delta, list) and delta else delta
-            should_hold = ev.value == last
+            should_hold = True
+            for ev, delta, _ in pairs:
+                last = delta[-1] if isinstance(delta, list) and delta else delta
+                if ev.value != last:
+                    should_hold = False
+                    break
         elif self.defn.action == 'set':
-            should_hold = ev.value == delta
+            should_hold = all(ev.value == delta for ev, delta, _ in pairs)
         else:
             return
         if should_hold and not self._held:
             self._held = True
-            self._cur_phase = 'set'
-            self._polygon.set_phase('set')
-            if self._text is not None:
-                self._text.set_phase('set')
+            self._set_interaction_phase('set')
         elif not should_hold and self._held:
             self._held = False
-            self._set_phase('unhover' if not self._hovered else 'hover')
-            
+            self._set_interaction_phase('unhover' if not self._hovered else 'hover')
+
     def hit_test(self, mx: float, my: float, w: int, h: int) -> bool:
         if self._is_closed:
             return False
@@ -3042,11 +3118,11 @@ class AnimatedButton:
 
     def hit_test_global(self, gx: float, gy: float, panel) -> bool:
         return self.hit_test(gx - panel.x(), gy - panel.y(), panel.width(), panel.height())
-    
+
     def mouse_left_hitbox(self):
         if self._pressed and not self._key_held:
             self._pressed = False
-            self._set_phase('unhover')
+            self._set_interaction_phase('unhover')
 
     def key_press(self, key: int, held_keys: set = None) -> bool:
         if self._is_closed:
@@ -3058,7 +3134,7 @@ class AnimatedButton:
         self._key_held  = True
         self._pressed   = True
         self._press_poly = QPolygonF(self._last_poly)
-        self._set_phase('click')
+        self._set_interaction_phase('click')
         return True
 
     def key_release(self, key: int, held_keys: set = None) -> bool:
@@ -3070,10 +3146,10 @@ class AnimatedButton:
             self.fire_event()
         self._check_held()
         if not self._held:
-            self._set_phase('release')
-            QTimer.singleShot(250, lambda: self._set_phase('hover' if self._hovered else 'unhover'))
+            self._set_interaction_phase('release')
+            QTimer.singleShot(250, lambda: self._set_interaction_phase('hover' if self._hovered else 'unhover'))
         return True
-    
+
     def _mandatory_keys_held(self, held_keys: set) -> bool:
         mk = self.defn.mandatory_keys
         if mk is None:
@@ -3090,45 +3166,40 @@ class AnimatedButton:
                 if k not in held_keys:
                     return False
         return True
-    
+
     @property
     def _is_closed(self) -> bool:
-        return self._cur_phase == 'close' or self._last_override_phase == 'close'
+        return self._base_phase == 'close'
 
     def update(self, widget_w: int = 0, widget_h: int = 0):
         self._polygon.update()
         if self._text is not None:
             self._text.update()
-        if self._locked and self._polygon.phase_done():
-            self._locked = False
-            if self._pending_set_check:
-                self._pending_set_check = False
-                ev    = self.defn.event_out
-                delta = self.defn.event_delta
-                if self.defn.hold_when_set and self.defn.action == 'set' and ev is not None and ev.value == delta:
-                    self._held = True
-                    self._cur_phase = 'set'
-                    self._polygon.set_phase('set')
-                    if self._text is not None:
-                        self._text.set_phase('set')
+        for p in self._extra_polys: p.update()
+        for t in self._extra_texts: t.update()
+
+        if self._base_phase == 'open' and not self._open_done:
+            if self._polygon.phase_done() and (self._text is None or self._text.phase_done()):
+                self._open_done = True
+                self._recompute_and_apply()
+
         self._check_held()
 
         if self.defn.continuous_update:
             is_held = self._key_held or self._pressed
             if is_held:
-                ev    = self.defn.event_out
-                delta = self.defn.event_delta
-                if ev is not None and delta is not None and isinstance(ev.value, (int, float)) and not isinstance(ev.value, bool):
-                    now = time.monotonic()
-                    if self._last_continuous_time == 0.0:
-                        self._last_continuous_time = now
-                    dt = now - self._last_continuous_time
+                now = time.monotonic()
+                if self._last_continuous_time == 0.0:
                     self._last_continuous_time = now
-                    new_val = ev.value + delta * dt
-                    lo, hi  = getattr(ev, 'min_val', None), getattr(ev, 'max_val', None)
-                    if lo is not None: new_val = max(float(lo), new_val)
-                    if hi is not None: new_val = min(float(hi), new_val)
-                    ev.value = new_val
+                dt = now - self._last_continuous_time
+                self._last_continuous_time = now
+                for ev, delta, _ in self._iter_event_pairs():
+                    if ev is not None and delta is not None and isinstance(ev.value, (int, float)) and not isinstance(ev.value, bool):
+                        new_val = ev.value + delta * dt
+                        lo, hi  = getattr(ev, 'min_val', None), getattr(ev, 'max_val', None)
+                        if lo is not None: new_val = max(float(lo), new_val)
+                        if hi is not None: new_val = min(float(hi), new_val)
+                        ev.value = new_val
             else:
                 self._last_continuous_time = 0.0
                 self._continuous_accum     = 0.0
@@ -3158,42 +3229,63 @@ class AnimatedButton:
 
     def phase_done(self) -> bool:
         text_done = self._text.phase_done() if self._text is not None else True
-        return self._polygon.phase_done() and text_done
+        extras_done = all(p.phase_done() for p in self._extra_polys) and all(t.phase_done() for t in self._extra_texts)
+        return self._polygon.phase_done() and text_done and extras_done
+
+    def _iter_event_pairs(self):
+        ev    = self.defn.event_out
+        delta = self.defn.event_delta
+        if isinstance(ev, (list, tuple)):
+            if isinstance(delta, (list, tuple)):
+                deltas    = list(delta) + [None] * max(0, len(ev) - len(delta))
+                list_mode = True
+            else:
+                deltas    = [delta] * len(ev)
+                list_mode = False
+            return [(e, d, list_mode) for e, d in zip(ev, deltas)]
+        return [(ev, delta, False)] if ev is not None else []
 
     def fire_event(self) -> None:
-        ev = self.defn.event_out
-        if ev is None:
-            return
-        delta  = self.defn.event_delta
         action = self.defn.action
+        pairs  = self._iter_event_pairs()
+        if not pairs:
+            return
 
-        if action == 'increment':
-            if delta is not None and isinstance(ev.value, (int, float)) and not isinstance(ev.value, bool):
+        if action == 'cycle':
+            for ev, delta, _ in pairs:
+                if ev is None:
+                    continue
+                if delta is not None and isinstance(delta, list) and len(delta) > 0:
+                    try:    idx = delta.index(ev.value)
+                    except: idx = -1
+                    ev.value = delta[(idx + 1) % len(delta)]
+            return
+
+        for ev, delta, list_mode in pairs:
+            if ev is None:
+                continue
+            if action == 'increment':
+                if delta is not None and isinstance(ev.value, (int, float)) and not isinstance(ev.value, bool):
+                    new_val = ev.value + delta
+                    lo, hi  = getattr(ev, 'min_val', None), getattr(ev, 'max_val', None)
+                    if lo is not None: new_val = max(float(lo), new_val)
+                    if hi is not None: new_val = min(float(hi), new_val)
+                    ev.value = int(round(new_val)) if isinstance(ev.value, int) else new_val
+            elif action == 'set':
+                if delta is not None or list_mode:
+                    ev.value = delta
+            elif isinstance(ev.value, bool):
+                ev.value = (not ev.value) if delta is None else bool(delta)
+            elif isinstance(ev.value, (int, float)):
+                if delta is None: continue
                 new_val = ev.value + delta
                 lo, hi  = getattr(ev, 'min_val', None), getattr(ev, 'max_val', None)
                 if lo is not None: new_val = max(float(lo), new_val)
                 if hi is not None: new_val = min(float(hi), new_val)
                 ev.value = int(round(new_val)) if isinstance(ev.value, int) else new_val
-        elif action == 'set':
-            if delta is not None:
-                ev.value = delta
-        elif action == 'cycle':
-            if delta is not None and isinstance(delta, list) and len(delta) > 0:
-                try:    idx = delta.index(ev.value)
-                except: idx = -1
-                ev.value = delta[(idx + 1) % len(delta)]
-            return
-        elif isinstance(ev.value, bool):
-            ev.value = (not ev.value) if delta is None else bool(delta)
-        elif isinstance(ev.value, (int, float)):
-            if delta is None: return
-            new_val = ev.value + delta
-            lo, hi  = getattr(ev, 'min_val', None), getattr(ev, 'max_val', None)
-            if lo is not None: new_val = max(float(lo), new_val)
-            if hi is not None: new_val = min(float(hi), new_val)
-            ev.value = int(round(new_val)) if isinstance(ev.value, int) else new_val
-        elif isinstance(ev.value, str):
-            if delta is not None: ev.value = str(delta)
+            elif isinstance(ev.value, str):
+                if delta is not None: ev.value = str(delta)
+
         if self.defn.on_fire is not None:
             self.defn.on_fire()
 
@@ -3210,6 +3302,8 @@ class AnimatedButton:
 
         self._last_poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
         self._polygon.draw(painter, w, h, self.cam_w, self.cam_h)
+        for p in self._extra_polys:
+            p.draw(painter, w, h, self.cam_w, self.cam_h)
         if self._text is not None and not self._text.hidden:
             label = self._text.resolve_text(None)
             if label:
@@ -3220,6 +3314,9 @@ class AnimatedButton:
                 dx, dy = self._text.resolve_pos(w, h, self.cam_w, self.cam_h, label, font, text_scale)
                 painter.drawText(dx, dy, label)
                 painter.setPen(Qt.NoPen)
+        for t in self._extra_texts:
+            if not t.hidden:
+                t.draw_text(painter, w, h, self.cam_w, self.cam_h, None, scale=scale)
 
 @dataclass
 class Segment:
@@ -3276,6 +3373,7 @@ def SegmentedButtons(
 
     def _make_poly(i: int, seg: Segment, weight_before: float) -> PolygonDef:
         r0, r1 = _norm_split(weight_before, seg.weight)
+        is_only  = n == 1
         is_first = i == 0
         is_last  = i == n - 1
         base_col = seg.color or fill_color
@@ -3294,7 +3392,24 @@ def SegmentedButtons(
             left_gap  = 0.0 if is_first else +half_gap
             right_gap = 0.0 if is_last  else -half_gap
 
-            if is_first:
+            if is_only:
+                p = [
+                    P(main_n0, top_n),
+                    P(main_n1, top_n),
+                    P(main_n1, mid_n),
+                    P(main_n1, bot_n),
+                    P(main_n0, bot_n),
+                    P(main_n0, mid_n),
+                ]
+                px_pts = [
+                    P(main_px0 + slant, top_px),
+                    P(main_px1 - slant, top_px),
+                    P(main_px1,         mid_px),
+                    P(main_px1 - slant, bot_px),
+                    P(main_px0 + slant, bot_px),
+                    P(main_px0,         mid_px),
+                ]
+            elif is_first:
                 p = [
                     P(main_n0, top_n),
                     P(main_n1, top_n),
@@ -3347,7 +3462,24 @@ def SegmentedButtons(
             top_gap  = 0.0 if is_first else +half_gap
             bot_gap  = 0.0 if is_last  else -half_gap
 
-            if is_first:
+            if is_only:
+                p = [
+                    P(mid_n,   main_n0),
+                    P(right_n, main_n0),
+                    P(right_n, main_n1),
+                    P(mid_n,   main_n1),
+                    P(left_n,  main_n1),
+                    P(left_n,  main_n0),
+                ]
+                px_pts = [
+                    P(mid_px,            main_px0),
+                    P(right_px,          main_px0 + slant),
+                    P(right_px,          main_px1 - slant),
+                    P(mid_px,            main_px1),
+                    P(left_px,           main_px1 - slant),
+                    P(left_px,           main_px0 + slant),
+                ]
+            elif is_first:
                 p = [
                     P(mid_n,   main_n0),
                     P(right_n, main_n0),
@@ -3392,7 +3524,7 @@ def SegmentedButtons(
                 ]
 
         def _make_dynamic_px(
-            is_first=is_first, is_last=is_last,
+            is_only=is_only, is_first=is_first, is_last=is_last,
             main_px0=main_px0, main_px1=main_px1,
             p1=p1, p2=p2, px1=px1, px2=px2,
             vertical=vertical,
@@ -3414,7 +3546,16 @@ def SegmentedButtons(
                     st       = +sl if not reverse_slant else -sl
                     sb       = -sl if not reverse_slant else +sl
                     mid_px_  = (px1.y + px2.y) / 2.0
-                    if is_first:
+                    if is_only:
+                        return [
+                            P(main_px0 + sl, top_px),
+                            P(main_px1 - sl, top_px),
+                            P(main_px1,      mid_px_),
+                            P(main_px1 - sl, bot_px),
+                            P(main_px0 + sl, bot_px),
+                            P(main_px0,      mid_px_),
+                        ]
+                    elif is_first:
                         return [
                             P(main_px0 + sl,               top_px),
                             P(main_px1 + right_gap + st,   top_px),
@@ -3442,7 +3583,16 @@ def SegmentedButtons(
                     sl       = abs(cross_px) / 2.0
                     st       = +sl if not reverse_slant else -sl
                     sb       = -sl if not reverse_slant else +sl
-                    if is_first:
+                    if is_only:
+                        return [
+                            P(mid_px,   main_px0),
+                            P(right_px, main_px0 + sl),
+                            P(right_px, main_px1 - sl),
+                            P(mid_px,   main_px1),
+                            P(left_px,  main_px1 - sl),
+                            P(left_px,  main_px0 + sl),
+                        ]
+                    elif is_first:
                         return [
                             P(mid_px,            main_px0),
                             P(right_px,          main_px0 + sl),
@@ -3472,7 +3622,7 @@ def SegmentedButtons(
             px            = px_pts,
             fill_color    = base_col,
             outline_color = outline_color,
-            outline_width    = outline_width,
+            outline_width = outline_width,
             closed        = True,
             phases        = {},
             dynamic_px    = _make_dynamic_px(),
@@ -3683,16 +3833,18 @@ def SevenSegmentDisplay(
 
 @dataclass
 class TextboxDef:
-    poly_def:         PolygonDef         = field(default_factory=PolygonDef)
-    text_def:         Optional[TextDef]  = None
-    event_out:        Optional[EventDef] = None
-    max_length:       float              = 1.0
-    max_length_px:    float              = 0.0
-    clear_when_sent:  bool               = True
-    exit_when_sent:   bool               = True
-    override_inputs:  bool               = True
-    visible_threshold_x: float = 0.0
-    visible_threshold_y: float = 0.0
+    poly_def:            PolygonDef         = field(default_factory=PolygonDef)
+    text_def:            Optional[TextDef]  = None
+    event_out:           Optional[EventDef] = None
+    live_event_out:      Optional[EventDef] = None
+    clear_event:         Optional[EventDef] = None
+    max_length:          float              = 1.0
+    max_length_px:       float              = 0.0
+    clear_when_sent:     bool               = True
+    exit_when_sent:      bool               = True
+    override_inputs:     bool               = True
+    visible_threshold_x: float              = 0.0
+    visible_threshold_y: float              = 0.0
 
     def __post_init__(self):
         self._build_phases()
@@ -3922,6 +4074,8 @@ class AnimatedTextbox:
         return text
 
     def update(self, widget_w: int = 0, widget_h: int = 0) -> None:
+        if self.defn.clear_event is not None and self.defn.clear_event.value:
+            self._buffer = ''
         self._polygon.update()
         if self._text is not None:
             buf = self._buffer
@@ -3929,6 +4083,8 @@ class AnimatedTextbox:
             self._text.update()
         if self._locked and self._polygon.phase_done():
             self._locked = False
+        if self.defn.live_event_out is not None:
+            self.defn.live_event_out.value = self._buffer
         w, h = max(1, widget_w), max(1, widget_h)
         self._polygon._dirty = True
         self._last_poly = self._polygon.get_polygon(w, h, self.cam_w, self.cam_h)
@@ -4633,7 +4789,7 @@ class WindowDef:
     text_defs:              List[TextDef]           = field(default_factory=list)
     graph_defs:             List[GraphDef]          = field(default_factory=list)
     pie_defs:               List[PieDef]            = field(default_factory=list)
-    slider_defs:            List[SliderGroupDef]    = field(default_factory=list)
+    slider_defs:            List[SliderDef]         = field(default_factory=list)
     button_defs:            List[ButtonDef]         = field(default_factory=list)
     textbox_defs:           List[TextboxDef]        = field(default_factory=list)
     sub_windows:            List['WindowDef']       = field(default_factory=list)
@@ -4641,19 +4797,35 @@ class WindowDef:
     draggable:              bool                    = False
     drag_boundary_p1:       P                       = field(default_factory=P)
     drag_boundary_p2:       P                       = field(default_factory=lambda: P(1.0, 1.0))
+    drag_boundary_px1:      P                       = field(default_factory=P)
+    drag_boundary_px2:      P                       = field(default_factory=P)
     scalable:               bool                    = False
     min_scale_w:            float                   = 0.05
     min_scale_h:            float                   = 0.05
-    scale_edge_px:          float                   = 8.0
+    scale_edge_px:          float                   = 16.0
     grid_snap:              bool                    = True
+    grid_snap_pixel:        bool                    = False
     grid_snap_x:            int                     = 19
     grid_snap_y:            int                     = 11
+    force_boundary:         bool                    = False
+    sticky_boundary:        bool                    = False
     spawn_event:            Optional[EventDef]      = None
     spawn_static_values:    List[Any]               = field(default_factory=list)
     spawn_event_group:      Optional[str]           = None
     spawn_tick_increment:   bool                    = False
     spawn_delete_threshold: int                     = 1
     spawn_limit:            int                     = 100
+    deselect_event:         Optional[EventDef]      = None
+    select_event:           Optional[EventDef]      = None
+    spawn_name_event_fn:    Optional[Callable[[str], EventDef]] = None
+    on_spawn:               Optional[Callable[[str, List[Any]], None]] = None
+    on_despawn:             Optional[Callable[[str], None]]            = None
+    export_p1:              Optional[EventDef]      = None
+    export_p2:              Optional[EventDef]      = None
+    export_px1:             Optional[EventDef]      = None
+    export_px2:             Optional[EventDef]      = None
+    ignore_click_consume: bool = False
+    ignore_mouse_event:   Any  = None
 
 @dataclass
 class WindowTween:
@@ -4669,8 +4841,11 @@ class WindowTween:
 class AnimatedWindow:
     def __init__(self, defn: WindowDef, cam_w: int = MONITOR_RESOLUTIONS[0][0], cam_h: int = MONITOR_RESOLUTIONS[0][1]) -> None:
         self.defn   = defn
+        _animated_window_registry[id(defn)] = self
         self.cam_w  = cam_w
         self.cam_h  = cam_h
+
+        self._win_retrigger_snapshots: Dict[str, Any] = {}
 
         self._sub_windows: List[AnimatedWindow] = [AnimatedWindow(d, cam_w, cam_h) for d in defn.sub_windows]
         self._polygons  = [AnimatedPolygon(d) for d in defn.polygon_defs]
@@ -4682,6 +4857,16 @@ class AnimatedWindow:
         self._buttons   = [AnimatedButton(d, cam_w, cam_h) for d in defn.button_defs]
         self._textboxes = [AnimatedTextbox(d, cam_w, cam_h) for d in defn.textbox_defs]
         self._listeners = list(defn.listener_defs)
+
+        for btn, bd in zip(self._buttons, defn.button_defs):
+            if bd.phase_override is not None:
+                ov = bd.phase_override
+                val = ov.value if hasattr(ov, 'value') else (ov() if callable(ov) else ov)
+                phase = str(val) if val is not None else ''
+                if phase not in ('open', 'close'):
+                    phase = 'close'
+                btn._last_override_phase = phase
+                btn._set_base_phase(phase)
 
         self._btn_grid: Dict[tuple, List[int]] = {}
         self._btn_bounds: List[Optional[tuple]] = [None] * len(self._buttons)
@@ -4762,6 +4947,7 @@ class AnimatedWindow:
         self._scale_start_px2y: float = 0.0
 
         self._snap_tween_active:  bool  = False
+        self._sticky_sides:       set   = set()
         self._snap_tween_t0:      float = 0.0
         self._snap_tween_dur:     float = 0.5
         self._snap_from_p1x:      float = 0.0
@@ -4828,13 +5014,15 @@ class AnimatedWindow:
         for p, pd in zip(self._polygons, self.defn.polygon_defs):
             if pd.phase_override is None:
                 p.set_phase(phase)
+        for a in self._arcs:
+            a.set_phase(phase)
         for t, td in zip(self._texts, self.defn.text_defs):
             if td.phase_override is None:
                 t.set_phase(phase)
         for sl  in self._sliders:  sl.set_phase(phase)
         for btn, bd in zip(self._buttons, self.defn.button_defs):
             if bd.phase_override is None and phase in ('open', 'close'):
-                btn._set_phase(phase)
+                btn._set_base_phase(phase)
         for tb in self._textboxes:
             tb._set_phase(phase)
         for gd in _gradients.values():
@@ -4847,8 +5035,8 @@ class AnimatedWindow:
                 sw._broadcast(phase)
         wp = self.defn.phases.get(phase)
         if wp:
-            self._win_tweens = [tw for tw in wp.tweens
-                                if tw.prev_phase is None or tw.prev_phase == prev]
+            self._win_tweens = [_resolve_tween_event_refs(tw) for tw in wp.tweens if tw.prev_phase is None or tw.prev_phase == prev]
+            self._update_window_retrigger_snapshot(phase, wp)
         else:
             self._win_tweens = []
         self._win_idx        = 0
@@ -4902,8 +5090,13 @@ class AnimatedWindow:
             result = fn(ev.value) if fn else str(ev.value)
         if result is None:
             result = str(ev.value) if not isinstance(ev, (list,tuple)) else str(ev[0].value)
+
         if result != self._cur_phase:
             self._broadcast(result)
+        else:
+            phase_def = self.defn.phases.get(result)
+            if phase_def is not None and getattr(phase_def, 'update_retrigger', False) and self._window_retrigger_changed(result, phase_def):
+                self._broadcast(result)
     
     def _poll_force_phases(self) -> None:
         d = self.defn
@@ -5018,150 +5211,181 @@ class AnimatedWindow:
 
     def update(self, ctx, widget_w, widget_h, _parent_abs_x=0.0, _parent_abs_y=0.0):
         if self.hidden: return
-        wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
-        self._abs_wx = _parent_abs_x + wx
-        self._abs_wy = _parent_abs_y + wy
-        self._abs_ww = ww
-        self._abs_wh = wh
-        ipw, iph = int(ww), int(wh)
-        self._last_ipw = ipw
-        self._last_iph = iph
 
-        if self._cur_phase == 'close' and self._is_done():
-            has_always = any(
-                not d._stopped
-                for p in self._polygons
-                for d in p._always_drivers.values()
-            )
-            if not has_always:
-                return
+        global _current_update_window
+        _prev_update_window = _current_update_window
+        _current_update_window = self
+        try:
+            wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+            if not (self._dragging_window or self._scaling_window):
+                if self.defn.sticky_boundary:
+                    self._sync_sticky_boundary(widget_w, widget_h, moved_sides=set())
+                if self.defn.force_boundary:
+                    self._clamp_to_boundary(widget_w, widget_h)
+                if self.defn.force_boundary or self.defn.sticky_boundary:
+                    wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
+            if self.defn.export_p1  is not None: self.defn.export_p1.value  = P(self._cur_p1.x,  self._cur_p1.y)
+            if self.defn.export_p2  is not None: self.defn.export_p2.value  = P(self._cur_p2.x,  self._cur_p2.y)
+            if self.defn.export_px1 is not None: self.defn.export_px1.value = P(self._cur_px1.x, self._cur_px1.y)
+            if self.defn.export_px2 is not None: self.defn.export_px2.value = P(self._cur_px2.x, self._cur_px2.y)
+            self._abs_wx = _parent_abs_x + wx
+            self._abs_wy = _parent_abs_y + wy
+            self._abs_ww = ww
+            self._abs_wh = wh
+            ipw, iph = int(ww), int(wh)
+            self._last_ipw = ipw
+            self._last_iph = iph
 
-        if ww > 0 and wh > 0:
-            mx = SYS_MOUSE_X.value
-            my = SYS_MOUSE_Y.value
-            _window_mouse_norm[id(self.defn)] = P(
-                (mx - wx) / ww,
-                (my - wy) / wh,
-            )
+            if self._cur_phase == 'close' and self._is_done():
+                has_always = any(
+                    not d._stopped
+                    for p in self._polygons
+                    for d in p._always_drivers.values()
+                )
+                if not has_always:
+                    return
 
-        # force open/close
-        if self._force_open_pending:
-            # Only trigger once the window's own phase has reached 'open'.
-            # This prevents force_open from firing while phase_event == 'waiting'.
-            if not self._force_open_triggered and self._cur_phase == 'open':
-                self._force_open_triggered = True
-                for p in self._polygons: p.set_phase('open')
-                for t in self._texts:    t.set_phase('open')
-                for a in self._arcs:     a.set_phase('open')
-            if self._force_open_triggered:
+            if ww > 0 and wh > 0:
+                mx = SYS_MOUSE_X.value
+                my = SYS_MOUSE_Y.value
+                _window_mouse_norm[id(self.defn)] = P(
+                    (mx - wx) / ww,
+                    (my - wy) / wh,
+                )
+                _window_size_px[id(self.defn)] = P(ww, wh)
+
+            if self._force_open_pending:
+                if not self._force_open_triggered and self._cur_phase == 'open':
+                    self._force_open_triggered = True
+                    for p in self._polygons: p.set_phase('open')
+                    for t in self._texts:    t.set_phase('open')
+                    for a in self._arcs:     a.set_phase('open')
+                if self._force_open_triggered:
+                    if all(p.phase_done() for p in self._polygons) and \
+                    all(t.phase_done() for t in self._texts):
+                        self._force_open_pending = False
+
+            if self._force_close_active:
+                if self._cur_phase == 'close' and self._prev_force_phase != 'close':
+                    for p in self._polygons: p.set_phase('close')
+                    for t in self._texts:    t.set_phase('close')
+                    for a in self._arcs:     a.set_phase('close')
                 if all(p.phase_done() for p in self._polygons) and \
-                   all(t.phase_done() for t in self._texts):
-                    self._force_open_pending = False
+                all(t.phase_done() for t in self._texts):
+                    self._force_close_active = False
+            self._prev_force_phase = self._cur_phase
 
-        if self._force_close_active:
-            if self._cur_phase == 'close' and self._prev_force_phase != 'close':
-                for p in self._polygons: p.set_phase('close')
-                for t in self._texts:    t.set_phase('close')
-                for a in self._arcs:     a.set_phase('close')
-            if all(p.phase_done() for p in self._polygons) and \
-            all(t.phase_done() for t in self._texts):
-                self._force_close_active = False
-        self._prev_force_phase = self._cur_phase
+            _pulse_resets: List[EventDef] = []
 
-        _pulse_resets: List[EventDef] = []
+            # Listeners
+            for gl in self._listeners:
+                gl.tick(ctx)
 
-        # Listeners
-        for gl in self._listeners:
-            gl.tick(ctx)
+            # Polygons
+            for p, pd in zip(self._polygons, self.defn.polygon_defs):
+                has_active_always = any(
+                    not d._stopped for d in p._always_drivers.values()
+                ) if p._always_drivers else False
 
-        # Polygons
-        for p, pd in zip(self._polygons, self.defn.polygon_defs):
-            has_active_always = any(
-                not d._stopped for d in p._always_drivers.values()
-            ) if p._always_drivers else False
-
-            if self._force_open_pending or self._force_close_active:
-                p.update()
-                continue
-
-            visible = _check_visible_threshold(pd, ww, wh, self.cam_w, self.cam_h)
-            p.hidden = not visible
-            if not visible:
-                if has_active_always:
+                if self._force_open_pending or self._force_close_active:
                     p.update()
-                continue
+                    continue
 
-            ov = pd.phase_override
-            if ov is not None:
-                phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
-                phase = str(phase) if phase is not None else ''
-                if phase and phase != p._phase:
-                    if _phase_key_exists(pd.phases or {}, phase):
-                        p.set_phase(phase)
-            p.update()
+                visible = _check_visible_threshold(pd, ww, wh, self.cam_w, self.cam_h)
+                p.hidden = not visible
+                if not visible:
+                    if has_active_always:
+                        p.update()
+                    continue
 
-        # Texts
-        for t, td in zip(self._texts, self.defn.text_defs):
-            has_active_always = any(
-                not d._stopped for d in t._always_drivers_t.values()
-            ) if t._always_drivers_t else False
+                ov = p.defn.phase_override
+                if ov is not None:
+                    phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
+                    phase = str(phase) if phase is not None else ''
+                    if phase and phase != p._phase:
+                        if _phase_key_exists(p.defn.phases or {}, phase):
+                            p.set_phase(phase)
 
-            if self._force_open_pending or self._force_close_active:
-                t.update()
-                continue
+                if p._phase:
+                    cur_phase_def = _get_phase_def(pd.phases or {}, p._phase)
+                    if cur_phase_def is not None and getattr(cur_phase_def, 'update_retrigger', False):
+                        p.set_phase(p._phase)
 
-            visible = _check_visible_threshold(td, ww, wh, self.cam_w, self.cam_h)
-            t.hidden = not visible
-            if not visible:
-                if has_active_always:
+                p.update()
+
+            for a in self._arcs:
+                a.update()
+
+            # Texts
+            for t, td in zip(self._texts, self.defn.text_defs):
+                has_active_always = any(
+                    not d._stopped for d in t._always_drivers_t.values()
+                ) if t._always_drivers_t else False
+
+                if self._force_open_pending or self._force_close_active:
                     t.update()
-                continue
+                    continue
 
-            ov = td.phase_override
-            if ov is not None:
-                phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
-                phase = str(phase) if phase is not None else ''
-                if phase and phase != t._phase:
-                    if _phase_key_exists(td.phases or {}, phase):
-                        t.set_phase(phase)
-            t.update()
+                visible = _check_visible_threshold(td, ww, wh, self.cam_w, self.cam_h)
+                t.hidden = not visible
+                if not visible:
+                    if has_active_always:
+                        t.update()
+                    continue
 
-        # Pies
-        for pie in self._pies: pie.update(ctx)
+                ov = t.defn.phase_override
+                if ov is not None:
+                    phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
+                    phase = str(phase) if phase is not None else ''
+                    if phase and phase != t._phase:
+                        if _phase_key_exists(t.defn.phases or {}, phase):
+                            t.set_phase(phase)
+                if t._phase:
+                    cur_phase_def = _get_phase_def(td.phases or {}, t._phase)
+                    if cur_phase_def is not None and getattr(cur_phase_def, 'update_retrigger', False):
+                        t.set_phase(t._phase)
 
-        # Sliders
-        for sl in self._sliders: sl.update(int(ww), int(wh))
+                t.update()
 
-        # Buttons
-        for btn, bd in zip(self._buttons, self.defn.button_defs):
-            ov = bd.phase_override
-            if ov is not None:
-                phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
-                phase = str(phase) if phase is not None else ''
-                if phase and phase != btn._last_override_phase:
-                    btn._last_override_phase = phase
-                    # Only set open/close — don't override hover/click/set/release
-                    if phase in ('open', 'close'):
-                        btn._set_phase(phase)
-            btn.update(int(ww), int(wh))
+            # Pies
+            for pie in self._pies: pie.update(ctx)
 
-        # Textboxes
-        for tb in self._textboxes:
-            tb.update(int(ww), int(wh))
+            # Sliders
+            for sl in self._sliders: sl.update(int(ww), int(wh))
 
-        ipw, iph = int(ww), int(wh)
+            # Buttons
+            for btn, bd in zip(self._buttons, self.defn.button_defs):
+                ov = bd.phase_override
+                if ov is not None:
+                    phase = ov() if callable(ov) else str(ov.value) if hasattr(ov, 'value') else str(ov)
+                    phase = str(phase) if phase is not None else ''
+                    # if bd.event_out is get_event('targeted_marker'):
+                        # print(f'[poll] ov.value={ov.value!r} phase={phase!r} last={btn._last_override_phase!r} cur_phase={btn._cur_phase!r}')
+                    if phase and phase != btn._last_override_phase:
+                        btn._last_override_phase = phase
+                        if phase in ('open', 'close'):
+                            btn._set_base_phase(phase)
+                btn.update(int(ww), int(wh))
 
-        # Sub windows
-        for sw in self._sub_windows:
-            if sw.defn.spawn_event is not None: continue
-            sw.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
+            # Textboxes
+            for tb in self._textboxes:
+                tb.update(int(ww), int(wh))
 
-        ipw, iph = int(ww), int(wh)
-        self._last_ipw = ipw
-        self._last_iph = iph
+            ipw, iph = int(ww), int(wh)
 
-        for inst in self._spawned:
-            inst.window.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
+            # Sub windows
+            for sw in self._sub_windows:
+                if sw.defn.spawn_event is not None: continue
+                sw.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
+
+            ipw, iph = int(ww), int(wh)
+            self._last_ipw = ipw
+            self._last_iph = iph
+
+            for inst in self._spawned:
+                inst.window.update(ctx, ipw, iph, _parent_abs_x=self._abs_wx, _parent_abs_y=self._abs_wy)
+        finally:
+            _current_update_window = _prev_update_window
 
     def draw(self, painter, widget_w, widget_h, ctx=None):
         if self._cur_phase == 'close' and self._is_done():
@@ -5170,43 +5394,58 @@ class AnimatedWindow:
         if ww <= 0 or wh <= 0:
             return
         scale = min(ww / self.cam_w, wh / self.cam_h)
-        painter.save()
-        painter.translate(wx, wy)
-        painter.setClipRect(QRectF(0, 0, ww, wh))
-        iww, iwh = int(ww), int(wh)
 
-        for poly in self._polygons:
-            poly.draw(painter, iww, iwh, self.cam_w, self.cam_h)
-        for arc in self._arcs:
-            arc.draw(painter, iww, iwh)
-        for text in self._texts:
-            if text.hidden: continue
-            text.draw_text(painter, iww, iwh, self.cam_w, self.cam_h, ctx, scale=scale)
-        for g in self._graphs:
-            g.draw(painter, iww, iwh, ctx, self.cam_w, self.cam_h)
-        for pie in self._pies:
-            pie.draw(painter, iww, iwh, self.cam_w, self.cam_h)
-        for sl in self._sliders:
-            sl.draw(painter, iww, iwh, scale=scale)
-        for btn in self._buttons:
-            btn.draw(painter, iww, iwh, scale=scale)
-        for tb in self._textboxes:
-            tb.draw(painter, iww, iwh, scale=scale)
+        global _current_window_screen_offset, _current_update_window
+        parent_offset = _current_window_screen_offset
+        _current_window_screen_offset = P(parent_offset.x + wx, parent_offset.y + wy)
 
-        for sw in self._sub_windows:
-            if sw.defn.spawn_event is not None:
-                continue
-            sw.draw(painter, iww, iwh, ctx)
-        for inst in self._spawned:
-            inst.window.draw(painter, iww, iwh, ctx)
+        _prev_update_window = _current_update_window
+        _current_update_window = self
+        try:
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.translate(wx, wy)
+            painter.setClipRect(QRectF(0, 0, ww, wh))
+            iww, iwh = int(ww), int(wh)
 
-        painter.restore()
+            for poly in self._polygons:
+                poly.draw(painter, iww, iwh, self.cam_w, self.cam_h)
+            for arc in self._arcs:
+                arc.draw(painter, iww, iwh)
+            for text in self._texts:
+                if text.hidden: continue
+                text.draw_text(painter, iww, iwh, self.cam_w, self.cam_h, ctx, scale=scale)
+            for g in self._graphs:
+                g.draw(painter, iww, iwh, ctx, self.cam_w, self.cam_h)
+            for pie in self._pies:
+                pie.draw(painter, iww, iwh, self.cam_w, self.cam_h)
+            for sl in self._sliders:
+                sl.draw(painter, iww, iwh, scale=scale)
+            for btn in self._buttons:
+                btn.draw(painter, iww, iwh, scale=scale)
+            for tb in self._textboxes:
+                tb.draw(painter, iww, iwh, scale=scale)
+
+            for sw in self._sub_windows:
+                if sw.defn.spawn_event is not None:
+                    continue
+                sw.draw(painter, iww, iwh, ctx)
+            for inst in self._spawned:
+                inst.window.draw(painter, iww, iwh, ctx)
+
+            painter.restore()
+        finally:
+            _current_update_window = _prev_update_window
+            _current_window_screen_offset = parent_offset
 
     def _to_local(self, mx: float, my: float, widget_w: int, widget_h: int) -> Tuple[float, float, float, float]:
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         return mx - wx, my - wy, ww, wh
     
     def mouse_press(self, mx: float, my: float, widget_w: int, widget_h: int) -> bool:
+        ignored = _resolve_bool_value(self.defn.ignore_mouse_event)
+        if ignored:
+            return False
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
         ipw, iph = int(ww), int(wh)
         for inst in reversed(self._spawned):
@@ -5235,13 +5474,23 @@ class AnimatedWindow:
                     break
 
         hit_btn = None
+        btn_fired = False
         if hit_tb is None and hit_sl is None:
             for btn in self._buttons:
-                if btn.hit_test(lx, ly, ipw, iph) and btn._mandatory_keys_held(self._held_keys):
-                    hit_btn = btn
-                    break
+                if self._resolve_ignore_mouse(btn.defn.ignore_mouse_event):
+                    continue
+                if btn.hit_test(lx, ly, ipw, iph):
+                    if not btn._mandatory_keys_held(self._held_keys):
+                        continue
+                    btn._pressed    = True
+                    btn._press_poly = QPolygonF(btn._last_poly)
+                    btn._set_interaction_phase('click')
+                    btn_fired = True
+                    hit_btn   = btn
+                    if not btn.defn.ignore_click_consume:
+                        return True
 
-        hit_interactive = hit_tb is not None or hit_sl is not None or hit_btn is not None
+        hit_interactive = hit_tb is not None or hit_sl is not None or btn_fired
         inside = (0 <= lx <= ipw and 0 <= ly <= iph)
 
         if self.defn.scalable and not hit_interactive and inside:
@@ -5260,7 +5509,7 @@ class AnimatedWindow:
                 self._scale_start_px2x  = self._cur_px2.x
                 self._scale_start_px2y  = self._cur_px2.y
                 self._cancel_active_phases()
-                return True
+                return not self.defn.ignore_click_consume
 
         if self.defn.draggable and not hit_interactive and inside:
             self._dragging_window    = True
@@ -5275,7 +5524,7 @@ class AnimatedWindow:
             self._drag_start_px2x    = self._cur_px2.x
             self._drag_start_px2y    = self._cur_px2.y
             self._cancel_active_phases()
-            return True
+            return not self.defn.ignore_click_consume
 
         for tb in self._textboxes:
             if tb is hit_tb:
@@ -5294,17 +5543,19 @@ class AnimatedWindow:
             return True
 
         if hit_btn is not None:
-            hit_btn._pressed    = True
-            hit_btn._press_poly = QPolygonF(hit_btn._last_poly)
-            hit_btn._set_phase('click')
             return True
 
         return False
 
     def mouse_move(self, mx, my, widget_w, widget_h):
-        SYS_MOUSE.value   = (mx, my)
-        SYS_MOUSE_X.value = mx
-        SYS_MOUSE_Y.value = my
+        if _resolve_bool_value(self.defn.ignore_mouse_event):
+            return
+        if self._parent_w == 0 and self._parent_h == 0:
+            SYS_MOUSE.value       = (mx, my)
+            SYS_MOUSE_X.value     = mx
+            SYS_MOUSE_Y.value     = my
+            SYS_MOUSE_ABS_X.value = mx
+            SYS_MOUSE_ABS_Y.value = my
 
         pw = self._parent_w if self._parent_w > 0 else widget_w
         ph = self._parent_h if self._parent_h > 0 else widget_h
@@ -5333,14 +5584,23 @@ class AnimatedWindow:
                 new_p2y = max(self._scale_start_p2y + dy_n,
                             self._scale_start_p1y + d.min_scale_h)
 
-            bx1 = d.drag_boundary_p1.x
-            by1 = d.drag_boundary_p1.y
-            bx2 = d.drag_boundary_p2.x
-            by2 = d.drag_boundary_p2.y
-            new_p1x = max(bx1, new_p1x)
-            new_p1y = max(by1, new_p1y)
-            new_p2x = min(bx2, new_p2x)
-            new_p2y = min(by2, new_p2y)
+            bx1_px = d.drag_boundary_p1.x * pw + d.drag_boundary_px1.x
+            by1_px = d.drag_boundary_p1.y * ph + d.drag_boundary_px1.y
+            bx2_px = d.drag_boundary_p2.x * pw + d.drag_boundary_px2.x
+            by2_px = d.drag_boundary_p2.y * ph + d.drag_boundary_px2.y
+
+            px1x, px1y = self._scale_start_px1x, self._scale_start_px1y
+            px2x, px2y = self._scale_start_px2x, self._scale_start_px2y
+
+            new_x1_px = max(bx1_px, new_p1x * pw + px1x)
+            new_y1_px = max(by1_px, new_p1y * ph + px1y)
+            new_x2_px = min(bx2_px, new_p2x * pw + px2x)
+            new_y2_px = min(by2_px, new_p2y * ph + px2y)
+
+            new_p1x = (new_x1_px - px1x) / pw
+            new_p1y = (new_y1_px - px1y) / ph
+            new_p2x = (new_x2_px - px2x) / pw
+            new_p2y = (new_y2_px - px2y) / ph
 
             if new_p2x - new_p1x < d.min_scale_w:
                 if 'l' in e: new_p1x = new_p2x - d.min_scale_w
@@ -5351,8 +5611,10 @@ class AnimatedWindow:
 
             self._cur_p1  = P(new_p1x, new_p1y)
             self._cur_p2  = P(new_p2x, new_p2y)
-            self._cur_px1 = P(self._scale_start_px1x, self._scale_start_px1y)
-            self._cur_px2 = P(self._scale_start_px2x, self._scale_start_px2y)
+            self._cur_px1 = P(px1x, px1y)
+            self._cur_px2 = P(px2x, px2y)
+            if self.defn.sticky_boundary:
+                self._sync_sticky_boundary(pw, ph, moved_sides=set(e))
             return True
 
         if self._dragging_window:
@@ -5363,6 +5625,8 @@ class AnimatedWindow:
             self._cur_px1 = P(self._drag_start_px1x,         self._drag_start_px1y)
             self._cur_px2 = P(self._drag_start_px2x,         self._drag_start_px2y)
             self._clamp_to_boundary(pw, ph)
+            if self.defn.sticky_boundary:
+                self._sync_sticky_boundary(pw, ph, moved_sides={'l', 'r', 't', 'b'})
             return True
 
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
@@ -5389,24 +5653,28 @@ class AnimatedWindow:
                 sl._hovered = hit
                 sl.set_phase('hovered' if hit else 'unhovered')
         for btn in self._buttons:
+            if self._resolve_ignore_mouse(btn.defn.ignore_mouse_event):
+                continue
             hit = btn.hit_test(lx, ly, ipw, iph)
             if hit != btn._hovered:
                 btn._hovered = hit
-                btn._set_phase('hover' if hit else 'unhover')
+                btn._set_interaction_phase('hover' if hit else 'unhover')
             if not hit and btn._pressed and not btn._key_held:
                 btn.mouse_left_hitbox()
         return False
 
     def mouse_release(self, mx: float, my: float, widget_w: int, widget_h: int) -> bool:
+        if _resolve_bool_value(self.defn.ignore_mouse_event):
+            return False
         if self._scaling_window:
             self._scaling_window = False
             self._scale_edge     = ''
-            self._start_snap_tween(time.monotonic())
+            self._start_snap_tween(time.monotonic(), widget_w, widget_h)
             return True
 
         if self._dragging_window:
             self._dragging_window = False
-            self._start_snap_tween(time.monotonic())
+            self._start_snap_tween(time.monotonic(), widget_w, widget_h)
             return True
 
         wx, wy, ww, wh = self._screen_rect(widget_w, widget_h)
@@ -5429,16 +5697,19 @@ class AnimatedWindow:
             QTimer.singleShot(150, lambda: sl.set_phase('hovered' if hovered else 'unhovered'))
             return True
         for btn in self._buttons:
+            if self._resolve_ignore_mouse(btn.defn.ignore_mouse_event):
+                continue
             if btn._pressed:
                 btn._pressed = False
-                btn._set_phase('release')
+                btn._set_interaction_phase('release')
                 if not btn.defn.continuous_update:
                     if btn._hit_test_press_poly(lx, ly):
                         btn.fire_event()
                         btn._check_held()
                 if not btn._held:
-                    QTimer.singleShot(250, lambda b=btn: b._set_phase('hover' if b._hovered else 'unhover'))
-                return True
+                    QTimer.singleShot(250, lambda b=btn: b._set_interaction_phase('hover' if b._hovered else 'unhover'))
+                if not btn.defn.ignore_click_consume:
+                    return True
         return False
         
     def key_press(self, key: int) -> bool:
@@ -5493,26 +5764,93 @@ class AnimatedWindow:
         for btn in self._buttons:
             if btn._hovered:
                 btn._hovered = False
-                btn._set_phase('unhover')
+                btn._set_interaction_phase('unhover')
     
-    def _snap_to_grid(self, p1x: float, p1y: float, p2x: float, p2y: float) -> Tuple[float, float, float, float]:
+    def _resolve_ignore_mouse(self, val) -> bool:
+        return _resolve_bool_value(val)
+    
+    def _snap_to_grid(self, p1x: float, p1y: float, p2x: float, p2y: float, parent_w: int, parent_h: int) -> Tuple[float, float, float, float]:
         d = self.defn
+
+        if d.grid_snap_pixel:
+            return self._snap_to_grid_px(p1x, p1y, p2x, p2y, parent_w, parent_h)
+
+        bx1 = d.drag_boundary_p1.x
+        by1 = d.drag_boundary_p1.y
+        bx2 = d.drag_boundary_p2.x
+        by2 = d.drag_boundary_p2.y
+
         gx, gy = max(1, d.grid_snap_x), max(1, d.grid_snap_y)
-        step_x = 1.0 / gx
-        step_y = 1.0 / gy
-        s_p1x = round(p1x / step_x) * step_x
-        s_p1y = round(p1y / step_y) * step_y
-        s_p2x = round(p2x / step_x) * step_x
-        s_p2y = round(p2y / step_y) * step_y
+        step_x = (bx2 - bx1) / gx
+        step_y = (by2 - by1) / gy
+
+        def _snap(v, origin, step):
+            if step <= 0:
+                return v
+            return origin + round((v - origin) / step) * step
+
+        s_p1x = _snap(p1x, bx1, step_x)
+        s_p1y = _snap(p1y, by1, step_y)
+        s_p2x = _snap(p2x, bx1, step_x)
+        s_p2y = _snap(p2y, by1, step_y)
+
         if s_p2x <= s_p1x: s_p2x = s_p1x + step_x
         if s_p2y <= s_p1y: s_p2y = s_p1y + step_y
         return s_p1x, s_p1y, s_p2x, s_p2y
-    
-    def _start_snap_tween(self, now: float) -> None:
+
+    def _snap_to_grid_px(self, p1x: float, p1y: float, p2x: float, p2y: float, parent_w: int, parent_h: int) -> Tuple[float, float, float, float]:
         d = self.defn
-        if not d.grid_snap or (d.grid_snap_x <= 1 and d.grid_snap_y <= 1):
+        gx_px = max(1.0, float(d.grid_snap_x))
+        gy_px = max(1.0, float(d.grid_snap_y))
+
+        # boundary in true pixels relative to parent
+        bx1 = d.drag_boundary_p1.x * parent_w + d.drag_boundary_px1.x
+        by1 = d.drag_boundary_p1.y * parent_h + d.drag_boundary_px1.y
+        bx2 = d.drag_boundary_p2.x * parent_w + d.drag_boundary_px2.x
+        by2 = d.drag_boundary_p2.y * parent_h + d.drag_boundary_px2.y
+
+        center_x = parent_w * 0.5
+        center_y = parent_h * 0.5
+
+        def _snap_px(v_px, boundary_lo, boundary_hi):
+            grid_pt = round(v_px / gx_px) * gx_px if gx_px == gy_px else v_px
+            return grid_pt
+
+        def _snap_axis(v_px, center, step, boundary_lo, boundary_hi):
+            rel = v_px - center
+            snapped_rel = round(rel / step) * step
+            snapped = center + snapped_rel
+            candidates = [snapped]
+            if boundary_lo is not None:
+                candidates.append(boundary_lo)
+            if boundary_hi is not None:
+                candidates.append(boundary_hi)
+            return min(candidates, key=lambda c: abs(c - v_px))
+
+        win_x1_px = p1x * parent_w
+        win_y1_px = p1y * parent_h
+        win_x2_px = p2x * parent_w
+        win_y2_px = p2y * parent_h
+
+        s_x1_px = _snap_axis(win_x1_px, center_x, gx_px, bx1, bx2)
+        s_y1_px = _snap_axis(win_y1_px, center_y, gy_px, by1, by2)
+        s_x2_px = _snap_axis(win_x2_px, center_x, gx_px, bx1, bx2)
+        s_y2_px = _snap_axis(win_y2_px, center_y, gy_px, by1, by2)
+
+        s_p1x, s_p1y = s_x1_px / parent_w, s_y1_px / parent_h
+        s_p2x, s_p2y = s_x2_px / parent_w, s_y2_px / parent_h
+
+        if s_p2x <= s_p1x: s_p2x = s_p1x + gx_px / parent_w
+        if s_p2y <= s_p1y: s_p2y = s_p1y + gy_px / parent_h
+        return s_p1x, s_p1y, s_p2x, s_p2y
+    
+    def _start_snap_tween(self, now: float, parent_w: int = None, parent_h: int = None) -> None:
+        d = self.defn
+        if not d.grid_snap or (d.grid_snap_x <= 0):
             return
-        s_p1x, s_p1y, s_p2x, s_p2y = self._snap_to_grid(self._cur_p1.x, self._cur_p1.y, self._cur_p2.x, self._cur_p2.y)
+        pw = parent_w if parent_w else (self._parent_w if self._parent_w > 0 else self.cam_w)
+        ph = parent_h if parent_h else (self._parent_h if self._parent_h > 0 else self.cam_h)
+        s_p1x, s_p1y, s_p2x, s_p2y = self._snap_to_grid(self._cur_p1.x, self._cur_p1.y, self._cur_p2.x, self._cur_p2.y, pw, ph)
         if (s_p1x == self._cur_p1.x and s_p1y == self._cur_p1.y and s_p2x == self._cur_p2.x and s_p2y == self._cur_p2.y):
             return
         self._snap_from_p1x = self._cur_p1.x
@@ -5525,6 +5863,7 @@ class AnimatedWindow:
         self._snap_to_p2y   = s_p2y
         self._snap_tween_t0     = now
         self._snap_tween_active = True
+        
 
     def _on_spawn_trigger(self, value) -> None:
         pass
@@ -5562,6 +5901,7 @@ class AnimatedWindow:
                     cur_val = int(float(dev.value))
                 except (TypeError, ValueError):
                     cur_val = 0
+                # print(f'[tick_spawn] inst={inst.obj_id} cur_val={cur_val} threshold={wdef.spawn_delete_threshold}')
                 if cur_val >= wdef.spawn_delete_threshold:
                     inst.closing = True
                     if _phase_key_exists(wdef.phases, 'close'):
@@ -5612,12 +5952,24 @@ class AnimatedWindow:
         if wdef.phase_event is GROUP_EVENT:
             sw._instance_phase_event = group_ev
 
+        obj_id = self._make_id()
+
+        if wdef.on_spawn is not None:
+            try:
+                wdef.on_spawn(obj_id, statics)
+            except Exception as e:
+                print(f'[on_spawn] error: {e}')
+
         def _resolve(val):
             if isinstance(val, _StaticRef):
                 idx = val.index
                 return statics[idx] if idx < len(statics) else None
             if val is GROUP_EVENT:
                 return group_ev
+            if val is SELECT_EVENT:
+                return wdef.select_event
+            if val is SELF_ID:
+                return obj_id
             return val
 
         def _resolve_p(p: P) -> P:
@@ -5651,22 +6003,21 @@ class AnimatedWindow:
             new_fill    = _resolve(d.fill_color)
             new_outline = _resolve(d.outline_color)
             new_pos_fn  = _patch_pos_fn(d.pos_fn)
+            new_phase_override = d.phase_override
+            if new_phase_override is SELF_ID:
+                _this_id = obj_id
+                # new_phase_override = lambda _id=_this_id: (lambda r: (print(f'[diamond] id={_id} target={get_event("targeted_marker").value} -> {r}'), r)[1])('selected' if get_event('targeted_marker').value == _id else 'unselected')
+                # new_phase_override = lambda _id=_this_id: 'selected' if get_event('targeted_marker').value == _id else 'unselected'
 
             changed = (
-                new_pts != d.p  or
-                new_px  != d.px or
-                new_fill    is not d.fill_color    or
-                new_outline is not d.outline_color or
-                new_pos_fn  is not d.pos_fn
+                new_pts != d.p or new_px != d.px or
+                new_fill is not d.fill_color or new_outline is not d.outline_color or
+                new_pos_fn is not d.pos_fn or new_phase_override is not d.phase_override
             )
-
             if changed:
                 poly.defn = _tw_replace(poly.defn,
-                    p             = new_pts,
-                    px            = new_px,
-                    fill_color    = new_fill,
-                    outline_color = new_outline,
-                    pos_fn        = new_pos_fn,
+                    p=new_pts, px=new_px, fill_color=new_fill, outline_color=new_outline,
+                    pos_fn=new_pos_fn, phase_override=new_phase_override,
                 )
                 poly.cur_p      = list(new_pts)
                 poly._sp        = list(new_pts)
@@ -5688,6 +6039,12 @@ class AnimatedWindow:
             if fn is GROUP_EVENT:
                 text.defn = _tw_replace(text.defn,
                     text_fn=lambda ctx, e=group_ev: str(e.value))
+            elif fn is SELF_ID:
+                if wdef.spawn_name_event_fn is not None:
+                    ev = wdef.spawn_name_event_fn(obj_id)
+                    text.defn = _tw_replace(text.defn, text_fn=lambda ctx, e=ev: str(e.value))
+                else:
+                    text.defn = _tw_replace(text.defn, text_fn=lambda ctx, s=str(obj_id): s)
             elif isinstance(fn, EventDef):
                 snapped = str(fn.value)
                 text.defn = _tw_replace(text.defn,
@@ -5730,7 +6087,7 @@ class AnimatedWindow:
             if col_changed:
                 text.cur_color = QColor(new_color)
                 text._sc       = QColor(new_color)
-                
+        
         for btn in sw._buttons:
             d = btn.defn
 
@@ -5794,7 +6151,6 @@ class AnimatedWindow:
 
         sw._broadcast('open')
 
-        obj_id = self._make_id()
         inst   = _SpawnedInstance(obj_id=obj_id, window=sw, group_event=group_ev)
         self._spawned.append(inst)
         return inst
@@ -5807,35 +6163,95 @@ class AnimatedWindow:
         group = wdef.spawn_event_group or ''
         if group:
             _free_group_event(group, inst.group_event)
+        if wdef.on_despawn is not None:
+            try:
+                wdef.on_despawn(inst.obj_id)
+            except Exception as e:
+                print(f'[on_despawn] error: {e}')
         if inst in self._spawned:
             self._spawned.remove(inst)
 
     def _is_done(self) -> bool:
-        """True when current phase animation has fully completed."""
         poly_done = all(p.phase_done() for p in self._polygons)
+        arc_done  = all(a.phase_done() for a in self._arcs)
         text_done = all(t.phase_done() for t in self._texts)
         btn_done  = all(b.phase_done() for b in self._buttons)
-        return poly_done and text_done and btn_done
+        return poly_done and arc_done and text_done and btn_done
 
     def _clamp_to_boundary(self, parent_w: int, parent_h: int) -> None:
         d = self.defn
 
-        bx1 = d.drag_boundary_p1.x
-        by1 = d.drag_boundary_p1.y
-        bx2 = d.drag_boundary_p2.x
-        by2 = d.drag_boundary_p2.y
+        bx1 = d.drag_boundary_p1.x * parent_w + d.drag_boundary_px1.x
+        by1 = d.drag_boundary_p1.y * parent_h + d.drag_boundary_px1.y
+        bx2 = d.drag_boundary_p2.x * parent_w + d.drag_boundary_px2.x
+        by2 = d.drag_boundary_p2.y * parent_h + d.drag_boundary_px2.y
 
-        win_w_n = self._cur_p2.x - self._cur_p1.x
-        win_h_n = self._cur_p2.y - self._cur_p1.y
+        win_x1 = self._cur_p1.x * parent_w + self._cur_px1.x
+        win_y1 = self._cur_p1.y * parent_h + self._cur_px1.y
+        win_x2 = self._cur_p2.x * parent_w + self._cur_px2.x
+        win_y2 = self._cur_p2.y * parent_h + self._cur_px2.y
 
-        new_p1x = max(bx1, min(bx2 - win_w_n, self._cur_p1.x))
-        new_p1y = max(by1, min(by2 - win_h_n, self._cur_p1.y))
+        win_w = win_x2 - win_x1
+        win_h = win_y2 - win_y1
 
-        dx = new_p1x - self._cur_p1.x
-        dy = new_p1y - self._cur_p1.y
+        new_x1 = max(bx1, min(bx2 - win_w, win_x1))
+        new_y1 = max(by1, min(by2 - win_h, win_y1))
 
-        self._cur_p1 = P(self._cur_p1.x + dx, self._cur_p1.y + dy)
-        self._cur_p2 = P(self._cur_p2.x + dx, self._cur_p2.y + dy)
+        dx_px = new_x1 - win_x1
+        dy_px = new_y1 - win_y1
+
+        dx_n = dx_px / parent_w if parent_w else 0.0
+        dy_n = dy_px / parent_h if parent_h else 0.0
+
+        self._cur_p1 = P(self._cur_p1.x + dx_n, self._cur_p1.y + dy_n)
+        self._cur_p2 = P(self._cur_p2.x + dx_n, self._cur_p2.y + dy_n)
+    
+    def _boundary_edges_px(self, pw: int, ph: int) -> Dict[str, float]:
+        d = self.defn
+        return {
+            'l': d.drag_boundary_p1.x * pw + d.drag_boundary_px1.x,
+            'r': d.drag_boundary_p2.x * pw + d.drag_boundary_px2.x,
+            't': d.drag_boundary_p1.y * ph + d.drag_boundary_px1.y,
+            'b': d.drag_boundary_p2.y * ph + d.drag_boundary_px2.y,
+        }
+
+    def _window_edges_px(self, pw: int, ph: int) -> Dict[str, float]:
+        return {
+            'l': self._cur_p1.x * pw + self._cur_px1.x,
+            'r': self._cur_p2.x * pw + self._cur_px2.x,
+            't': self._cur_p1.y * ph + self._cur_px1.y,
+            'b': self._cur_p2.y * ph + self._cur_px2.y,
+        }
+
+    def _sync_sticky_boundary(self, pw: int, ph: int, moved_sides: Optional[set] = None, eps: float = 1.0) -> None:
+        if not self.defn.sticky_boundary or pw <= 0 or ph <= 0:
+            return
+        moved_sides = moved_sides or set()
+        edge_px = self._window_edges_px(pw, ph)
+        bnd_px  = self._boundary_edges_px(pw, ph)
+
+        for side in moved_sides:
+            if abs(edge_px[side] - bnd_px[side]) <= eps:
+                self._sticky_sides.add(side)
+            else:
+                self._sticky_sides.discard(side)
+
+        p1x, p1y = self._cur_p1.x, self._cur_p1.y
+        p2x, p2y = self._cur_p2.x, self._cur_p2.y
+
+        for side in ('l', 'r', 't', 'b'):
+            if side in moved_sides:
+                continue
+            if side in self._sticky_sides:
+                if side == 'l': p1x = (bnd_px['l'] - self._cur_px1.x) / pw
+                if side == 'r': p2x = (bnd_px['r'] - self._cur_px2.x) / pw
+                if side == 't': p1y = (bnd_px['t'] - self._cur_px1.y) / ph
+                if side == 'b': p2y = (bnd_px['b'] - self._cur_px2.y) / ph
+            elif abs(edge_px[side] - bnd_px[side]) <= eps:
+                self._sticky_sides.add(side)
+
+        self._cur_p1 = P(p1x, p1y)
+        self._cur_p2 = P(p2x, p2y)
     
     def _cancel_active_phases(self) -> None:
         for p in self._polygons:
@@ -5849,7 +6265,7 @@ class AnimatedWindow:
                 btn._pressed   = False
                 btn._key_held  = False
                 btn._hovered   = False
-                btn._set_phase('unhover')
+                btn._set_interaction_phase('unhover')
         for sl in self._sliders:
             if sl._dragging:
                 sl._dragging = False
@@ -5876,6 +6292,22 @@ class AnimatedWindow:
         if top:              return 't'
         if bot:              return 'b'
         return ''
+    
+    def _window_retrigger_changed(self, phase_name, phase_def) -> bool:
+        refs = _collect_tween_event_refs(phase_def)
+        if not refs:
+            return False
+        prev = self._win_retrigger_snapshots.get(phase_name)
+        if prev is None:
+            return False
+        return _snapshot_event_refs(refs) != prev
+
+    def _update_window_retrigger_snapshot(self, phase_name, phase_def):
+        refs = _collect_tween_event_refs(phase_def)
+        if refs:
+            self._win_retrigger_snapshots[phase_name] = _snapshot_event_refs(refs)
+        else:
+            self._win_retrigger_snapshots.pop(phase_name, None)
 
 # ──────────────────────── EVENT DEF ────────────────────────
 
@@ -5928,6 +6360,7 @@ class EventListener:
     conditions:       List[Callable[[Any], bool]]      = field(default_factory=list)
     values:           List[Any]                        = field(default_factory=list)
     wait_for_updates: Optional[Callable[Any]]          = None
+    skip_none:        bool                             = True
     _last_value:      Any                              = field(default=None, init=False, repr=False, compare=False)
 
     def _validate(self) -> bool:
@@ -5941,7 +6374,7 @@ class EventListener:
         except Exception:
             raw = None
 
-        if raw is None:
+        if raw is None and self.skip_none:
             return
 
         if self.wait_for_updates is not None:
@@ -5982,7 +6415,8 @@ class EventListener:
                     continue
 
         for target in self.targets:
-            # print(output)
+            # if target.name == 'selected_marker_phase':
+                # print(f'[listener] raw={raw!r} -> output={output!r}')
             target.value = output    
 
 
@@ -6005,6 +6439,8 @@ class _SpawnedInstance:
 _spawn_group_events: Dict[str, List[EventDef]] = {}
 GROUP_EVENT = '__group_event__'
 SNAPSHOT_EVENT = '__snapshot_event__'
+SELECT_EVENT = '__select_event__'
+SELF_ID = '__self_id__'
 
 def _snap_phase(animated_obj):
     for tw in animated_obj._tweens:
@@ -6047,6 +6483,12 @@ class _StaticRef:
 def STATIC(index: int) -> _StaticRef:
     return _StaticRef(index)
 
+def delete_spawned_by_id(parent_window: AnimatedWindow, obj_id: str) -> None:
+    for inst in parent_window._spawned:
+        if inst.obj_id == obj_id:
+            inst.group_event.value = inst.window.defn.spawn_delete_threshold
+            return
+
 def _patch_fn_defaults(fn: Callable, new_defaults: tuple) -> Callable:
     import types
     try:
@@ -6062,11 +6504,31 @@ def _patch_fn_defaults(fn: Callable, new_defaults: tuple) -> Callable:
         return fn
 
 _window_mouse_norm: Dict[int, P] = {}
+_window_size_px: Dict[int, P] = {}
+
+def get_window_size_px(wdef: 'WindowDef') -> P:
+    return _window_size_px.get(id(wdef), P(0.0, 0.0))
+
+
+_true_screen_w: int = MONITOR_RESOLUTIONS[0][0]
+_true_screen_h: int = MONITOR_RESOLUTIONS[0][1]
+_current_window_screen_offset: P = P(0.0, 0.0)
+
+_slider_knob_positions: Dict[int, P] = {}
+
+def get_slider_knob_pos(slider_def: 'SliderDef') -> P:
+    return _slider_knob_positions.get(id(slider_def), P(0.0, 0.0))
 
 def get_mouse_norm(wdef: 'WindowDef') -> P:
     return _window_mouse_norm.get(id(wdef), P(0.0, 0.0))
 
 _current_spawn_window: Optional['AnimatedWindow'] = None
+_current_update_window: Optional['AnimatedWindow'] = None
+
+def get_own_window_size_px() -> P:
+    if _current_update_window is None:
+        return P(0.0, 0.0)
+    return _window_size_px.get(id(_current_update_window.defn), P(0.0, 0.0))
 
 def get_spawn_mouse_norm() -> P:
     if _current_spawn_window is None:
@@ -6077,6 +6539,17 @@ def get_spawn_mouse_norm() -> P:
     return P(
         (SYS_MOUSE_ABS_X.value - w._abs_wx) / w._abs_ww,
         (SYS_MOUSE_ABS_Y.value - w._abs_wy) / w._abs_wh,
+    )
+
+def get_spawn_mouse_offset_px() -> P:
+    if _current_spawn_window is None:
+        return P(0.0, 0.0)
+    w = _current_spawn_window
+    if w._abs_ww <= 0 or w._abs_wh <= 0:
+        return P(0.0, 0.0)
+    return P(
+        (SYS_MOUSE_ABS_X.value - w._abs_wx) - w._abs_ww / 2.0,
+        (SYS_MOUSE_ABS_Y.value - w._abs_wy) - w._abs_wh / 2.0,
     )
 
 def _reset_phase_override_event(ov) -> None:
@@ -6106,6 +6579,10 @@ def _check_visible_threshold(defn: Any, ww: float, wh: float, cam_w: int, cam_h:
             return False
     return True
 
+_animated_window_registry: Dict[int, 'AnimatedWindow'] = {}
+
+def get_animated_window(defn: 'WindowDef') -> Optional['AnimatedWindow']:
+    return _animated_window_registry.get(id(defn))
 
 
 
@@ -6204,6 +6681,17 @@ class DataChannel:
         }
 
 # ──────────────────────── Helpers ────────────────────────
+
+def set_true_screen_size(w: int, h: int) -> None:
+    global _true_screen_w, _true_screen_h
+    _true_screen_w, _true_screen_h = w, h
+
+def get_true_screen_size() -> Tuple[int, int]:
+    return _true_screen_w, _true_screen_h
+
+def reset_window_screen_offset() -> None:
+    global _current_window_screen_offset
+    _current_window_screen_offset = P(0.0, 0.0)
 
 def _ease(t: float, curve) -> float:
     # Common curves
@@ -6386,6 +6874,88 @@ def _resolve_rotation(cur_rot_center_p, cur_rot_center_px, cur_rot_target_p, cur
 
     return cx, cy, net
 
+def _resolve_angle_value(val, ctx=None) -> float:
+    if val is None:
+        return 0.0
+    if isinstance(val, EventDef):
+        v = val.value
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
+    if callable(val):
+        try:
+            v = val()
+        except TypeError:
+            try:
+                v = val(ctx)
+            except Exception:
+                return 0.0
+        except Exception:
+            return 0.0
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    return 0.0
+
+def _resolve_bool_value(val) -> bool:
+    if val is None:
+        return False
+    if isinstance(val, EventDef):
+        return bool(val.value)
+    if callable(val):
+        try:    return bool(val())
+        except: return False
+    return bool(val)
+
+def _resolve_tween_event_refs(tw):
+    changes = {}
+
+    if isinstance(tw, PolygonTween):
+        for attr in ('p', 'px'):
+            val = getattr(tw, attr)
+            if isinstance(val, _RectCornerRef):
+                changes[attr] = _rect_corner_ref_to_points(val)
+            elif isinstance(val, EventDef):
+                ev_val = val.value
+                if isinstance(ev_val, list):
+                    changes[attr] = [P(pt.x, pt.y) for pt in ev_val if isinstance(pt, P)]
+                elif isinstance(ev_val, P):
+                    changes[attr] = [P(ev_val.x, ev_val.y)]
+
+    elif isinstance(tw, TextTween):
+        for attr in ('p', 'px'):
+            val = getattr(tw, attr)
+            if isinstance(val, EventDef):
+                ev_val = val.value
+                if isinstance(ev_val, P):
+                    changes[attr] = P(ev_val.x, ev_val.y)
+                elif isinstance(ev_val, list) and ev_val and isinstance(ev_val[0], P):
+                    changes[attr] = P(ev_val[0].x, ev_val[0].y)
+
+    elif isinstance(tw, WindowTween):
+        for attr in ('p1', 'p2', 'px1', 'px2'):
+            val = getattr(tw, attr)
+            if isinstance(val, EventDef):
+                ev_val = val.value
+                if isinstance(ev_val, P):
+                    changes[attr] = P(ev_val.x, ev_val.y)
+
+    if changes:
+        return _tw_replace(tw, **changes)
+    return tw
+
+def _collect_tween_event_refs(phase_def):
+    refs = []
+    for tw in phase_def.tweens:
+        if isinstance(tw, Reset):
+            continue
+        for attr in ('p', 'px', 'p1', 'p2', 'px1', 'px2'):
+            val = getattr(tw, attr, None)
+            if isinstance(val, EventDef):
+                refs.append(val)
+    return refs
+
+def _snapshot_event_refs(refs):
+    return tuple(list(ev.value) if isinstance(ev.value, list) else ev.value for ev in refs)
+
 
 # ──────────────────────── PHASE KEYS ────────────────────────
 
@@ -6415,6 +6985,14 @@ P_CLICK    = PhaseKey('click')
 P_RELEASE  = PhaseKey('release')
 P_SET      = PhaseKey('set')
 P_ALWAYS   = PhaseKey('always')
+
+def _get_phase_def(phases: dict, phase: str):
+    if phase in phases:
+        return phases[phase]
+    for key, val in phases.items():
+        if isinstance(key, tuple) and phase in key:
+            return val
+    return None
 
 def _phase_key_exists(phases: dict, name) -> bool:
     if name in phases:

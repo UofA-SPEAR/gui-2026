@@ -7,16 +7,26 @@ from rclpy.node import Node
 from std_msgs.msg import Float64
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QFontDatabase
+from PySide6.QtGui import QPainter, QFontDatabase, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
+def main():
+    rclpy.init()
+    node = MainNode()
+
+    fmt = QSurfaceFormat()
+    fmt.setSamples(4)   # try 8 if your GPU/driver supports it and you want smoother edges
+    QSurfaceFormat.setDefaultFormat(fmt)
+
+    app = QApplication(sys.argv)
+    ...
 from dataclasses import dataclass, field
 
 import time
 from typing import Dict, Any
 
 from spear_gui.overlay_system import (
-    expand_defs, _gradients, _pending_pulse_resets,
+    expand_defs, _gradients, _pending_pulse_resets, set_true_screen_size,
     AnimatedPolygon, AnimatedText, AnimatedGraph, AnimatedPie, AnimatedWindow, DataChannel,
     SYS_MOUSE_ABS_X, SYS_MOUSE_ABS_Y,
 )
@@ -118,6 +128,8 @@ class MainOverlayWidget(QOpenGLWidget):
         super().__init__(parent)
         self._node = node
 
+        self._win_cache: Dict[int, QPixmap] = {}
+
         self.setMinimumSize(640, 360)
         self.setStyleSheet('background-color: #0a0c12;')
         self.setWindowTitle('Main Overlay')
@@ -127,7 +139,6 @@ class MainOverlayWidget(QOpenGLWidget):
         self.setWindowFlags(Qt.FramelessWindowHint)
 
         self._windows  = [AnimatedWindow(d) for d in MAIN_WINDOW_DEFS]
-        self._win_cache: Dict[int, QPixmap] = {}
 
         for win in self._windows:
             win._broadcast('open')
@@ -164,7 +175,18 @@ class MainOverlayWidget(QOpenGLWidget):
             return False
         if win._graphs or win._spawned:
             return False
+        if win._dragging_window or win._scaling_window or win._snap_tween_active:
+            return False
+        if win._dragging_slider is not None:
+            return False
+        if win._sliders:
+            return False
+        phase_def = win.defn.phases.get(win._cur_phase)
+        if phase_def is not None and getattr(phase_def, 'update_retrigger', False):
+            return False
         for btn in win._buttons:
+            if btn.defn.phase_override is not None:          # <-- added
+                return False
             if btn._cur_phase not in ('', 'open', 'close', 'unhover') or btn._hovered or btn._pressed or btn._held:
                 return False
             if not btn.phase_done():
@@ -186,6 +208,8 @@ class MainOverlayWidget(QOpenGLWidget):
             if tb.defn.poly_def.gradient is not None:
                 return False
         for p in win._polygons:
+            if p.defn.phase_override is not None:             # <-- added
+                return False
             if not p.phase_done():
                 return False
             if self._has_active_always(p):
@@ -193,6 +217,8 @@ class MainOverlayWidget(QOpenGLWidget):
             if p.defn.gradient is not None:
                 return False
         for t in win._texts:
+            if t.defn.phase_override is not None:             # <-- added
+                return False
             if not t.phase_done():
                 return False
             if self._has_active_always(t):
@@ -208,21 +234,23 @@ class MainOverlayWidget(QOpenGLWidget):
 
     def _draw_with_cache(self, painter, win, w, h, ctx):
         from PySide6.QtGui import QPixmap
+        from spear_gui.overlay_system import reset_window_screen_offset  # or import at top
         wid = id(win.defn)
         if self._is_fully_static(win):
             if wid not in self._win_cache:
                 pix = QPixmap(w, h)
                 pix.fill(Qt.transparent)
                 p2 = QPainter(pix)
-                # p2.setRenderHint(QPainter.RenderHint.Antialiasing)
-                p2.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-                p2.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+                p2.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                p2.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                reset_window_screen_offset()
                 win.draw(p2, w, h, ctx)
                 p2.end()
                 self._win_cache[wid] = pix
             painter.drawPixmap(0, 0, self._win_cache[wid])
         else:
             self._win_cache.pop(wid, None)
+            reset_window_screen_offset()
             win.draw(painter, w, h, ctx)
 
     def keyPressEvent(self, event):
@@ -258,25 +286,26 @@ class MainOverlayWidget(QOpenGLWidget):
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton: return
         mx, my = event.position().x(), event.position().y()
-        for win in self._windows:
+        for win in reversed(self._windows):
             if win.mouse_press(mx, my, self.width(), self.height()): break
 
     def mouseMoveEvent(self, event):
         mx, my = event.position().x(), event.position().y()
-        for win in self._windows:
+        for win in reversed(self._windows):
             win.mouse_move(mx, my, self.width(), self.height())
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.LeftButton: return
         mx, my = event.position().x(), event.position().y()
-        for win in self._windows:
+        for win in reversed(self._windows):
             if win.mouse_release(mx, my, self.width(), self.height()): break
 
     def leaveEvent(self, event):
         for win in self._windows: win.mouse_leave()
 
     def resizeEvent(self, event):
-        self._win_cache.clear()
+        if hasattr(self, '_win_cache'):
+            self._win_cache.clear()
         super().resizeEvent(event)
 
     def paintEvent(self, event):
@@ -288,7 +317,12 @@ class MainOverlayWidget(QOpenGLWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.NoPen)
 
+        if not hasattr(self, '_windows'):
+            painter.end()
+            return
+
         w, h = self.width(), self.height()
+        set_true_screen_size(w, h)
         ctx  = self._context()
 
         for win in self._windows:
@@ -302,6 +336,10 @@ import os
 def main():
     rclpy.init()
     node = MainNode()
+
+    fmt = QSurfaceFormat()
+    fmt.setSamples(4)   # try 8 if your GPU/driver supports it and you want smoother edges
+    QSurfaceFormat.setDefaultFormat(fmt)
 
     app = QApplication(sys.argv)
 

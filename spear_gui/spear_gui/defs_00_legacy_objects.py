@@ -410,7 +410,7 @@ MAIN_WINDOW_DEFS = [
             ButtonDef(poly_def=RectDef(p1=P(0, 0), p2=P(1, 1)), key=Qt.Key_P, mandatory_keys=Qt.Key_Shift, action='set', event_out=_ev['spawn_marker'], event_delta=True, invisible=True),
         ],
         slider_defs=[
-            SliderDef(p=P(0.5, 1), px=P(70, -15), length=0.5, length_px=-85, event_out=_ev['map_zoom'], min_val=0.1, max_val=2.9, step=0.1, label='ZOOM', unit='', decimals=1)
+            # SliderDef(p=P(0.5, 1), px=P(70, -15), length=0.5, length_px=-85, event_out=_ev['map_zoom'], min_val=0.1, max_val=2.9, step=0.1, label='ZOOM', unit='', decimals=1)
         ],
         sub_windows=[
             WindowDef(
