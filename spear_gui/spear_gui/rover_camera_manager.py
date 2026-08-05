@@ -11,8 +11,7 @@ Usage:
     ros2 run <package> jetson_camera_sender
 
 Publishing settings:
-    ros2 topic pub --once /camera_settings std_msgs/msg/String "data: '5000,exposure=10000,gain=30000'"
-    # Format: "<port>,<setting>=<value>,<setting>=<value>,..."
+    ros2 topic pub --once /camera_settings std_msgs/msg/String "data: '5000,exposure=10000,gain=30000'"  # Format: "<port>,<setting>=<value>,<setting>=<value>,..."
 
 
 Serials = [302801647, 303928833, 305325257, 307142683, 308873104, 309256978, 44249482, 58896881]
@@ -31,6 +30,7 @@ import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 import threading
+import time
 import sys
 import rclpy
 from rclpy.node import Node
@@ -38,8 +38,10 @@ from std_msgs.msg import String
 
 # ──────────────────────── Config ────────────────────────
 
-RECEIVER_IP = "192.168.8.224"  # IP of the machine receiving the stream
+RECEIVER_IP = "192.168.10.11"  # IP of the machine receiving the stream
 BITRATE     = 4000000           # bits per second
+ERROR_RESTART_DELAY = 3.0       # seconds to wait before retrying a stream that stopped/failed
+STAGGER_DELAY = 0.5              # seconds between each camera's initial start attempt
 
 CAMERAS = [
     {"camera_sn": 302801647, "source": "zedxonesrc", "port": 5000, "exposure": 10000, "gain": 30000},
@@ -85,21 +87,52 @@ def build_pipeline(source, camera_sn, port, exposure, gain):
 # ──────────────────────── Camera Stream ────────────────────────
 
 class CameraStream:
-    def __init__(self, config, logger):
-        self.source    = config["source"]
-        self.camera_sn = config["camera_sn"]
-        self.port      = config["port"]
-        self.exposure  = config["exposure"]
-        self.gain      = config["gain"]
-        self.logger    = logger
-        self.pipeline  = None
-        self.loop      = None
-        self.thread    = None
-        self._lock     = threading.Lock()
+    def __init__(self, config, logger, start_delay=0.0):
+        self.source      = config["source"]
+        self.camera_sn   = config["camera_sn"]
+        self.port        = config["port"]
+        self.exposure    = config["exposure"]
+        self.gain        = config["gain"]
+        self.logger      = logger
+        self.start_delay = start_delay
+        self.pipeline    = None
+        self.loop        = None
+        self.thread      = None
+        self._lock       = threading.Lock()
+        self._stop_event = threading.Event()
+        self._run_thread = None
 
     def start(self):
-        with self._lock:
-            self._start_pipeline()
+        # Runs this stream's open/retry loop on its own thread so a camera that
+        # hangs or errors on open (e.g. disconnected) can never block the other
+        # streams or the ROS node from starting.
+        self._stop_event.clear()
+        self._run_thread = threading.Thread(target=self._run, daemon=True)
+        self._run_thread.start()
+
+    def _run(self):
+        if self.start_delay:
+            time.sleep(self.start_delay)
+
+        while not self._stop_event.is_set():
+            with self._lock:
+                self._start_pipeline()
+
+            glib_thread = self.thread
+            if glib_thread:
+                glib_thread.join()
+
+            if self._stop_event.is_set():
+                break
+
+            with self._lock:
+                self._stop_pipeline()
+
+            self.logger.warn(
+                f"[{self.source} sn {self.camera_sn}] stream down, "
+                f"retrying in {ERROR_RESTART_DELAY:.0f}s"
+            )
+            time.sleep(ERROR_RESTART_DELAY)
 
     def _start_pipeline(self):
         pipeline_str = build_pipeline(self.source, self.camera_sn, self.port, self.exposure, self.gain)
@@ -138,8 +171,12 @@ class CameraStream:
             self._start_pipeline()
 
     def stop(self):
+        self._stop_event.set()
         with self._lock:
             self._stop_pipeline()
+        if self._run_thread:
+            self._run_thread.join(timeout=2)
+            self._run_thread = None
 
     def _stop_pipeline(self):
         if self.pipeline:
@@ -171,8 +208,8 @@ class CameraSenderNode(Node):
         Gst.init(None)
 
         self.streams = {}
-        for cam in CAMERAS:
-            stream = CameraStream(cam, self.get_logger())
+        for i, cam in enumerate(CAMERAS):
+            stream = CameraStream(cam, self.get_logger(), start_delay=i * STAGGER_DELAY)
             self.streams[cam["port"]] = stream
 
         self.get_logger().info(f"Starting {len(self.streams)} camera stream(s)...")
@@ -221,23 +258,30 @@ class CameraSenderNode(Node):
 
     def shutdown(self):
         self.get_logger().info("Shutting down streams...")
-        for stream in self.streams.values():
-            stream.stop()
+        # Stop every stream concurrently so one camera stuck in a blocking
+        # open() call can't prevent the healthy ones from being released.
+        threads = [threading.Thread(target=s.stop, daemon=True) for s in self.streams.values()]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
 
 # ──────────────────────── Main ────────────────────────
 
 def main():
     rclpy.init()
-    node = CameraSenderNode()
-
+    node = None
     try:
+        node = CameraSenderNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        node.shutdown()
-        node.destroy_node()
-        rclpy.shutdown()
+        if node is not None:
+            node.shutdown()
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
